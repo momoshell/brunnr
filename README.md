@@ -1,16 +1,17 @@
 # brunnr
 
-> A private, cross-repo catalog for skills, agents, prompts, and multi-agent prompts.
+> A reference-first catalog for skills, agents, prompts, and multi-agent prompts.
 
-brunnr is your team's central well of agentic knowledge. It stores reusable AI components—skills, agents, prompts, and multi-agent workflows—and distributes them safely across repositories, devices, and team members.
+brunnr is your team's central well of agentic knowledge. The `library.yaml` file is the single source of truth—it catalogs what exists and where to find it. Content can be stored in the brunnr repository (repo-backed) or referenced from external locations (local paths or remote URLs).
 
 ## Why brunnr?
 
-- **Private-first**: Your catalog lives in a repository you control. No external services required.
-- **Cross-repo**: Install the same skill into multiple projects without copy-paste.
-- **Cross-device**: Sync your personal catalog across machines.
-- **Team sharing**: Share vetted prompts and workflows with your entire team.
-- **Versioned**: Track changes to your AI components like any other code.
+- **Reference-first**: `library.yaml` is the authority; it points to content rather than containing it
+- **Flexible sourcing**: Store content in brunnr, reference local files, or link to remote URLs
+- **Cross-repo**: Install the same skill into multiple projects without copy-paste
+- **Cross-device**: Sync your personal catalog across machines
+- **Team sharing**: Share vetted prompts and workflows with your entire team
+- **Versioned**: Track changes to your AI components like any other code
 
 ## Quick Start
 
@@ -23,8 +24,81 @@ cd your-project
 just -f ~/.config/brunnr/justfile install
 
 # Add a skill from brunnr to your current project
-just -f ~/.config/brunnr/justfile add skill my-skill
+just -f ~/.config/brunnr/justfile add skill code-reviewer
 ```
+
+## Core Concepts
+
+| Concept | What it is |
+|---------|------------|
+| **brunnr** | A reference-first catalog where `library.yaml` is the authority pointing to content |
+| **library.yaml** | The catalog index—source of truth for what exists and where to find it |
+| **Source types** | Repo-backed (in brunnr), local reference (`file://`), remote reference (GitHub URL) |
+| **Skills** | Reusable capabilities stored in directories and installed to `.claude/skills/` |
+| **Agents** | Specialized AI configurations stored as files and installed to `.claude/agents/` |
+| **Prompts** | Single-shot instructions stored as files and installed to `.claude/commands/` |
+| **Multi-agent prompts** | Orchestrated workflows using `type: multi-agent`; stored alongside regular prompts |
+| **SKILL.md** | The specification document defining the brunnr format and behavior |
+| **cookbook/** | Task-oriented guides for common operations |
+| **justfile** | Thin terminal wrapper providing convenient shortcuts |
+
+## Source Types
+
+brunnr supports three ways to reference content:
+
+| Type | Source Format | Use Case |
+|------|---------------|----------|
+| **Repo-backed** | `skills/my-skill/SKILL.md` | Content stored in brunnr, synced with git |
+| **Local reference** | `file:///Users/you/path/to/skill.md` | Content outside brunnr on your machine |
+| **Remote reference** | `https://raw.githubusercontent.com/...` | Content fetched from GitHub on demand |
+
+### Repo-Backed (Default)
+
+Store content in the brunnr repository. Best for team-vetted, versioned components.
+
+```yaml
+# library.yaml
+skills:
+  - name: code-reviewer
+    description: Review code for bugs, style, and best practices
+    source: skills/code-reviewer/SKILL.md
+```
+
+### Local Reference
+
+Reference content at an absolute path on your machine. Best for personal components.
+
+```yaml
+# library.yaml
+skills:
+  - name: my-local-skill
+    description: Personal skill stored outside brunnr
+    source: file:///Users/me/.local/share/brunnr-skills/my-skill/SKILL.md
+```
+
+### Remote Reference
+
+Reference content from a GitHub raw URL. Best for published external components.
+
+```yaml
+# library.yaml
+agents:
+  - name: external-agent
+    description: Reference to an agent from another repo
+    source: https://raw.githubusercontent.com/org/ai-catalog/main/agents/docs-checker.md
+```
+
+## Catalog Sections
+
+brunnr organizes content into three top-level sections:
+
+| Section | Location in brunnr | Installs to | Description |
+|---------|-------------------|-------------|-------------|
+| **skills** | `skills/` or external | `.claude/skills/` | Reusable capabilities (analysis, generation, review) |
+| **agents** | `agents/` or external | `.claude/agents/` | Specialized agent configurations |
+| **prompts** | `prompts/` or external | `.claude/commands/` | Single-shot prompts and templates |
+
+> **Note**: Multi-agent prompts are a prompt subtype (use `type: multi-agent`), not a separate section.
 
 ## Repository Structure
 
@@ -32,7 +106,7 @@ just -f ~/.config/brunnr/justfile add skill my-skill
 brunnr/
 ├── README.md           # This file
 ├── SKILL.md            # Main skill specification
-├── library.yaml        # Catalog index
+├── library.yaml        # Catalog index (the authority)
 ├── justfile            # Terminal shortcuts
 └── cookbook/           # Usage guides
     ├── install.md      # Install brunnr into a project
@@ -44,28 +118,6 @@ brunnr/
     ├── sync.md         # Sync across devices
     └── search.md       # Search the catalog
 ```
-
-## Catalog Sections
-
-brunnr organizes content into four categories:
-
-| Section | Location in brunnr | Installs to | Description |
-|---------|-------------------|-------------|-------------|
-| **skills** | `skills/` | `.claude/skills/` | Reusable capabilities (analysis, generation, review) |
-| **agents** | `agents/` | `.claude/agents/` | Specialized agent configurations |
-| **prompts** | `prompts/` | `.claude/commands/` | Single-shot prompts and templates |
-| **multi-agent prompts** | `prompts/` (with `type: multi-agent`) | `.claude/commands/` | Orchestrated multi-step workflows |
-
-> **Note**: Multi-agent prompts are stored alongside regular prompts with a `type: multi-agent` metadata field, rather than a separate top-level section.
-
-## Default Paths
-
-brunnr uses Claude-style defaults:
-
-- **Source** (in brunnr repo): `skills/`, `agents/`, `prompts/`
-- **Target** (in your project): `.claude/skills/`, `.claude/agents/`, `.claude/commands/`
-
-These can be customized via environment variables or `library.yaml`.
 
 ## Workflows
 
@@ -82,7 +134,7 @@ just -f ~/.config/brunnr/justfile add skill test-writer
 # 3. Use them in your project
 # (Skills are now available to Claude in .claude/skills/)
 
-# 4. Push improvements back to brunnr
+# 4. Push improvements back to brunnr (for repo-backed skills)
 just -f ~/.config/brunnr/justfile push skill code-reviewer
 ```
 
@@ -127,7 +179,7 @@ brunnr prioritizes safe operations:
 
 ### library.yaml
 
-The `library.yaml` file is the source of truth for your catalog. See `SKILL.md` for the full schema.
+The `library.yaml` file is the source of truth for your catalog. See `SKILL.md` for the full schema and source semantics.
 
 ## Cookbook
 
@@ -145,5 +197,3 @@ See the `cookbook/` directory for detailed guides:
 ## Contributing
 
 brunnr is designed to be forked and customized. Adapt it to your team's workflows, naming conventions, and AI tools.
-
-

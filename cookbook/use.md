@@ -148,11 +148,26 @@ User: @security-auditor @performance-reviewer review this API endpoint
 AI: [both agents contribute to the review]
 ```
 
+## Dependencies
+
+Dependencies are documented in `library.yaml` but are NOT automatically installed. Before using an item, check if it has dependencies and install them manually:
+
+```bash
+# Check dependencies for an item
+ruby -ryaml -e "
+  catalog = YAML.load_file('~/.config/brunnr/library.yaml')
+  item = catalog['agents'].find { |a| a['name'] == 'security-auditor' }
+  puts 'Dependencies: ' + item['dependencies'].to_s
+"
+```
+
+Install any required dependencies using `just add`.
+
 ## Best Practices
 
 1. **Start specific**: Use the most specific skill/agent for your task
 2. **Layer when needed**: Combine complementary skills for complex tasks
-3. **Check dependencies**: Ensure required dependencies are installed
+3. **Check dependencies**: Review library.yaml and install required dependencies manually
 4. **Keep updated**: Sync brunnr regularly to get improvements
 
 ## Troubleshooting

@@ -4,7 +4,7 @@
 
 ## Overview
 
-The `search` command helps you find items in your brunnr catalog by searching names, descriptions, and tags.
+The `search` command helps you find items in your brunnr catalog by searching names, descriptions, and tags from `library.yaml`.
 
 ## Syntax
 
@@ -27,27 +27,25 @@ just -f ~/.config/brunnr/justfile search doc
 
 ## What Gets Searched
 
-The search command looks in:
+The search command looks in `library.yaml` catalog fields:
 
-1. **library.yaml** — Item names, descriptions, and tags
-2. **Skill files** — SKILL.md content
-3. **Agent files** — Markdown content and frontmatter
-4. **Prompt files** — Markdown content and frontmatter
+1. **name** — Item identifier
+2. **description** — What the item does
+3. **tags** — Searchable keywords
+
+Results show the matching entry with its section, name, description, and tags.
 
 ## Search Results
-
-Results are grouped by section:
 
 ```bash
 $ just -f ~/.config/brunnr/justfile search security
 Searching brunnr catalog for 'security'...
 
-library.yaml:
-  skills: security-review (tags: security, audit)
-  agents: security-auditor (description: Audit code for security vulnerabilities)
+skill: code-reviewer - Review code for bugs, style, and best practices
+  tags: review, code-quality, security
 
-skills/security-review/SKILL.md
-agents/security-auditor.md
+agent: security-auditor - Audit code for security vulnerabilities
+  tags: security, audit, review
 ```
 
 ## Advanced Search
@@ -63,51 +61,40 @@ just -f ~/.config/brunnr/justfile search SECURITY
 just -f ~/.config/brunnr/justfile search security
 ```
 
-### Multi-Word Search
-
-Search for phrases with spaces:
-
-```bash
-just -f ~/.config/brunnr/justfile search "code review"
-```
-
 ### Partial Matches
 
-Search finds partial matches:
+Search finds partial matches in names, descriptions, and tags:
 
 ```bash
-# Finds "documentation", "document", "doc-generator", etc.
-just -f ~/.config/brunnr/justfile search doc
+# Finds items with "review" in name, description, or tags
+just -f ~/.config/brunnr/justfile search review
+
+# Finds items with "code" in any field
+just -f ~/.config/brunnr/justfile search code
 ```
 
-## Searching by Tag
+### Searching by Tag
 
-To find items with specific tags:
-
-```bash
-# Search library.yaml directly for tags
-grep -i "tags:.*performance" ~/.config/brunnr/library.yaml
-```
-
-## Searching by Type
-
-To find multi-agent prompts specifically:
+Tags are automatically searched:
 
 ```bash
-# Search for multi-agent type in library.yaml
-grep -B 5 "type: multi-agent" ~/.config/brunnr/library.yaml
+# Find items tagged with "audit"
+just -f ~/.config/brunnr/justfile search audit
+
+# Find items tagged with "multi-agent"
+just -f ~/.config/brunnr/justfile search multi-agent
 ```
 
 ## Combining with List
 
-Use search to find items, then list to see details:
+Use search to find items, then list to see all available items:
 
 ```bash
 # Find security items
 just -f ~/.config/brunnr/justfile search security
 
-# See if a specific one is installed
-just -f ~/.config/brunnr/justfile list agent | grep security
+# List all available items
+just -f ~/.config/brunnr/justfile list
 ```
 
 ## Searching Installed Items
@@ -130,11 +117,16 @@ grep -r "search-term" .claude/commands/
 To find what depends on a specific item:
 
 ```bash
-# Search for references to a skill
-grep -r "code-reviewer" ~/.config/brunnr/
-
-# Search in library.yaml dependencies section
-grep -A 20 "dependencies:" ~/.config/brunnr/library.yaml | grep "code-reviewer"
+# Search library.yaml for dependencies
+ruby -ryaml -e "
+  catalog = YAML.load_file('~/.config/brunnr/library.yaml')
+  catalog.values.flatten.each do |item|
+    deps = item['dependencies'] || {}
+    if deps['skills']&.include?('code-reviewer')
+      puts \"#{item['name']} depends on code-reviewer\"
+    end
+  end
+"
 ```
 
 ## Use Cases
@@ -172,11 +164,11 @@ just -f ~/.config/brunnr/justfile search security
 The search output can be used in scripts:
 
 ```bash
-# Count security items
+# Count matching items
 just -f ~/.config/brunnr/justfile search security | wc -l
 
-# Get just the filenames
-just -f ~/.config/brunnr/justfile search review | grep "\.md$"
+# Get just the item names
+just -f ~/.config/brunnr/justfile search review | grep "^  \w" | cut -d' ' -f2
 
 # Check if an item exists
 if just -f ~/.config/brunnr/justfile search "my-skill" | grep -q "my-skill"; then
@@ -191,7 +183,8 @@ fi
 ```bash
 $ just -f ~/.config/brunnr/justfile search xyz
 Searching brunnr catalog for 'xyz'...
-No matches in library.yaml
+
+No matches found in catalog
 ```
 
 Possible causes:
@@ -211,23 +204,23 @@ just -f ~/.config/brunnr/justfile search code
 just -f ~/.config/brunnr/justfile search "code review"
 ```
 
-### Search is slow
-
-For large catalogs, search may be slow. Consider:
+### Library.yaml not found
 
 ```bash
-# Search only library.yaml (faster)
-grep -i "search-term" ~/.config/brunnr/library.yaml
+$ just -f ~/.config/brunnr/justfile search test
+Error: library.yaml not found at ~/.config/brunnr/library.yaml
+```
 
-# Use find for specific file types
-find ~/.config/brunnr -name "*.md" -exec grep -l "search-term" {} \;
+Check that BRUNNR_HOME is set correctly:
+```bash
+echo $BRUNNR_HOME
 ```
 
 ## Best Practices
 
-1. **Use specific terms**: "security-audit" is better than "security"
-2. **Check library.yaml first**: It's the fastest search target
-3. **Combine with list**: Search to find, list to verify
+1. **Use specific terms**: "security" finds more than "audit"
+2. **Check tags**: Tags are searchable and often more precise
+3. **Combine with list**: Search to find, list to see all options
 4. **Search before adding**: Make sure the item exists
 5. **Search before creating**: Avoid duplicating existing items
 

@@ -4,7 +4,7 @@
 
 ## Overview
 
-The `add` command copies items from your brunnr catalog to the current project. It handles dependencies and ensures safe, non-destructive installation.
+The `add` command copies items from your brunnr catalog to the current project. It uses `library.yaml` as the authoritative source and ensures safe, non-destructive installation.
 
 ## Syntax
 
@@ -15,6 +15,18 @@ just -f ~/.config/brunnr/justfile add <section> <name>
 Where:
 - `<section>` is one of: `skill`, `agent`, `prompt`
 - `<name>` is the item name as listed in `library.yaml`
+
+## How It Works
+
+The `add` command follows a catalog-aware resolution process:
+
+1. **Lookup**: Finds the item in `library.yaml` by name within the section
+2. **Source Resolution**: Resolves the `source` field to determine the actual file location:
+   - **Repo-backed**: Path relative to BRUNNR_HOME (e.g., `skills/code-reviewer/SKILL.md`)
+   - **file://**: Absolute local path (e.g., `file:///Users/me/.local/share/...`)
+   - **Remote (https://)**: Not supported in this phase - fails with clear message
+3. **Validation**: Checks that source exists and target doesn't conflict
+4. **Installation**: Copies from resolved source to target directory
 
 ## Adding Skills
 
@@ -72,24 +84,28 @@ just -f ~/.config/brunnr/justfile add prompt complex-review
 
 Check library.yaml for required agents and install them manually if needed.
 
-## Dependency Resolution
+## Dependencies
 
-Dependencies are documented in `library.yaml` for manual reference. Check library.yaml before adding items to ensure required dependencies are available:
+Dependencies are documented in `library.yaml` but are NOT automatically installed. Check library.yaml before adding items to ensure required dependencies are available:
 
 ```bash
 # Check what dependencies an item requires
-cat ~/.config/brunnr/library.yaml | grep -A 10 "name: security-auditor"
+ruby -ryaml -e "puts YAML.load_file('~/.config/brunnr/library.yaml')['agents'].find { |a| a['name'] == 'security-auditor' }['dependencies']"
 ```
 
 Install any required dependencies manually before or after adding an item.
 
-## Safety Behavior
+## Fail-Closed Behavior
 
-The `add` command follows these safety rules:
+The `add` command fails with clear error messages for:
 
-1. **No overwrites**: If the item already exists in your project, the command fails with a clear message
-2. **Atomic installation**: Either all files install successfully, or none do
-3. **Type checking**: Source and target types must match (file vs. directory)
+| Error | Cause |
+|-------|-------|
+| `not found in library.yaml` | Item doesn't exist in catalog |
+| `Source file not found` | Source path in library.yaml doesn't exist |
+| `Remote sources not supported` | Source is https:// (not implemented) |
+| `Unsupported source format` | Source has invalid format |
+| `already installed` | Target directory already has this item |
 
 ## Handling Conflicts
 
@@ -126,3 +142,5 @@ ls -la .claude/commands/
 - [`use.md`](use.md) — How to use installed items
 - [`remove.md`](remove.md) — How to remove items safely
 - [`push.md`](push.md) — How to push local changes back to brunnr
+- [`list.md`](list.md) — How to list available items
+- [`search.md`](search.md) — How to search the catalog

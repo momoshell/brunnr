@@ -4,7 +4,7 @@
 
 ## Overview
 
-The `list` command shows you the contents of your brunnr catalog and what's currently installed in your project.
+The `list` command shows you the contents of your brunnr catalog (from `library.yaml`) and what's currently installed in your project.
 
 ## Syntax
 
@@ -24,25 +24,23 @@ Where `<section>` is one of: `skill`, `agent`, `prompt`
 just -f ~/.config/brunnr/justfile list
 ```
 
-Output shows all catalog sections with their contents:
+Output shows all catalog sections with names and descriptions:
 
 ```
 brunnr catalog sections:
 
 skills:
-  code-reviewer
-  test-writer
-  doc-generator
+  code-reviewer - Review code for bugs, style, and best practices
+  my-local-skill - Personal skill stored outside brunnr
 
 agents:
-  security-auditor
-  performance-reviewer
-  docs-checker
+  security-auditor - Audit code for security vulnerabilities
+  external-agent - Reference to an agent from another repo
 
 prompts:
-  pr-description
-  commit-message
-  code-explain
+  pr-description - Generate a pull request description from commits
+  complex-review - Multi-agent code review with security, perf, and docs
+  my-local-prompt - Personal prompt stored outside brunnr
 ```
 
 ## Listing Skills
@@ -55,13 +53,11 @@ Output shows both available and installed skills:
 
 ```
 Available skills:
-  code-reviewer
-  test-writer
-  doc-generator
+  code-reviewer - Review code for bugs, style, and best practices
+  my-local-skill - Personal skill stored outside brunnr
 
 Installed skills:
   code-reviewer
-  test-writer
 ```
 
 ## Listing Agents
@@ -74,9 +70,8 @@ Output:
 
 ```
 Available agents:
-  security-auditor
-  performance-reviewer
-  docs-checker
+  security-auditor - Audit code for security vulnerabilities
+  external-agent - Reference to an agent from another repo
 
 Installed agents:
   security-auditor
@@ -92,14 +87,12 @@ Output:
 
 ```
 Available prompts:
-  pr-description
-  commit-message
-  code-explain
-  complex-review
+  pr-description - Generate a pull request description from commits
+  complex-review - Multi-agent code review with security, perf, and docs
+  my-local-prompt - Personal prompt stored outside brunnr
 
 Installed prompts:
   pr-description
-  commit-message
 ```
 
 ## Understanding Status
@@ -108,8 +101,26 @@ Items can have different statuses:
 
 | Status | Meaning |
 |--------|---------|
-| **Available** | In brunnr catalog but not installed in current project |
+| **Available** | In brunnr catalog (library.yaml) but not installed in current project |
 | **Installed** | Present in current project |
+
+## Library.yaml as Source of Truth
+
+The `list` command reads from `library.yaml` which is the authoritative catalog. Each entry contains:
+
+- `name`: Unique identifier
+- `description`: What the item does
+- `source`: Where the content lives (repo-backed, file://, or https://)
+- `tags`: Searchable tags
+- `dependencies`: Required skills, agents, or prompts
+
+```bash
+# View full catalog
+cat ~/.config/brunnr/library.yaml
+
+# View specific item details
+ruby -ryaml -e "puts YAML.load_file('~/.config/brunnr/library.yaml')['skills'].find { |s| s['name'] == 'code-reviewer' }.to_yaml"
+```
 
 ## Checking for Modifications
 
@@ -131,23 +142,16 @@ diff ~/.config/brunnr/prompts/pr-description.md .claude/commands/pr-description.
 To see what depends on an item:
 
 ```bash
-# Search for references to a skill
-grep -r "code-reviewer" ~/.config/brunnr/library.yaml
-
-# Search in installed items
-grep -r "code-reviewer" .claude/
-```
-
-## Library.yaml as Source of Truth
-
-The most detailed information is in `library.yaml`:
-
-```bash
-# View full catalog
-cat ~/.config/brunnr/library.yaml
-
-# Filter for specific item
-grep -A 10 "name: code-reviewer" ~/.config/brunnr/library.yaml
+# Search for references to a skill in library.yaml
+ruby -ryaml -e "
+  catalog = YAML.load_file('~/.config/brunnr/library.yaml')
+  catalog.values.flatten.each do |item|
+    deps = item['dependencies'] || {}
+    if deps['skills']&.include?('code-reviewer')
+      puts \"#{item['name']} depends on code-reviewer\"
+    end
+  end
+"
 ```
 
 ## Use Cases
@@ -183,8 +187,8 @@ just -f ~/.config/brunnr/justfile list
 The list output can be used in scripts:
 
 ```bash
-# Get all available skills
-just -f ~/.config/brunnr/justfile list skill | grep -A 100 "Available" | tail -n +2
+# Get all available skill names
+just -f ~/.config/brunnr/justfile list skill | ruby -lane "puts $_.split(' - ').first if $_ =~ /^  \w/"
 
 # Check if specific skill is installed
 just -f ~/.config/brunnr/justfile list skill | grep -q "code-reviewer" && echo "Installed"
@@ -200,8 +204,8 @@ If a section shows as empty:
 # Check brunnr home is set correctly
 echo $BRUNNR_HOME
 
-# Verify directory structure
-ls -la ~/.config/brunnr/
+# Verify library.yaml exists
+ls -la ~/.config/brunnr/library.yaml
 ```
 
 ### Missing items
@@ -209,11 +213,11 @@ ls -la ~/.config/brunnr/
 If an item is in brunnr but not showing:
 
 ```bash
-# Check library.yaml is valid
-head ~/.config/brunnr/library.yaml
+# Check library.yaml is valid YAML
+ruby -ryaml -e "YAML.load_file('~/.config/brunnr/library.yaml')"
 
-# Check file exists
-ls ~/.config/brunnr/skills/<name>/
+# Check item exists in library.yaml
+grep "name:" ~/.config/brunnr/library.yaml
 ```
 
 ## See Also

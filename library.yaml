@@ -1,59 +1,136 @@
 # brunnr Catalog
+# Reference-first catalog for skills, agents, and prompts
+# This file is the authoritative source of truth for what exists in the catalog
 
 name: brunnr
 description: Private catalog for skills, agents, prompts, and multi-agent prompts
-version: "1.0.0"
+version: "2.0.0"
 
-# Default paths (can be overridden via environment variables)
-paths:
-  skills: skills/
-  agents: agents/
-  prompts: prompts/
+# =============================================================================
+# SOURCE SEMANTICS
+# =============================================================================
+# Each entry requires a 'source' field that defines where the content lives.
+# Three source types are supported:
+#
+# 1. REPO-BACKED (default): Path within this brunnr repository
+#    source: skills/my-skill/SKILL.md
+#    - Content is stored in the brunnr repo
+#    - Synced with git
+#    - Use for team-vetted, versioned components
+#
+# 2. LOCAL REFERENCE: Absolute path on your machine
+#    source: file:///Users/you/projects/shared-skills/my-skill/SKILL.md
+#    - Content lives outside brunnr
+#    - Not synced with brunnr git
+#    - Use for personal components or external repos
+#
+# 3. REMOTE REFERENCE: GitHub blob/raw URL
+#    source: https://raw.githubusercontent.com/org/repo/main/skills/my-skill/SKILL.md
+#    - Content fetched on demand
+#    - Not stored in brunnr
+#    - Use for referencing external, published components
+#
+# =============================================================================
+# REQUIRED FIELDS (per entry)
+# =============================================================================
+# - name: Unique identifier within the section
+# - description: What this item does (one line)
+# - source: Where to find the content (see semantics above)
+#
+# =============================================================================
+# OPTIONAL METADATA
+# =============================================================================
+# - type: For prompts only — "single" (default) or "multi-agent"
+# - install_to: Override default install path (rarely needed)
+# - dependencies:
+#     skills: [skill-name]      # Required skills
+#     agents: [agent-name]      # Required agents
+#     prompts: [prompt-name]    # Related prompts
+# - origin: Where this came from (URL, author, etc.)
+# - sync: "auto" | "manual" | "never" — how to handle updates
+# - tags: [tag1, tag2] — for search and filtering
 
-# Skills catalog
-# Skills are reusable capabilities like code review, test generation, etc.
-# Each skill has its own directory with a SKILL.md file
-skills: []
-  # Example entry:
-  # - name: code-reviewer
-  #   description: Review code for bugs, style, and best practices
-  #   file: code-reviewer/SKILL.md
-  #   tags: [review, code-quality]
-  #   dependencies:
-  #     skills: []
-  #     agents: []
+# =============================================================================
+# SKILLS
+# =============================================================================
+# Skills are reusable capabilities with their own directory and SKILL.md file.
+# Each skill directory may contain additional files (scripts, templates, etc.).
+# Default install path: .claude/skills/<name>/
+# =============================================================================
+skills:
+  # Example: Repo-backed skill (content stored in brunnr)
+  - name: code-reviewer
+    description: Review code for bugs, style, and best practices
+    source: skills/code-reviewer/SKILL.md
+    tags: [review, code-quality, security]
+    dependencies:
+      skills: []
+      agents: []
+    sync: auto
 
-# Agents catalog
-# Agents are specialized AI configurations for specific tasks
-# Each agent is a single markdown file with frontmatter
-agents: []
-  # Example entry:
-  # - name: security-auditor
-  #   description: Audit code for security vulnerabilities
-  #   file: security-auditor.md
-  #   tags: [security, audit]
-  #   dependencies:
-  #     skills: [code-reviewer]
+  # Example: Local reference skill (content outside brunnr)
+  - name: my-local-skill
+    description: Personal skill stored outside brunnr
+    source: file:///Users/me/.local/share/brunnr-skills/my-skill/SKILL.md
+    tags: [personal, experimental]
+    sync: manual
 
-# Prompts catalog
-# Prompts are single-shot instructions or templates
-# Multi-agent prompts use type: multi-agent in their metadata
-prompts: []
-  # Example entries:
-  # - name: pr-description
-  #   description: Generate a pull request description from commits
-  #   file: pr-description.md
-  #   type: single
-  #   tags: [git, documentation]
-  #   dependencies:
-  #     skills: []
-  #     agents: []
-  #
-  # - name: complex-review
-  #   description: Multi-agent code review with security, perf, and docs
-  #   file: complex-review.md
-  #   type: multi-agent
-  #   tags: [review, multi-agent]
-  #   dependencies:
-  #     skills: []
-  #     agents: [security-auditor, performance-reviewer, docs-checker]
+# =============================================================================
+# AGENTS
+# =============================================================================
+# Agents are specialized AI configurations stored as single markdown files.
+# Default install path: .claude/agents/<name>.md
+# =============================================================================
+agents:
+  # Example: Repo-backed agent
+  - name: security-auditor
+    description: Audit code for security vulnerabilities
+    source: agents/security-auditor.md
+    tags: [security, audit, review]
+    dependencies:
+      skills: [code-reviewer]
+      agents: []
+
+  # Example: Remote reference agent
+  - name: external-agent
+    description: Reference to an agent from another repo
+    source: https://raw.githubusercontent.com/org/ai-catalog/main/agents/docs-checker.md
+    origin: https://github.com/org/ai-catalog
+    tags: [external, documentation]
+    sync: never
+
+# =============================================================================
+# PROMPTS
+# =============================================================================
+# Prompts are single-shot instructions or templates stored as markdown files.
+# Multi-agent prompts use type: multi-agent and include orchestration logic.
+# Default install path: .claude/commands/<name>.md
+# =============================================================================
+prompts:
+  # Example: Single prompt (type defaults to "single")
+  - name: pr-description
+    description: Generate a pull request description from commits
+    source: prompts/pr-description.md
+    type: single
+    tags: [git, documentation, pr]
+    dependencies:
+      skills: []
+      agents: []
+
+  # Example: Multi-agent prompt (orchestrated workflow)
+  - name: complex-review
+    description: Multi-agent code review with security, perf, and docs
+    source: prompts/complex-review.md
+    type: multi-agent
+    tags: [review, multi-agent, orchestration]
+    dependencies:
+      skills: [code-reviewer]
+      agents: [security-auditor]
+
+  # Example: Local reference prompt
+  - name: my-local-prompt
+    description: Personal prompt stored outside brunnr
+    source: file:///Users/me/.local/share/brunnr-prompts/daily-standup.md
+    type: single
+    tags: [personal, standup]
+    sync: manual

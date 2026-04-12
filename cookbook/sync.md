@@ -4,7 +4,7 @@
 
 ## Overview
 
-The `sync` command updates your local brunnr repository with the latest changes from the remote. This is essential for multi-device workflows and team collaboration.
+The `sync` command is a **safer reviewed workflow** that updates your local brunnr repository with the latest changes from the remote. It performs careful checks before pulling to prevent data loss.
 
 ## Syntax
 
@@ -14,10 +14,24 @@ just -f ~/.config/brunnr/justfile sync
 
 ## What Sync Does
 
-1. **Fetches** latest changes from the remote repository
-2. **Reports** any local modifications that would conflict
-3. **Fast-forwards** if your local branch is behind
-4. **Stops** if manual resolution is needed (diverged branches)
+1. **Verifies** brunnr is a git repository
+2. **Checks** for uncommitted local changes (dirty working tree)
+3. **Verifies** a remote is configured
+4. **Fetches** latest changes from the remote
+5. **Fast-forwards** if your local branch is behind (safe, no merge)
+6. **Stops** with clear instructions if branches have diverged
+
+## Safety Checks
+
+The sync command performs these safety checks:
+
+| Check | What It Does | Failure Message |
+|-------|--------------|-----------------|
+| Git repo | Verifies `.git` directory exists | "Error: ... is not a git repository" |
+| Clean working tree | Checks for uncommitted changes | "Error: brunnr has uncommitted changes" |
+| Remote configured | Verifies origin remote exists | "Error: No remote configured" |
+| Upstream tracking | Ensures branch tracks remote | "Error: ... has no upstream tracking" |
+| Fast-forward only | Only pulls if local is behind | "Error: Branch has diverged from remote" |
 
 ## Personal Workflow (Single User, Multiple Devices)
 
@@ -83,14 +97,19 @@ just -f ~/.config/brunnr/justfile sync
 just -f ~/.config/brunnr/justfile list skill
 ```
 
-## Handling Conflicts
+## Handling Errors
 
-If you have local changes and the remote has diverged:
+### Dirty Working Tree
+
+If you have uncommitted local changes:
 
 ```bash
 $ just -f ~/.config/brunnr/justfile sync
-Error: Local changes would be overwritten
-Please commit or stash your changes first
+Error: brunnr has uncommitted changes
+Please commit or stash your changes before syncing.
+
+Modified files:
+ M skills/code-reviewer/SKILL.md
 ```
 
 Options:
@@ -100,14 +119,14 @@ Options:
    cd ~/.config/brunnr
    git add .
    git commit -m "My local changes"
-   git pull  # May need merge resolution
+   just -f ~/.config/brunnr/justfile sync
    ```
 
-2. **Stash your changes**:
+2. **Stash your changes** (to sync now, restore later):
    ```bash
    cd ~/.config/brunnr
    git stash
-   git pull
+   just -f ~/.config/brunnr/justfile sync
    git stash pop  # May have conflicts to resolve
    ```
 
@@ -115,7 +134,34 @@ Options:
    ```bash
    cd ~/.config/brunnr
    git reset --hard origin/main
+   just -f ~/.config/brunnr/justfile sync
    ```
+
+### Diverged Branch
+
+If local and remote have diverged:
+
+```bash
+$ just -f ~/.config/brunnr/justfile sync
+Error: Branch has diverged from remote
+Local: 3 commit(s) ahead
+Remote: 2 commit(s) behind
+
+Manual merge required. Options:
+  1. Review and merge: cd ~/.config/brunnr && git merge origin/main
+  2. Rebase if safe: cd ~/.config/brunnr && git rebase origin/main
+  3. Reset to remote: cd ~/.config/brunnr && git reset --hard origin/main
+```
+
+### No Upstream Tracking
+
+If your branch doesn't track a remote branch:
+
+```bash
+$ just -f ~/.config/brunnr/justfile sync
+Error: Current branch 'main' has no upstream tracking
+Set upstream with: git push -u origin main
+```
 
 ## After Syncing
 
@@ -155,7 +201,7 @@ You can add sync to your shell startup:
 ```bash
 # In ~/.bashrc or ~/.zshrc
 if [ -d ~/.config/brunnr/.git ]; then
-    (cd ~/.config/brunnr && git pull --quiet 2>/dev/null) &
+    (cd ~/.config/brunnr && git fetch 2>/dev/null) &
 fi
 ```
 
@@ -163,8 +209,10 @@ Or use a cron job:
 
 ```bash
 # Sync brunnr every hour
-0 * * * * cd ~/.config/brunnr && git pull --quiet
+0 * * * * cd ~/.config/brunnr && git fetch 2>/dev/null
 ```
+
+> **Note**: Automated sync via cron should only fetch, not pull. Use the `sync` command interactively to ensure proper conflict handling.
 
 ## Troubleshooting
 
@@ -172,7 +220,7 @@ Or use a cron job:
 
 ```bash
 $ just -f ~/.config/brunnr/justfile sync
-Error: Not a git repository
+Error: ~/.config/brunnr is not a git repository
 ```
 
 Your brunnr directory isn't a git clone. Fix:
@@ -199,7 +247,7 @@ git remote set-url origin git@github.com:username/brunnr.git
 
 ### "Merge conflicts"
 
-If sync results in merge conflicts:
+If you manually merge and get conflicts:
 
 ```bash
 cd ~/.config/brunnr

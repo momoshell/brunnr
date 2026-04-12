@@ -1,43 +1,266 @@
-# SKILL.md — brunnr Specification
+# SKILL.md — brunnr Specification v2.0
 
-> Specification for the brunnr meta-skill: a private, cross-repo catalog for skills, agents, prompts, and multi-agent prompts.
+> Specification for the brunnr meta-skill: a reference-first catalog for skills, agents, prompts, and multi-agent prompts.
 
 ## Overview
 
-brunnr is a markdown-driven system for managing reusable AI components across multiple repositories, devices, and team members. It provides consistent installation, synchronization, and dependency management without requiring runtime code or external services.
+brunnr is a **reference-first** catalog system for managing reusable AI components. The `library.yaml` file is the single source of truth for what exists in your catalog and where to find it. Content may be stored in the brunnr repository (repo-backed) or referenced from external locations (local paths or remote URLs).
 
-## Core Concepts
+### Key Principles
 
-### Catalog Sections
+1. **Reference-first**: `library.yaml` is the authority; it points to content rather than containing it
+2. **Flexible sourcing**: Content can be repo-backed, local, or remote
+3. **Minimal schema**: Only `name`, `description`, and `source` are required
+4. **Safe operations**: No blind overwrites; explicit dependencies; atomic transactions
 
-brunnr organizes content into three top-level sections, with multi-agent prompts represented as a prompt subtype:
+## Catalog Structure
 
-1. **skills** — Reusable capabilities (e.g., code review, test generation)
-2. **agents** — Specialized agent configurations (e.g., security auditor, documentation writer)
-3. **prompts** — Single-shot prompts and templates
-   - **type: single** (default) — Standalone prompts
-   - **type: multi-agent** — Orchestrated workflows involving multiple agents
+### Top-Level Sections
 
-### Source and Target Directories
+brunnr organizes content into three top-level sections:
 
-| Section | Source (in brunnr) | Target (in project) |
-|---------|-------------------|---------------------|
-| skills | `skills/` | `.claude/skills/` |
-| agents | `agents/` | `.claude/agents/` |
-| prompts | `prompts/` | `.claude/commands/` |
+| Section | Description | Install Target |
+|---------|-------------|----------------|
+| **skills** | Reusable capabilities with their own directories | `.claude/skills/<name>/` |
+| **agents** | Specialized AI configurations (single files) | `.claude/agents/<name>.md` |
+| **prompts** | Single-shot prompts and templates | `.claude/commands/<name>.md` |
 
-> **Rationale**: Prompts install to `.claude/commands/` because they represent executable instructions, following Claude's convention.
+**Multi-agent prompts** are a subtype of prompts (use `type: multi-agent`), not a separate section.
+
+### Source Semantics
+
+Every catalog entry requires a `source` field that defines where the content lives:
+
+#### 1. Repo-Backed Source (Default)
+
+Content is stored within the brunnr repository and versioned with git.
+
+```yaml
+source: skills/my-skill/SKILL.md
+```
+
+- Path is relative to brunnr repository root
+- Content is synced with brunnr git operations
+- Use for team-vetted, shared components
+
+#### 2. Local Reference
+
+Content lives outside brunnr at an absolute path on your machine.
+
+```yaml
+source: file:///Users/you/projects/shared-skills/my-skill/SKILL.md
+```
+
+- Must use `file://` URI scheme with absolute path
+- Not synced with brunnr git
+- Use for personal components or external project repos
+
+#### 3. Remote Reference
+
+Content is fetched from a GitHub blob/raw URL.
+
+```yaml
+source: https://raw.githubusercontent.com/org/repo/main/skills/my-skill/SKILL.md
+```
+
+- Must use raw GitHub content URL
+- Fetched on demand, not stored in brunnr
+- Use for referencing published external components
+
+## library.yaml Schema
+
+### Required Fields (Per Entry)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Unique identifier within the section |
+| `description` | string | One-line description of what this item does |
+| `source` | string | Content location (see Source Semantics above) |
+
+### Optional Metadata
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | string | For prompts: `"single"` (default) or `"multi-agent"` |
+| `install_to` | string | Override default install path (rarely needed) |
+| `tags` | array | Searchable tags for filtering |
+| `dependencies` | object | Required skills/agents and related prompts |
+| `origin` | string | Source attribution (URL, author, etc.) |
+| `sync` | string | `"auto"`, `"manual"`, or `"never"` — update behavior |
+
+### Example library.yaml
+
+```yaml
+name: brunnr
+description: Private catalog for skills, agents, prompts, and multi-agent prompts
+version: "2.0.0"
+
+skills:
+  - name: code-reviewer
+    description: Review code for bugs, style, and best practices
+    source: skills/code-reviewer/SKILL.md
+    tags: [review, code-quality]
+    sync: auto
+
+  - name: my-local-skill
+    description: Personal skill stored outside brunnr
+    source: file:///Users/me/.local/share/brunnr-skills/my-skill/SKILL.md
+    sync: manual
+
+agents:
+  - name: security-auditor
+    description: Audit code for security vulnerabilities
+    source: agents/security-auditor.md
+    tags: [security, audit]
+    dependencies:
+      skills: [code-reviewer]
+
+  - name: external-agent
+    description: Reference to an agent from another repo
+    source: https://raw.githubusercontent.com/org/ai-catalog/main/agents/docs-checker.md
+    origin: https://github.com/org/ai-catalog
+    sync: never
+
+prompts:
+  - name: pr-description
+    description: Generate a pull request description from commits
+    source: prompts/pr-description.md
+    type: single
+    tags: [git, documentation]
+
+  - name: complex-review
+    description: Multi-agent code review with security, perf, and docs
+    source: prompts/complex-review.md
+    type: multi-agent
+    tags: [review, multi-agent]
+    dependencies:
+      skills: [code-reviewer]
+      agents: [security-auditor]
+```
+
+## Content Formats
+
+### Skill Format
+
+Skills are directories containing a `SKILL.md` file:
+
+```
+skills/my-skill/
+├── SKILL.md          # Main specification
+├── scripts/          # Optional helper scripts
+└── templates/        # Optional templates
+```
+
+The `SKILL.md` follows this structure:
+
+```markdown
+# Skill Name
+
+> One-line description
+
+## Description
+
+Full description of what the skill does.
 
 ## Variables
 
-The following variables can be set via environment variables or `library.yaml`:
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `VAR_NAME` | yes/no | value | What this variable controls |
+
+## Commands
+
+### command-name
+
+Description of the command.
+
+**Parameters**:
+- `param1`: Description
+
+**Behavior**:
+- Step-by-step behavior
+
+**Usage**:
+```bash
+example usage
+```
+```
+
+### Agent Format
+
+Agents are single markdown files with YAML frontmatter:
+
+```markdown
+---
+name: Agent Name
+description: What this agent does
+tags: [tag1, tag2]
+dependencies:
+  skills: [skill-name]
+  agents: [agent-name]
+---
+
+# Agent Name
+
+Agent instructions and behavior...
+```
+
+### Prompt Format
+
+Prompts are single markdown files with YAML frontmatter:
+
+```markdown
+---
+name: prompt-name
+description: What this prompt does
+type: single | multi-agent
+tags: [tag1, tag2]
+dependencies:
+  skills: [skill-name]
+  agents: [agent-name]
+---
+
+# Prompt Title
+
+Prompt content...
+```
+
+**Multi-agent prompts** specify `type: multi-agent` and include orchestration:
+
+```markdown
+---
+name: complex-review
+description: Multi-agent code review workflow
+type: multi-agent
+agents:
+  - security-auditor
+  - performance-reviewer
+  - docs-checker
+---
+
+# Complex Review Workflow
+
+1. Run security-auditor on the code
+2. Run performance-reviewer on the code
+3. Run docs-checker on the code
+4. Synthesize findings into a unified report
+```
+
+## Target Directories
+
+| Section | Default Source | Default Target |
+|---------|---------------|----------------|
+| skills | `skills/<name>/` | `.claude/skills/<name>/` |
+| agents | `agents/<name>.md` | `.claude/agents/<name>.md` |
+| prompts | `prompts/<name>.md` | `.claude/commands/<name>.md` |
+
+> **Note**: Prompts install to `.claude/commands/` following Claude's convention for executable instructions.
+
+## Variables
 
 | Variable | Environment | Default | Description |
 |----------|-------------|---------|-------------|
 | `BRUNNR_HOME` | `BRUNNR_HOME` | `~/.config/brunnr` | Path to brunnr repository |
-| `SKILLS_SRC` | — | `skills/` | Source directory for skills |
-| `AGENTS_SRC` | — | `agents/` | Source directory for agents |
-| `PROMPTS_SRC` | — | `prompts/` | Source directory for prompts |
 | `SKILLS_DIR` | `BRUNNR_SKILLS_DIR` | `.claude/skills` | Target directory for skills |
 | `AGENTS_DIR` | `BRUNNR_AGENTS_DIR` | `.claude/agents` | Target directory for agents |
 | `PROMPTS_DIR` | `BRUNNR_PROMPTS_DIR` | `.claude/commands` | Target directory for prompts |
@@ -67,15 +290,14 @@ Add an item from brunnr to the current project.
 - `name`: The item name as listed in `library.yaml`
 
 **Behavior**:
-- Copies files from brunnr source to project target
-- Fails if item doesn't exist in brunnr
+- Resolves the source from `library.yaml`
+- Copies files from source to project target
+- Fails if item doesn't exist in catalog
 - Fails if target already exists (use `push` to update)
-- Reports all installed files
 
 **Safety rules**:
 - Never overwrites existing files
 - Atomic: either all files install or none do
-- Dependencies are documented in library.yaml for manual checking
 
 **Usage**:
 ```bash
@@ -95,7 +317,6 @@ Remove an item from the current project.
 **Behavior**:
 - Removes files from project target directory
 - Fails if item is not installed
-- Does not remove dependencies (orphans may remain)
 
 **Safety rules**:
 - Never removes files outside the target directory
@@ -115,13 +336,16 @@ Push local changes back to brunnr.
 - `name`: The item name
 
 **Behavior**:
-- Copies files from project target to brunnr source
-- Updates `library.yaml` if the item is new
-- Fails if source already exists and differs (use force flags with caution)
+- Looks up item in `library.yaml` to verify source type
+- For repo-backed sources: copies files from project to brunnr
+- For local/remote sources (`file://` or `https://`): fails with error
+- If item already exists in brunnr: fails with warning (no overwrite)
+- After push, instructs user to manually update `library.yaml` for new items
 
 **Safety rules**:
-- Never overwrites brunnr source without explicit confirmation
-- Reports what would change before applying
+- Fails-closed for local/remote references (cannot push to external sources)
+- Fails if item already exists in brunnr (no blind overwrite)
+- Catalog-aware: validates entry exists in `library.yaml`
 
 **Usage**:
 ```bash
@@ -136,12 +360,8 @@ List available or installed items.
 - `section` (optional): One of `skill`, `agent`, `prompt`
 
 **Behavior**:
-- Without section: lists all catalog sections with counts
-- With section: lists items in that section with install status
-
-**Install status indicators**:
-- Present in current project — Installed
-- In brunnr but not installed here — Available
+- Reads from `library.yaml` (the catalog authority)
+- Shows install status for each item
 
 **Usage**:
 ```bash
@@ -154,9 +374,18 @@ just -f $BRUNNR_HOME/justfile list skill
 Synchronize brunnr repository with remote.
 
 **Behavior**:
-- Pulls latest changes from origin
-- Reports any local modifications that would conflict
-- Does not push local changes (use `git push` separately)
+- Verifies BRUNNR_HOME is a git repository
+- Checks for uncommitted changes (fails if dirty)
+- Checks remote is configured
+- Fetches latest from origin
+- Checks upstream tracking is set
+- Fast-forwards only when safe (ff-only merge)
+- Stops on divergence with error message
+
+**Safety rules**:
+- Fails if working tree is dirty
+- Fails if branch has diverged from remote
+- Uses ff-only merge to prevent unintended commits
 
 **Usage**:
 ```bash
@@ -179,117 +408,15 @@ Search the catalog.
 just -f $BRUNNR_HOME/justfile search "security"
 ```
 
-## Source File Parsing
-
-### SKILL.md Format
-
-Skills are defined by a `SKILL.md` file with the following structure:
-
-```markdown
-# Skill Name
-
-> One-line description
-
-## Description
-
-Full description of what the skill does.
-
-## Variables
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `VAR_NAME` | yes/no | value | What this variable controls |
-
-## Commands
-
-### command-name
-
-Description of the command.
-
-**Parameters**:
-- `param1`: Description
-- `param2`: Description
-
-**Behavior**:
-- Step-by-step behavior
-
-**Usage**:
-```bash
-example usage
-```
-```
-
-### Agent Configuration Format
-
-Agents are defined by markdown files with frontmatter:
-
-```markdown
----
-name: Agent Name
-description: What this agent does
-tags: [tag1, tag2]
-dependencies:
-  skills: [skill-name]
-  agents: [agent-name]
----
-
-# Agent Name
-
-Agent instructions and behavior...
-```
-
-### Prompt Format
-
-Prompts are markdown files with frontmatter:
-
-```markdown
----
-name: prompt-name
-description: What this prompt does
-type: single | multi-agent
-tags: [tag1, tag2]
-dependencies:
-  skills: [skill-name]
-  agents: [agent-name]
----
-
-# Prompt Title
-
-Prompt content...
-```
-
-**Multi-agent prompts** specify `type: multi-agent` and include orchestration instructions:
-
-```markdown
----
-name: complex-review
-description: Multi-agent code review workflow
-type: multi-agent
-agents:
-  - security-auditor
-  - performance-reviewer
-  - docs-checker
----
-
-# Complex Review Workflow
-
-1. Run security-auditor on the code
-2. Run performance-reviewer on the code
-3. Run docs-checker on the code
-4. Synthesize findings into a unified report
-```
-
 ## Dependency Rules
 
-### Dependency Types
+Dependencies are declared in `library.yaml` and item frontmatter for documentation purposes. brunnr does not automatically resolve or install dependencies—users should verify dependencies manually.
 
-Dependencies are explicitly declared in `library.yaml` and item frontmatter:
-
-| Type | Description | Resolution |
-|------|-------------|------------|
-| `skills` | Required skills | Documented for manual installation |
-| `agents` | Required agents | Documented for manual installation |
-| `prompts` | Related prompts | Documented for reference |
+| Type | Description |
+|------|-------------|
+| `skills` | Required skills |
+| `agents` | Required agents |
+| `prompts` | Related prompts |
 
 ### Dependency Declaration
 
@@ -313,118 +440,6 @@ dependencies:
 ---
 ```
 
-### Dependency Resolution
-
-1. **Documentation**: Dependencies are documented in library.yaml for manual checking
-2. **Circular detection**: Not currently implemented
-3. **Missing dependencies**: Users should verify dependencies manually before installation
-4. **Versioning**: Dependencies are resolved by name; versioning is not yet supported
-
-## Target Directory Rules
-
-### Directory Creation
-
-- Target directories are created on first `install` or `add`
-- Missing parent directories are created as needed
-- Directory permissions follow umask defaults
-
-### File Placement
-
-| Section | Source Pattern | Target Pattern |
-|---------|---------------|----------------|
-| skills | `skills/<name>/` | `.claude/skills/<name>/` |
-| agents | `agents/<name>.md` | `.claude/agents/<name>.md` |
-| prompts | `prompts/<name>.md` | `.claude/commands/<name>.md` |
-
-### Conflict Handling
-
-| Scenario | Behavior |
-|----------|----------|
-| Target exists, identical to source | Report "already installed" |
-| Target exists, differs from source | Report conflict, do not overwrite |
-| Target is a directory, source is file | Error: type mismatch |
-| Target is file, source is directory | Error: type mismatch |
-
-## Repository Sync Rules
-
-### Sync Behavior
-
-The `sync` command updates the local brunnr repository:
-
-1. Fetch from origin
-2. Report local modifications that would conflict
-3. Fast-forward if possible
-4. Require manual resolution if diverged
-
-### Multi-Device Workflow
-
-```bash
-# On device A: make changes
-cd ~/.config/brunnr
-# ... edit files ...
-git add . && git commit -m "Update skills"
-git push
-
-# On device B: sync changes
-just -f ~/.config/brunnr/justfile sync
-```
-
-### Team Workflow
-
-```bash
-# Team member adds skill locally
-just -f ~/.config/brunnr/justfile push skill new-skill
-
-# Team lead reviews and merges via git workflow
-# Other team members sync
-just -f ~/.config/brunnr/justfile sync
-```
-
-## library.yaml Schema
-
-```yaml
-# Catalog metadata
-name: brunnr
-description: Private catalog for skills, agents, and prompts
-version: "1.0.0"
-
-# Default paths (override via env vars)
-paths:
-  skills: skills/
-  agents: agents/
-  prompts: prompts/
-
-# Skills catalog
-skills: []
-  # - name: skill-name
-  #   description: What this skill does
-  #   file: skill-name/SKILL.md
-  #   tags: [tag1, tag2]
-  #   dependencies:
-  #     skills: [other-skill]
-  #     agents: [helper-agent]
-
-# Agents catalog
-agents: []
-  # - name: agent-name
-  #   description: What this agent does
-  #   file: agent-name.md
-  #   tags: [tag1, tag2]
-  #   dependencies:
-  #     skills: [required-skill]
-
-# Prompts catalog
-prompts: []
-  # - name: prompt-name
-  #   description: What this prompt does
-  #   file: prompt-name.md
-  #   type: single | multi-agent
-  #   tags: [tag1, tag2]
-  #   dependencies:
-  #     skills: [required-skill]
-  #     agents: [required-agent]
-```
-
 ## Safety Checklist
 
 When implementing brunnr commands, ensure:
@@ -437,4 +452,5 @@ When implementing brunnr commands, ensure:
 
 ## Version History
 
+- **2.0.0** — Reference-first redesign: `library.yaml` as catalog authority, explicit source semantics (repo-backed, local, remote)
 - **1.0.0** — Initial specification with skills, agents, prompts, and multi-agent prompt support
