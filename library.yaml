@@ -1,0 +1,59 @@
+# brunnr Catalog
+
+name: brunnr
+description: Private catalog for skills, agents, prompts, and multi-agent prompts
+version: "1.0.0"
+
+# Default paths (can be overridden via environment variables)
+paths:
+  skills: skills/
+  agents: agents/
+  prompts: prompts/
+
+# Skills catalog
+# Skills are reusable capabilities like code review, test generation, etc.
+# Each skill has its own directory with a SKILL.md file
+skills: []
+  # Example entry:
+  # - name: code-reviewer
+  #   description: Review code for bugs, style, and best practices
+  #   file: code-reviewer/SKILL.md
+  #   tags: [review, code-quality]
+  #   dependencies:
+  #     skills: []
+  #     agents: []
+
+# Agents catalog
+# Agents are specialized AI configurations for specific tasks
+# Each agent is a single markdown file with frontmatter
+agents: []
+  # Example entry:
+  # - name: security-auditor
+  #   description: Audit code for security vulnerabilities
+  #   file: security-auditor.md
+  #   tags: [security, audit]
+  #   dependencies:
+  #     skills: [code-reviewer]
+
+# Prompts catalog
+# Prompts are single-shot instructions or templates
+# Multi-agent prompts use type: multi-agent in their metadata
+prompts: []
+  # Example entries:
+  # - name: pr-description
+  #   description: Generate a pull request description from commits
+  #   file: pr-description.md
+  #   type: single
+  #   tags: [git, documentation]
+  #   dependencies:
+  #     skills: []
+  #     agents: []
+  #
+  # - name: complex-review
+  #   description: Multi-agent code review with security, perf, and docs
+  #   file: complex-review.md
+  #   type: multi-agent
+  #   tags: [review, multi-agent]
+  #   dependencies:
+  #     skills: []
+  #     agents: [security-auditor, performance-reviewer, docs-checker]
