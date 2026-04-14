@@ -170,51 +170,96 @@ just -f ~/.config/brunnr/justfile install
 
 ## Skill Optimization (autoresearch)
 
-brunnr includes an autonomous skill optimization pipeline inspired by [karpathy/autoresearch](https://github.com/karpathy/autoresearch). The idea: an agent iteratively edits a SKILL.md, runs binary eval assertions, and keeps only the changes that improve pass rate — the same way autoresearch optimizes a neural network training script overnight.
+brunnr includes an autonomous skill optimization pipeline inspired by [karpathy/autoresearch](https://github.com/karpathy/autoresearch). An agent iteratively edits a SKILL.md, runs binary eval assertions, and keeps only the changes that improve pass rate — the same way autoresearch optimizes a neural network training script overnight.
+
+### Eval philosophy
+
+Every eval needs three things:
+
+- **Objective metric**: a number you can measure — not "feels better," an actual pass rate
+- **Measurement tool**: automated, reliable, no human needed — deterministic string checks or binary LLM judge
+- **Lever to pull**: something the agent can change — the SKILL.md instructions
+
+Assertions are **binary** (pass/fail, not scores) and **deterministic first** (string match > regex > LLM judge). This keeps evals cheap, fast, and low-noise.
 
 ### The pipeline
 
 ```
-/gen-evals          → eval-designer creates evals.json     → you review
-/autoresearch-skill → agent optimizes SKILL.md against evals → you review results
+/fork-skill         → (if external) copy skill into brunnr repo
+/gen-evals          → eval-designer creates evals.json        → you review
+/autoresearch-skill → agent optimizes SKILL.md against evals   → you review results
 /skill-status       → shows which skills need attention next
 ```
 
-### Step 1: Generate evals (`/gen-evals`)
+> **Requirement:** Only repo-backed skills can be optimized — the agent needs to edit and commit the SKILL.md. If the skill is a remote or local reference, run `/fork-skill` first to bring it into the brunnr repo.
 
-The `eval-designer` agent reads your skill, asks clarifying questions about your real goals and failure modes, then generates `evals/evals.json` — a suite of binary pass/fail assertions.
+### Step 1: Fork if needed (`/fork-skill`)
+
+If the skill's `source` in `library.yaml` is `file://` or `https://`, run `/fork-skill <name>`. This:
+- Fetches the content from the external source
+- Copies it into `skills/<name>/SKILL.md`
+- Updates `library.yaml` to point to the repo-backed path
+- Preserves the original URL in the `origin` field for attribution
+
+Skip this step if the skill is already repo-backed.
+
+### Step 2: Generate evals (`/gen-evals`)
+
+The `eval-designer` agent reads the skill, asks clarifying questions about your real goals and failure modes, then generates `evals/evals.json`:
 
 ```json
 {
-  "assertions": [
-    { "check": "output contains 'parameterized query'", "type": "deterministic" },
-    { "check": "fix does not introduce a new vulnerability", "type": "semantic", "reason": "requires understanding of fix safety" }
+  "skill_name": "code-reviewer",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Review this file for security issues",
+      "files": ["fixtures/sql-injection.py"],
+      "assertions": [
+        { "check": "output contains 'SQL injection'", "type": "deterministic" },
+        { "check": "output contains 'parameterized' or 'prepared statement'", "type": "deterministic" },
+        { "check": "suggested fix does not introduce a new vulnerability", "type": "semantic", "reason": "requires understanding of fix safety" }
+      ],
+      "split": "train"
+    }
   ]
 }
 ```
 
-**Key design choices:**
+**Design choices:**
 - **Binary, not fuzzy.** Every assertion is YES/NO. No scores, no scales.
-- **Deterministic first.** String match and regex checks are preferred (>80% target). Semantic LLM checks (haiku-class, YES/NO only) are a flagged fallback.
-- **Train/holdout split.** 70% of evals are used for optimization, 30% are held back to catch overfitting.
+- **Deterministic first.** String match and regex checks are preferred (>80% target). Semantic LLM checks (haiku-class model, YES/NO only) are a flagged fallback — if a semantic assertion gets inconsistent results, rewrite the assertion, don't upgrade the judge.
+- **Train/holdout split.** ~70% of evals are used for optimization (`"split": "train"`), ~30% are held back to catch overfitting (`"split": "holdout"`).
 
-Generated evals are a draft — review them and add 1–2 handcrafted cases based on real failures.
+Generated evals are a draft — review them and add 1–2 handcrafted cases based on real failures you've seen.
 
-### Step 2: Optimize the skill (`/autoresearch-skill`)
+### Step 3: Optimize the skill (`/autoresearch-skill`)
 
-The `autoresearch-skill` agent runs in a loop:
+The agent takes these parameters:
+
+| Parameter | Example | Purpose |
+|---|---|---|
+| `SKILL` | `code-reviewer` | Skill name |
+| `SKILL_PATH` | `.claude/skills/code-reviewer/SKILL.md` | File to optimize |
+| `EVAL_FILE` | `evals/evals.json` | Eval suite to score against |
+| `RUNS` | `3` | Times to run the full eval suite per experiment (averaged for stability) |
+| `RUN_TAG` | `apr14` | Short tag for the git branch |
+
+Then it runs in a loop:
 
 1. **Propose** a focused change to the SKILL.md (add, tweak, delete, or simplify an instruction)
-2. **Commit** the change
-3. **Run** the eval suite N times (configurable `RUNS` parameter) and average the pass rate
+2. **Commit** the change to a `autoresearch-skill/<RUN_TAG>` branch
+3. **Run** the eval suite `RUNS` times and average the pass rate
 4. **Keep or discard** — improved pass rate = keep, regressed or negligible gain with added complexity = discard
-5. **Holdout check** every 10 experiments — revert if holdout regresses (overfitting)
+5. **Holdout check** every 10 experiments — revert if holdout regresses (overfitting protection)
 6. **Log** every experiment to `results.tsv`
 7. **Loop** — never stops until you stop it
 
 The agent also runs **delete-and-test** experiments (at least every 5th) to remove instructions that aren't pulling their weight, keeping skills lean.
 
-When done, optimization history is recorded in `evals.json`:
+**Safety rules:** the agent never modifies eval files or fixtures (that would be cheating), never touches files outside the SKILL.md, never installs packages, and never force-pushes. It verifies the skill is repo-backed before starting — if not, it stops and directs you to `/fork-skill`.
+
+When done, optimization history is recorded in `evals.json` so `/skill-status` can track it:
 
 ```json
 {
@@ -223,17 +268,23 @@ When done, optimization history is recorded in `evals.json`:
       "run_tag": "apr14",
       "date": "2026-04-14",
       "experiments_total": 47,
+      "experiments_kept": 12,
+      "experiments_discarded": 32,
+      "experiments_crashed": 3,
       "baseline_pass_rate": 71.0,
       "best_pass_rate": 92.3,
-      "holdout_pass_rate": 88.5
+      "holdout_pass_rate": 88.5,
+      "branch": "autoresearch-skill/apr14"
     }
   ]
 }
 ```
 
-### Step 3: Check status (`/skill-status`)
+After reviewing results, merge the branch to keep the improvements: `git merge autoresearch-skill/<RUN_TAG>`.
 
-Shows which skills need optimization next, ranked by priority:
+### Step 4: Check status (`/skill-status`)
+
+Scans all skills' `evals.json` history and ranks by what needs attention:
 
 ```
 | Skill         | Last optimized | Pass rate | Status          |
@@ -247,25 +298,38 @@ Recommended next:
 2. test-writer — pass rate 68%, stale. Ready for /autoresearch-skill.
 ```
 
+Staleness is ranked: never optimized > low pass rate > stale (>30 days) > holdout drift > current.
+
 ### Generic autoresearch
 
-For non-skill targets (optimizing code, configs, or anything with a measurable metric and a run command), the generic `autoresearch` agent works directly. Give it a target file, a run command, and a metric regex.
+For non-skill targets — optimizing code, configs, SQL queries, or anything with a measurable metric and a run command — the generic `autoresearch` agent works directly:
 
-### Agents and prompts summary
+| Parameter | Example |
+|---|---|
+| `TARGET` | `src/optimizer.ts` |
+| `RUN_CMD` | `npm run bench > run.log 2>&1` |
+| `METRIC_NAME` | `p99_latency_ms` |
+| `METRIC_DIRECTION` | `minimize` |
+| `METRIC_REGEX` | `^p99_latency_ms:\s*([\d.]+)` |
+| `BUDGET` | `60s` |
+
+Same keep/discard loop, same git-based experiment tracking — just without the eval assertion layer.
+
+### Agents and prompts
 
 | Agent | Purpose |
 |-------|---------|
-| `autoresearch` | Generic — optimize any file against any metric |
+| `autoresearch` | Generic — optimize any file against any run command + metric |
 | `autoresearch-skill` | Specialized — optimize a SKILL.md against binary eval assertions |
-| `eval-designer` | Generate `evals.json` for a skill |
+| `eval-designer` | Generate `evals.json` with binary assertions for a skill |
 
-| Prompt | Triggers |
-|--------|----------|
-| `/autoresearch` | Kickoff for generic optimization |
-| `/autoresearch-skill` | Kickoff for skill optimization |
-| `/gen-evals` | Kickoff for eval generation |
+| Prompt | Purpose |
+|--------|---------|
+| `/autoresearch` | Start a generic optimization session |
+| `/autoresearch-skill` | Start a skill optimization session |
+| `/gen-evals` | Generate eval assertions for a skill |
 | `/fork-skill` | Fork an external skill into brunnr for editing/optimization |
-| `/skill-status` | Check which skills need attention |
+| `/skill-status` | See which skills need optimization next |
 
 ## Safety & Consistency
 
