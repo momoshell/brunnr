@@ -82,6 +82,35 @@ skills:
 # Default install path: .claude/agents/<name>.md
 # =============================================================================
 agents:
+  - name: autoresearch
+    description: Autonomous researcher — iteratively modifies a target, runs experiments, keeps only improvements; runs in a loop until stopped
+    source: agents/autoresearch.md
+    tags: [autonomous, experimentation, optimization, research]
+    origin: https://github.com/karpathy/autoresearch
+    dependencies:
+      skills: []
+      agents: []
+    sync: auto
+
+  - name: autoresearch-skill
+    description: Autonomous skill optimizer — iteratively edits a SKILL.md against binary eval assertions, keeps only changes that improve pass rate
+    source: agents/autoresearch-skill.md
+    tags: [autonomous, experimentation, optimization, skills, evals]
+    origin: https://github.com/karpathy/autoresearch
+    dependencies:
+      skills: []
+      agents: []
+    sync: auto
+
+  - name: eval-designer
+    description: Generates binary eval assertions for a skill — produces evals.json with deterministic checks and flagged semantic fallbacks
+    source: agents/eval-designer.md
+    tags: [evals, testing, skills, assertions, quality]
+    dependencies:
+      skills: []
+      agents: []
+    sync: auto
+
   # Example: Repo-backed agent
   - name: security-auditor
     description: Audit code for security vulnerabilities
@@ -107,6 +136,47 @@ agents:
 # Default install path: .claude/commands/<name>.md
 # =============================================================================
 prompts:
+  - name: autoresearch
+    description: Kick off an autonomous research session — collects params and starts the autoresearch agent loop
+    source: prompts/autoresearch.md
+    type: single
+    tags: [autonomous, experimentation, optimization, research]
+    origin: https://github.com/karpathy/autoresearch
+    dependencies:
+      skills: []
+      agents: [autoresearch]
+    sync: auto
+
+  - name: autoresearch-skill
+    description: Kick off an autonomous skill optimization session — collects params and starts the autoresearch-skill agent loop
+    source: prompts/autoresearch-skill.md
+    type: single
+    tags: [autonomous, experimentation, optimization, skills, evals]
+    dependencies:
+      skills: []
+      agents: [autoresearch-skill]
+    sync: auto
+
+  - name: gen-evals
+    description: Generate binary eval assertions for a skill — creates evals.json before running autoresearch-skill
+    source: prompts/gen-evals.md
+    type: single
+    tags: [evals, testing, skills, assertions, quality]
+    dependencies:
+      skills: []
+      agents: [eval-designer]
+    sync: auto
+
+  - name: skill-status
+    description: Report which skills need optimization — scans evals.json history and ranks by staleness, pass rate, and run count. Use this to decide which skill to autoresearch next.
+    source: prompts/skill-status.md
+    type: single
+    tags: [evals, optimization, skills, status, staleness]
+    dependencies:
+      skills: []
+      agents: []
+    sync: auto
+
   # Example: Single prompt (type defaults to "single")
   - name: pr-description
     description: Generate a pull request description from commits
