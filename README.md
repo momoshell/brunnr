@@ -39,7 +39,7 @@ just -f ~/.config/brunnr/justfile add skill code-reviewer
 | **Prompts** | Single-shot instructions stored as files and installed to `.claude/commands/` |
 | **Multi-agent prompts** | Orchestrated workflows using `type: multi-agent`; stored alongside regular prompts |
 | **SKILL.md** | The specification document defining the brunnr format and behavior |
-| **cookbook/** | Task-oriented guides for common operations |
+| **lore/** | Task-oriented guides for common operations |
 | **justfile** | Thin terminal wrapper providing convenient shortcuts |
 
 ## Source Types
@@ -118,7 +118,7 @@ brunnr/
 │   ├── fork-skill.md           # /fork-skill
 │   ├── gen-evals.md            # /gen-evals
 │   └── skill-status.md         # /skill-status
-└── cookbook/           # Usage guides
+└── lore/              # Usage guides
     ├── install.md      # Install brunnr into a project
     ├── add.md          # Add items to your project
     ├── use.md          # Use installed items
@@ -354,18 +354,18 @@ brunnr prioritizes safe operations:
 
 The `library.yaml` file is the source of truth for your catalog. See `SKILL.md` for the full schema and source semantics.
 
-## Cookbook
+## Lore
 
-See the `cookbook/` directory for detailed guides:
+See the `lore/` directory for detailed guides:
 
-- [`cookbook/install.md`](cookbook/install.md) — Install brunnr into a project
-- [`cookbook/add.md`](cookbook/add.md) — Add skills/agents/prompts to your project
-- [`cookbook/use.md`](cookbook/use.md) — Use installed components
-- [`cookbook/push.md`](cookbook/push.md) — Push local improvements back to brunnr
-- [`cookbook/remove.md`](cookbook/remove.md) — Remove components safely
-- [`cookbook/list.md`](cookbook/list.md) — List available and installed items
-- [`cookbook/sync.md`](cookbook/sync.md) — Sync brunnr across devices
-- [`cookbook/search.md`](cookbook/search.md) — Search the catalog
+- [`lore/install.md`](lore/install.md) — Install brunnr into a project
+- [`lore/add.md`](lore/add.md) — Add skills/agents/prompts to your project
+- [`lore/use.md`](lore/use.md) — Use installed components
+- [`lore/push.md`](lore/push.md) — Push local improvements back to brunnr
+- [`lore/remove.md`](lore/remove.md) — Remove components safely
+- [`lore/list.md`](lore/list.md) — List available and installed items
+- [`lore/sync.md`](lore/sync.md) — Sync brunnr across devices
+- [`lore/search.md`](lore/search.md) — Search the catalog
 
 ## Contributing
 
