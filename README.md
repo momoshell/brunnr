@@ -115,6 +115,7 @@ brunnr/
 ├── prompts/            # Kickoff prompts
 │   ├── autoresearch.md         # /autoresearch
 │   ├── autoresearch-skill.md   # /autoresearch-skill
+│   ├── fork-skill.md           # /fork-skill
 │   ├── gen-evals.md            # /gen-evals
 │   └── skill-status.md         # /skill-status
 └── cookbook/           # Usage guides
@@ -263,6 +264,7 @@ For non-skill targets (optimizing code, configs, or anything with a measurable m
 | `/autoresearch` | Kickoff for generic optimization |
 | `/autoresearch-skill` | Kickoff for skill optimization |
 | `/gen-evals` | Kickoff for eval generation |
+| `/fork-skill` | Fork an external skill into brunnr for editing/optimization |
 | `/skill-status` | Check which skills need attention |
 
 ## Safety & Consistency

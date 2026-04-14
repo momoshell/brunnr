@@ -167,6 +167,16 @@ prompts:
       agents: [eval-designer]
     sync: auto
 
+  - name: fork-skill
+    description: Fork an externally-referenced skill into the brunnr repo — converts remote or local reference to repo-backed for editing and optimization
+    source: prompts/fork-skill.md
+    type: single
+    tags: [skills, fork, import, catalog]
+    dependencies:
+      skills: []
+      agents: []
+    sync: auto
+
   - name: skill-status
     description: Report which skills need optimization — scans evals.json history and ranks by staleness, pass rate, and run count. Use this to decide which skill to autoresearch next.
     source: prompts/skill-status.md

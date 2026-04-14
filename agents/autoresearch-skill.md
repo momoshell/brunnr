@@ -78,29 +78,33 @@ If the eval file has no `split` field on evals, assign 70% train / 30% holdout r
 
 ## Setup protocol (do this exactly once)
 
-1. **Read the skill.** Read `SKILL_PATH` fully. Understand every instruction before changing anything.
-2. **Read and validate evals.** Read `EVAL_FILE`. Verify the schema is correct. Count assertions by type. Report the ratio:
+1. **Verify the skill is repo-backed.** Look up the skill in `library.yaml`. If the `source` starts with `file://` or `https://`, **stop immediately** — you cannot optimize a skill you don't own. Tell the user:
+   - The skill is externally referenced and cannot be edited in place.
+   - They should run `/fork-skill <name>` to copy it into brunnr and update `library.yaml`.
+   - Do not proceed. Do not run evals. Do not create a branch.
+2. **Read the skill.** Read `SKILL_PATH` fully. Understand every instruction before changing anything.
+3. **Read and validate evals.** Read `EVAL_FILE`. Verify the schema is correct. Count assertions by type. Report the ratio:
    ```
    Assertions: 24 total (19 deterministic, 5 semantic)
    Split: 17 train, 7 holdout
    ```
    If >50% are semantic, warn the user that eval quality may be low and suggest rewriting assertions.
-3. **Pin the eval file.** Record the git hash or file checksum of `EVAL_FILE` in the log. If evals change mid-run, past experiments are no longer comparable.
-4. **Create the experiment branch.** `git checkout -b autoresearch-skill/<RUN_TAG>`. Abort if the branch exists.
-5. **Verify clean state.** `git status` must be clean.
-6. **Initialize `results.tsv`** at the repo root with this header:
+4. **Pin the eval file.** Record the git hash or file checksum of `EVAL_FILE` in the log. If evals change mid-run, past experiments are no longer comparable.
+5. **Create the experiment branch.** `git checkout -b autoresearch-skill/<RUN_TAG>`. Abort if the branch exists.
+6. **Verify clean state.** `git status` must be clean.
+7. **Initialize `results.tsv`** at the repo root with this header:
    ```
    experiment	commit	pass_rate_train	pass_rate_holdout	semantic_count	tokens	status	description
    ```
    Add `results.tsv` and `run.log` to `.gitignore` if not already ignored.
-7. **Run the no-skill baseline.** Run each train eval `RUNS` times without the skill loaded. Record the pass rate. This is the floor — if optimization ever drops below this, something is broken.
-8. **Run the current-skill baseline.** Run each train eval `RUNS` times with the current unmodified skill. This is your starting point.
-9. **Log both baselines** in `results.tsv`:
-   ```
-   0	<commit>	<no_skill_rate>	-	0	0	baseline-no-skill	No skill loaded
-   1	<commit>	<current_rate>	<holdout_rate>	<semantic_n>	<tokens>	baseline	Unmodified skill
-   ```
-10. **Announce.** Report: branch name, no-skill baseline, current-skill baseline, assertion breakdown, and that you are entering the loop.
+8. **Run the no-skill baseline.** Run each train eval `RUNS` times without the skill loaded. Record the pass rate. This is the floor — if optimization ever drops below this, something is broken.
+9. **Run the current-skill baseline.** Run each train eval `RUNS` times with the current unmodified skill. This is your starting point.
+10. **Log both baselines** in `results.tsv`:
+    ```
+    0	<commit>	<no_skill_rate>	-	0	0	baseline-no-skill	No skill loaded
+    1	<commit>	<current_rate>	<holdout_rate>	<semantic_n>	<tokens>	baseline	Unmodified skill
+    ```
+11. **Announce.** Report: branch name, no-skill baseline, current-skill baseline, assertion breakdown, and that you are entering the loop.
 
 ## Running an eval
 

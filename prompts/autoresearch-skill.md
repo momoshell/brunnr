@@ -27,6 +27,7 @@ Ask for any that are missing:
 ## Step 2 — Pre-flight checks
 
 Before confirming with the user, verify:
+- The skill's `source` in `library.yaml` is repo-backed (not `file://` or `https://`). If it's external, **stop** and tell the user to run `/fork-skill` first.
 - `SKILL_PATH` exists and is readable
 - `EVAL_FILE` exists and has valid schema
 - Report assertion counts: total, deterministic, semantic, train/holdout split
