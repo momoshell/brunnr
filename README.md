@@ -372,6 +372,27 @@ brunnr prioritizes safe operations:
 | `BRUNNR_AGENTS_DIR` | `.claude/agents` | Where to install agents |
 | `BRUNNR_PROMPTS_DIR` | `.claude/commands` | Where to install prompts |
 
+The defaults work out of the box for most setups. If you need to override them, add the variables to your shell profile:
+
+**bash** (`~/.bashrc` or `~/.bash_profile`):
+```bash
+export BRUNNR_HOME="$HOME/.config/brunnr"
+```
+
+**zsh** (`~/.zshrc`):
+```bash
+export BRUNNR_HOME="$HOME/.config/brunnr"
+```
+
+**fish** (`~/.config/fish/config.fish`):
+```fish
+set -gx BRUNNR_HOME $HOME/.config/brunnr
+```
+
+You only need to set variables that differ from the defaults. The most common override is `BRUNNR_HOME` if you cloned brunnr somewhere other than `~/.config/brunnr`.
+
+The `BRUNNR_SKILLS_DIR`, `BRUNNR_AGENTS_DIR`, and `BRUNNR_PROMPTS_DIR` variables are relative to your project root and control where `brunnr install` and `brunnr add` place files. Change these only if your project uses a non-standard `.claude/` layout.
+
 ### library.yaml
 
 The `library.yaml` file is the source of truth for your catalog. See `SKILL.md` for the full schema and source semantics.
