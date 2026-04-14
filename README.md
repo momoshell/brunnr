@@ -13,19 +13,37 @@ brunnr is your team's central well of agentic knowledge. The `library.yaml` file
 - **Team sharing**: Share vetted prompts and workflows with your entire team
 - **Versioned**: Track changes to your AI components like any other code
 
+## Prerequisites
+
+| Tool | What it's for | Install |
+|------|---------------|---------|
+| **git** | Version control, syncing brunnr across devices | [git-scm.com](https://git-scm.com) |
+| **just** | Runs brunnr commands (modern make alternative) | `brew install just` or [just.systems](https://just.systems) |
+| **Claude Code** | AI assistant that uses your skills, agents, and prompts | [claude.ai/code](https://claude.ai/code) |
+
+brunnr manages files that Claude Code reads from `.claude/` in your project. The `just` commands handle copying files between brunnr and your projects. Claude Code reads the installed skills/agents/prompts at runtime.
+
 ## Quick Start
 
 ```bash
-# Clone brunnr to a central location
+# 1. Install just (if you don't have it)
+brew install just
+
+# 2. Clone brunnr to a central location
 git clone <your-brunnr-repo> ~/.config/brunnr
 
-# Install the brunnr skill into your project
-cd your-project
-just -f ~/.config/brunnr/justfile install
+# 3. (Optional) Create a shell alias for convenience
+alias brunnr='just -f ~/.config/brunnr/justfile'
 
-# Add a skill from brunnr to your current project
+# 4. Install brunnr into your project
+cd your-project
+just -f ~/.config/brunnr/justfile install   # or: brunnr install
+
+# 5. Add a skill from the catalog
 just -f ~/.config/brunnr/justfile add skill code-reviewer
 ```
+
+After `install`, your project will have `.claude/skills/`, `.claude/agents/`, and `.claude/commands/` directories. Claude Code automatically picks up anything placed there.
 
 ## Core Concepts
 
@@ -317,19 +335,23 @@ Same keep/discard loop, same git-based experiment tracking — just without the 
 
 ### Agents and prompts
 
+**Agents** are autonomous AI configurations — they define how Claude behaves during a task. Install them with `brunnr add agent <name>`, which places them in `.claude/agents/`. You can then invoke an agent in Claude Code by selecting it from the agent picker or referencing it directly.
+
 | Agent | Purpose |
 |-------|---------|
 | `autoresearch` | Generic — optimize any file against any run command + metric |
 | `autoresearch-skill` | Specialized — optimize a SKILL.md against binary eval assertions |
 | `eval-designer` | Generate `evals.json` with binary assertions for a skill |
 
-| Prompt | Purpose |
-|--------|---------|
-| `/autoresearch` | Start a generic optimization session |
-| `/autoresearch-skill` | Start a skill optimization session |
-| `/gen-evals` | Generate eval assertions for a skill |
-| `/fork-skill` | Fork an external skill into brunnr for editing/optimization |
-| `/skill-status` | See which skills need optimization next |
+**Prompts** are slash commands you type in Claude Code. Install them with `brunnr add prompt <name>`, which places them in `.claude/commands/`. Then type the command in any Claude Code session to run it.
+
+| Prompt | How to use | What it does |
+|--------|-----------|--------------|
+| `/autoresearch` | Type in Claude Code | Collects target, metric, and run command, then starts the generic optimization loop |
+| `/autoresearch-skill` | Type in Claude Code | Collects skill name, eval file, and run count, then starts the skill optimization loop |
+| `/gen-evals` | Type in Claude Code | Reads a skill, asks about your goals and failure modes, generates `evals/evals.json` |
+| `/fork-skill` | Type in Claude Code | Copies an external skill into brunnr so it can be edited and optimized |
+| `/skill-status` | Type in Claude Code | Scans all skills and reports which ones need optimization next |
 
 ## Safety & Consistency
 
