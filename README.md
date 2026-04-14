@@ -37,10 +37,10 @@ alias brunnr='just -f ~/.config/brunnr/justfile'
 
 # 4. Install brunnr into your project
 cd your-project
-just -f ~/.config/brunnr/justfile install   # or: brunnr install
+brunnr install
 
 # 5. Add a skill from the catalog
-just -f ~/.config/brunnr/justfile add skill code-reviewer
+brunnr add skill code-reviewer
 ```
 
 After `install`, your project will have `.claude/skills/`, `.claude/agents/`, and `.claude/commands/` directories. Claude Code automatically picks up anything placed there.
@@ -153,17 +153,17 @@ brunnr/
 
 ```bash
 # 1. Install brunnr into a new project
-just -f ~/.config/brunnr/justfile install
+brunnr install
 
 # 2. Add skills you need
-just -f ~/.config/brunnr/justfile add skill code-reviewer
-just -f ~/.config/brunnr/justfile add skill test-writer
+brunnr add skill code-reviewer
+brunnr add skill test-writer
 
 # 3. Use them in your project
 # (Skills are now available to Claude in .claude/skills/)
 
 # 4. Push improvements back to brunnr (for repo-backed skills)
-just -f ~/.config/brunnr/justfile push skill code-reviewer
+brunnr push skill code-reviewer
 ```
 
 ### Team Workflow
@@ -182,8 +182,8 @@ git commit -m "Add security-review skill"
 git push
 
 # Team members sync and install
-just -f ~/.config/brunnr/justfile sync
-just -f ~/.config/brunnr/justfile install
+brunnr sync
+brunnr install
 ```
 
 ## Skill Optimization (autoresearch)
