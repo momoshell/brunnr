@@ -246,5 +246,14 @@ Tell the user:
 - The branch name containing the improved skill
 - How to review: `git log autoresearch-skill/<RUN_TAG>` and `results.tsv`
 - How to merge: `git merge autoresearch-skill/<RUN_TAG>` (if satisfied)
-- How to push back to brunnr: `just push skill <name>` (if repo-backed)
 - Suggest running `/skill-status` to see where this skill ranks across the catalog
+
+### 3. Push back to brunnr
+
+After the user merges, **explicitly ask** whether they want to push the improved skill back to brunnr:
+
+> "The improved skill is merged into your project. Do you want to push it back to brunnr so the catalog stays up to date? I can run `brunnr push skill <name>` for you."
+
+- If yes: run `brunnr push skill <SKILL>`.
+- If no: remind them that brunnr's copy is now behind and they can push later.
+- Do not push without asking. The user may want to test the skill in their project before updating brunnr.

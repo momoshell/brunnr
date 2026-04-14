@@ -281,16 +281,16 @@ push section name:
         
         # Check source type and fail for non-repo-backed sources
         if [[ "$SOURCE" == file://* ]]; then
-            echo "Error: Source is external - cannot push to file:// reference"
+            echo "Error: Source is a local reference — cannot push to file:// path"
             echo "Source: $SOURCE"
-            echo "Local references cannot be pushed to brunnr."
+            echo "Run /fork-skill {{name}} first to copy it into brunnr, then push."
             exit 1
         fi
-        
+
         if [[ "$SOURCE" == https://* ]]; then
-            echo "Error: Source is remote - cannot push to remote reference"
+            echo "Error: Source is a remote reference — cannot push to external repo"
             echo "Source: $SOURCE"
-            echo "Remote references cannot be pushed to brunnr."
+            echo "Run /fork-skill {{name}} first to copy it into brunnr, then push."
             exit 1
         fi
         
