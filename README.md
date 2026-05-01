@@ -207,6 +207,80 @@ brunnr sync
 brunnr install
 ```
 
+## Building Pi components with pi-pi
+
+The `pi-pi` extension is a meta-agent that **builds new Pi components** — extensions, skills, agents, prompts, themes, settings — by dispatching a team of research experts that fetch fresh upstream Pi docs, then synthesizing their findings and writing the files. Reach for it whenever the alternative is reading half a dozen pages of [pi-mono](https://github.com/badlogic/pi-mono) docs to figure out how to register a tool, wire a custom widget, or set up a new theme.
+
+### Install and launch
+
+```bash
+# Add the pi-pi extension to your project — directory-routed install
+brunnr add extension pi-pi
+# This drops:
+#   .pi/extensions/pi-pi.ts
+#   .pi/agents/pi-pi/{pi-orchestrator,ext,theme,skill,config,tui,prompt,agent,keybinding,cli}-expert.md
+
+# Launch Pi with pi-pi loaded
+pi -e .pi/extensions/pi-pi.ts
+```
+
+You'll see a grid of expert cards above the editor and a `Pi Pi (9 experts)` status. Type a build request:
+
+```
+Build a Pi extension that watches `.trigger` and replays its contents into the editor on save.
+```
+
+The orchestrator picks the relevant experts (here: `ext-expert` + `tui-expert` + maybe `keybinding-expert`), calls the `query_experts` tool with all of them at once, waits for their research, and writes the resulting `.ts` file to `extensions/`.
+
+### Modes
+
+`query_experts` takes an optional `mode`:
+
+| Mode | Behavior |
+|---|---|
+| `parallel` (default) | All queries run as concurrent subprocesses, max 4 in flight |
+| `chain` | Sequential; each question may include `{previous}` to inject the prior expert's full output |
+
+Use `chain` when one expert's output should narrow the next expert's query — e.g. *"ask `config-expert` about provider setup, then chain to `ext-expert` with `{previous}` so they design `registerProvider` against those specific keys."*
+
+### The expert roster
+
+| Expert | Domain |
+|---|---|
+| `ext-expert` | Extensions — tools, events, commands, shortcuts, custom rendering, state, system prompts |
+| `theme-expert` | Themes — JSON format, all 51 colour tokens, hot reload |
+| `skill-expert` | Skills — SKILL.md frontmatter, directory structure, validation, Agent Skills standard |
+| `config-expert` | Settings, providers, models, packages, keybindings |
+| `tui-expert` | TUI components, keyboard input, overlays, widgets, footers, custom editors |
+| `prompt-expert` | Prompt templates — single-file `.md`, `$1` / `$@` / `${@:N}` argument syntax |
+| `agent-expert` | Agent personas, `teams.yaml`, dispatcher / pipeline / parallel orchestration patterns |
+| `keybinding-expert` | `registerShortcut`, key IDs, reserved keys, macOS terminal compatibility |
+| `cli-expert` | All `pi` CLI flags, output modes, package subcommands, env vars |
+
+Each expert fetches fresh docs from `pi-mono` on first query (firecrawl with `curl` fallback) so answers track upstream as Pi evolves.
+
+### Where experts live (and the safety check)
+
+pi-pi loads expert definitions from two locations:
+
+| Path | Trusted? |
+|---|---|
+| `~/.pi/agent/agents/pi-pi/` | Yes — user-installed, always loaded |
+| `<project>/.pi/agents/pi-pi/` | No — pi-pi prompts via `ctx.ui.confirm()` before loading; project-level entries shadow user-level on name collision |
+
+In headless mode (`--mode json`) project-level experts are never auto-loaded. Project-controlled experts can execute arbitrary subagent system prompts, so the confirmation prompt is the safety gate.
+
+### pi-pi vs. the optimizers
+
+| You want to… | Use |
+|---|---|
+| Build a *new* Pi component from scratch | `pi-pi` |
+| Improve an *existing* skill against evals | `/autoresearch-skill` → `/autoresearch-skill-gepa` if it plateaus, or `/autoresearch-pipeline` for hands-off |
+| Improve an *existing* agent `.md` against trajectory evals | `/autoresearch-agent` |
+| Generate evals before optimizing | `/gen-evals` (skills) or `/gen-evals-agent` (agents) |
+
+Build first with pi-pi, then sharpen with the optimizers.
+
 ## Skill Optimization (autoresearch + GEPA)
 
 brunnr includes two optimization algorithms and a pipeline orchestrator for skills, drawn from [karpathy/autoresearch](https://github.com/karpathy/autoresearch) and [gepa-ai/gepa](https://github.com/gepa-ai/gepa). An agent iteratively edits a SKILL.md, runs binary eval assertions, and keeps only the changes that improve pass rate.
