@@ -42,9 +42,19 @@ brunnr install
 
 # 5. Add a skill from the catalog
 brunnr add skill code-reviewer
+
+# 6. Launch Pi — it picks up everything in .pi/ natively
+pi
 ```
 
-After `install`, your project will have `.pi/skills/`, `.pi/agents/`, `.pi/prompts/`, `.pi/extensions/`, and `.pi/themes/` directories. Pi automatically discovers anything placed there.
+After `install`, your project will have `.pi/skills/`, `.pi/agents/`, `.pi/prompts/`, `.pi/extensions/`, and `.pi/themes/` directories. Pi automatically discovers anything placed there — no extra config or extension required.
+
+**From here:**
+
+- **Day-to-day**: see [Workflows](#workflows) for the `add` / `remove` / `list` / `push` / `sync` patterns.
+- **Build *new* Pi components without reading docs**: add the [Eitri meta-agent](#building-pi-components-with-eitri) — `brunnr add extension eitri`, then `pi -e .pi/extensions/eitri.ts` and ask it to build something.
+- **Improve an *existing* skill or agent against evals**: see [Skill Optimization](#skill-optimization-autoresearch--gepa) (autoresearch + GEPA) and [Agent Optimization](#agent-optimization).
+- **Reference**: [Source Types](#source-types), [Catalog Sections](#catalog-sections), and the per-command guides in [`lore/`](lore/).
 
 ## Core Concepts
 
