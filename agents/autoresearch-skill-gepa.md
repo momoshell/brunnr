@@ -175,15 +175,15 @@ Unlike `autoresearch-skill`, the keep/discard decision is **per-eval-subset**, n
 - A's per-eval pass rate is strictly > B's on **at least one** eval, AND
 - A's overall pass rate is ≥ B's.
 
-Apply the conditions in the order listed; the first match wins:
+Apply the conditions in the order listed; the first match wins. **`crash` is checked second** (after a failed run, the dominance comparison can't be evaluated meaningfully):
 
-| Outcome | Condition | Action |
-|---|---|---|
-| **discard** | The new candidate is dominated by some current front member (per the definition above) | `git reset --hard <parent_commit>` and skip the commit. |
-| **front** | The new candidate dominates at least one current front member, OR is non-dominated by every member AND has overall pass rate ≥ the front's current minimum | Add to front. Evict any front members that the new candidate dominates. If size still > `PARETO_WIDTH` after eviction, drop the oldest non-dominating member. Branch advances on this experiment's commit. |
-| **keep (simplification)** | Overall pass rate flat (within 0.5% of the parent) AND the change reduced complexity (line count down) AND not dominated by any front member | Add to front. |
-| **discard** | None of the above match (the candidate is non-dominated but does not improve any subset and adds complexity) | `git reset --hard <parent_commit>` and skip. |
-| **crash** | Eval run failed. | Diagnose, attempt one fix. If unfixable, reset and log as crash. |
+| Order | Outcome | Condition | Action |
+|---|---|---|---|
+| 1 | **crash** | Eval run failed; pass rate cannot be computed. | Diagnose, attempt one fix. If unfixable, `git reset --hard <parent_commit>` and log as crash. |
+| 2 | **discard (dominated)** | The new candidate is dominated by some current front member (per the definition above) | `git reset --hard <parent_commit>` and skip the commit. |
+| 3 | **front** | The new candidate dominates at least one current front member, OR is non-dominated by every member AND has overall pass rate ≥ the front's current minimum | Add to front. Evict any front members that the new candidate dominates. If size still > `PARETO_WIDTH` after eviction, drop the oldest non-dominating member. Branch advances on this experiment's commit. |
+| 4 | **keep (simplification)** | Overall pass rate flat (within 0.5% of the parent) AND the change reduced complexity (line count down) AND not dominated by any front member | Add to front. |
+| 5 | **discard** | None of the above match (the candidate is non-dominated but does not improve any subset and adds complexity) | `git reset --hard <parent_commit>` and skip. |
 
 Update `results/pareto-front.json` after every experiment, even crashes (to record what was tried).
 

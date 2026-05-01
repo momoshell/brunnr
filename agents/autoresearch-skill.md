@@ -1,6 +1,6 @@
 ---
 name: autoresearch-skill
-description: Autonomous skill optimizer — iteratively edits a SKILL.md, runs binary eval assertions, and keeps only changes that improve pass rate. Use this whenever you want to improve a skill's quality through automated experimentation, optimize skill instructions, or run an overnight skill improvement loop.
+description: Autonomous skill optimizer — iteratively edits a SKILL.md, runs binary eval assertions, and keeps only changes that improve pass rate. Stops at plateau with a diagnostic report (overfit / single-cluster / scattered-ceiling / eval-quality) and supports a delete-only mode for compaction passes. Use this whenever you want to improve a skill's quality through automated experimentation, optimize skill instructions, or run an overnight skill improvement loop.
 tags: [autonomous, experimentation, optimization, skills, evals]
 dependencies:
   skills: []
@@ -119,7 +119,7 @@ For each eval case in the suite:
 5. **Record** pass/fail for each assertion.
 6. **Repeat `RUNS` times** and average the pass rate for stability.
 
-**Persist per-eval data.** After each experiment, write `results/per-eval/exp-<N>.json` with the per-eval, per-run, per-assertion results:
+**Persist per-eval data.** After each experiment, write `results/per-eval/exp-<N>.json` with the per-eval, per-run, per-assertion results. **Include each assertion's `check` text** — the single-cluster pattern diagnosis (below) groups failures by assertion theme, which requires the text, not just the id:
 
 ```json
 {
@@ -130,8 +130,20 @@ For each eval case in the suite:
     {
       "eval_id": 1,
       "runs": [
-        { "run": 1, "assertions": [{ "id": 0, "pass": true }, { "id": 1, "pass": false }] },
-        { "run": 2, "assertions": [{ "id": 0, "pass": true }, { "id": 1, "pass": false }] }
+        {
+          "run": 1,
+          "assertions": [
+            { "id": 0, "check": "output contains 'SQL injection'", "pass": true },
+            { "id": 1, "check": "output contains 'parameterized'", "pass": false }
+          ]
+        },
+        {
+          "run": 2,
+          "assertions": [
+            { "id": 0, "check": "output contains 'SQL injection'", "pass": true },
+            { "id": 1, "check": "output contains 'parameterized'", "pass": false }
+          ]
+        }
       ]
     }
   ]
@@ -254,14 +266,16 @@ Best train pass rate: X% (unchanged for last 10 experiments)
 Holdout pass rate:    Y%
 Holdout gap:          (X - Y) points
 
-Pattern: <overfit | single-cluster | scattered-ceiling | eval-quality>
+Patterns: <one or more of: overfit, single-cluster, scattered-ceiling, eval-quality>
+          (comma-separated when multiple apply; orchestrators advance only if neither
+           overfit nor eval-quality is in the list)
 
 Failing evals (top 5 by failure rate):
   - eval #3 "Review SQL injection fixture": 0/3 runs passed assertion "output contains 'parameterized'"
   - eval #7 ...
 
 Recommended next step:
-  <one of the moves from the table above, specific to this skill>
+  <one move per pattern from the table above, specific to this skill>
 
 Resume guidance:
   <when it is OK to resume the loop after the user makes the change>

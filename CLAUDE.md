@@ -47,12 +47,12 @@ The four assertion categories for agent evals — `final-state`, `trajectory`, `
 
 ## Tiebreaker order (when picking a "winner" from a Pareto front)
 
-Standard across all GEPA-based optimizers and the pipeline orchestrator:
+Standard order, used by `autoresearch-skill-gepa` and the pipeline orchestrator:
 1. Highest holdout pass rate (best generalizer wins)
 2. Highest train pass rate
 3. Smallest token cost / leanest
 
-If you change this rule in one file, change it everywhere.
+`autoresearch-agent` extends this with one extra rank between train and token cost: **lowest avg turn count** (fewer turns = cheaper at runtime). The deviation is intentional — turn count is a meaningful runtime metric for agents but undefined for skills. If you add a new optimizer, follow the standard order; only deviate with explicit justification documented here.
 
 ## Authoritative paths the agents write to
 

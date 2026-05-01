@@ -1,7 +1,7 @@
 ---
 name: autoresearch-pipeline
-description: Run the full skill-optimization pipeline — autoresearch (hill-climb) → autoresearch-skill-gepa (reflection) → delete-only compaction — with plateau-based escalation between stages. One pass per epoch. Use this instead of running the optimizers individually when you want best-effort results without manually deciding when to escalate.
-type: single
+description: Run the full skill-optimization pipeline — autoresearch-skill (hill-climb) → autoresearch-skill-gepa (reflection) → autoresearch-skill in delete-only mode (compaction) — with plateau-based escalation between stages. One pass per epoch. Use this instead of running the optimizers individually when you want best-effort results without manually deciding when to escalate.
+type: multi-agent
 tags: [autonomous, optimization, skills, evals, pipeline, orchestration]
 dependencies:
   skills: []
@@ -154,6 +154,8 @@ The agent runs until:
 | Crash | Stop |
 
 Stage 3 only ends; it never advances. There is no stage 4.
+
+> **Note**: Unlike Stages 1 and 2, Stage 3 has no `TARGET reached` early-exit. Compaction does not raise pass rate — it just removes instructions whose loss doesn't regress it. Pass rate is already at-or-above target by definition (otherwise the pipeline would have stopped earlier). Stage 3 runs until there's nothing left to safely remove.
 
 ## Step 7 — Wrap-up
 
