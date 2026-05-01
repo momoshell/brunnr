@@ -1,5 +1,5 @@
 /**
- * Pi Pi — Meta-agent that builds Pi agents
+ * Eitri — Meta-agent that builds Pi agents
  *
  * A team of domain-specific research experts (extensions, themes, skills,
  * settings, TUI) gather documentation and patterns. The primary agent
@@ -14,8 +14,8 @@
  * Experts are read-only researchers. The primary agent is the only writer.
  *
  * Experts are loaded from:
- *   ~/.pi/agent/agents/pi-pi/    (user-level, trusted)
- *   .pi/agents/pi-pi/            (project-level, requires confirmation)
+ *   ~/.pi/agent/agents/eitri/    (user-level, trusted)
+ *   .pi/agents/eitri/            (project-level, requires confirmation)
  *
  * Subprocesses honour ctx.signal — Esc cancels running experts cleanly
  * (SIGTERM → SIGKILL after 5s).
@@ -24,10 +24,14 @@
  *   /experts          — list available experts and their status
  *   /experts-grid N   — set dashboard column count (default 3)
  *
- * Usage: pi -e extensions/pi-pi.ts
+ * Usage: pi -e extensions/eitri.ts
  *
  * ─────────────────────────────────────────────────────────────────────────
- * Origin: based on https://github.com/badlogic/pi-vs-claude-code (extensions/pi-pi.ts)
+ * Origin: based on https://github.com/badlogic/pi-vs-claude-code (upstream
+ * extensions/pi-pi.ts). Renamed Eitri in brunnr after the master dwarf
+ * smith — forger of Mjölnir, Draupnir, and Gullinbursti — paired with the
+ * brunnr (well of wisdom) that the experts draw from.
+ *
  * Hardened in brunnr: ctx.signal abort handling (SIGTERM→SIGKILL), user/
  * project agent scope split with confirmation, truncateHead helper for tool
  * output, theme-token border colours, promptSnippet/promptGuidelines, cached
@@ -161,18 +165,18 @@ export default function (pi: ExtensionAPI) {
 	let cachedOrchestratorPath: string | undefined;
 
 	function userDir(): string {
-		return join(homedir(), ".pi", "agent", "agents", "pi-pi");
+		return join(homedir(), ".pi", "agent", "agents", "eitri");
 	}
 
 	function projectDir(cwd: string): string {
-		return join(cwd, ".pi", "agents", "pi-pi");
+		return join(cwd, ".pi", "agents", "eitri");
 	}
 
 	// Find the orchestrator template, preferring project-level when present.
 	function findOrchestratorPath(cwd: string): string | undefined {
 		const candidates = [
-			join(projectDir(cwd), "pi-orchestrator.md"),
-			join(userDir(), "pi-orchestrator.md"),
+			join(projectDir(cwd), "eitri-orchestrator.md"),
+			join(userDir(), "eitri-orchestrator.md"),
 		];
 		for (const p of candidates) {
 			if (existsSync(p)) return p;
@@ -186,16 +190,16 @@ export default function (pi: ExtensionAPI) {
 		try {
 			entries = readdirSync(dir);
 		} catch (err) {
-			if (ctx.hasUI) ctx.ui.notify(`Pi Pi: cannot read ${dir} — ${(err as Error).message}`, "warning");
+			if (ctx.hasUI) ctx.ui.notify(`Eitri: cannot read ${dir} — ${(err as Error).message}`, "warning");
 			return;
 		}
 		for (const file of entries) {
 			if (!file.endsWith(".md")) continue;
-			if (file === "pi-orchestrator.md") continue;
+			if (file === "eitri-orchestrator.md") continue;
 			const fullPath = resolve(dir, file);
 			const def = parseAgentFile(fullPath);
 			if (!def) {
-				if (ctx.hasUI) ctx.ui.notify(`Pi Pi: skipping malformed expert ${fullPath} (missing 'name' frontmatter or invalid format)`, "warning");
+				if (ctx.hasUI) ctx.ui.notify(`Eitri: skipping malformed expert ${fullPath} (missing 'name' frontmatter or invalid format)`, "warning");
 				continue;
 			}
 			const key = def.name.toLowerCase();
@@ -227,7 +231,7 @@ export default function (pi: ExtensionAPI) {
 		if (existsSync(projDir)) {
 			let candidateFiles: string[] = [];
 			try {
-				candidateFiles = readdirSync(projDir).filter(f => f.endsWith(".md") && f !== "pi-orchestrator.md");
+				candidateFiles = readdirSync(projDir).filter(f => f.endsWith(".md") && f !== "eitri-orchestrator.md");
 			} catch {}
 
 			if (candidateFiles.length > 0) {
@@ -235,7 +239,7 @@ export default function (pi: ExtensionAPI) {
 				if (ctx.hasUI) {
 					const names = candidateFiles.map(f => f.replace(/\.md$/, "")).join(", ");
 					allow = await ctx.ui.confirm(
-						"Load project-level Pi Pi experts?",
+						"Load project-level Eitri experts?",
 						`Found ${candidateFiles.length} expert .md file(s) in ${projDir}: ${names}\n\nProject-level experts can execute arbitrary subagent system prompts. Only load if you trust this repository.`,
 						{},
 					);
@@ -309,12 +313,12 @@ export default function (pi: ExtensionAPI) {
 	function updateWidget() {
 		if (!widgetCtx) return;
 
-		widgetCtx.ui.setWidget("pi-pi-grid", (_tui: any, theme: any) => {
+		widgetCtx.ui.setWidget("eitri-grid", (_tui: any, theme: any) => {
 
 			return {
 				render(width: number): string[] {
 					if (experts.size === 0) {
-						return ["", theme.fg("dim", "  No experts found. Add agent .md files to .pi/agents/pi-pi/")];
+						return ["", theme.fg("dim", "  No experts found. Add agent .md files to .pi/agents/eitri/")];
 					}
 
 					const cols = Math.min(gridCols, experts.size);
@@ -800,7 +804,7 @@ Each query specifies an expert name and a specific question. Ask about WHAT to b
 	// ── Commands ─────────────────────────────────
 
 	pi.registerCommand("experts", {
-		description: "List available Pi Pi experts and their status",
+		description: "List available Eitri experts and their status",
 		handler: async (_args, _ctx) => {
 			widgetCtx = _ctx;
 			const lines = Array.from(experts.values())
@@ -830,7 +834,7 @@ Each query specifies an expert name and a specific question. Ask about WHAT to b
 	function buildSystemPrompt(): string {
 		const orchestratorPath = cachedOrchestratorPath;
 		if (!orchestratorPath) {
-			return "Error: Could not locate pi-orchestrator.md in either ~/.pi/agent/agents/pi-pi/ or .pi/agents/pi-pi/.";
+			return "Error: Could not locate eitri-orchestrator.md in either ~/.pi/agent/agents/eitri/ or .pi/agents/eitri/.";
 		}
 		try {
 			const raw = readFileSync(orchestratorPath, "utf-8");
@@ -862,7 +866,7 @@ Each query specifies an expert name and a specific question. Ask about WHAT to b
 
 	pi.on("session_start", async (_event, _ctx) => {
 		if (widgetCtx) {
-			widgetCtx.ui.setWidget("pi-pi-grid", undefined);
+			widgetCtx.ui.setWidget("eitri-grid", undefined);
 		}
 		widgetCtx = _ctx;
 
@@ -870,9 +874,9 @@ Each query specifies an expert name and a specific question. Ask about WHAT to b
 		updateWidget();
 
 		const expertNames = Array.from(experts.values()).map(s => displayName(s.def.name)).join(", ");
-		_ctx.ui.setStatus("pi-pi", `Pi Pi (${experts.size} experts)`);
+		_ctx.ui.setStatus("eitri", `Eitri (${experts.size} experts)`);
 		_ctx.ui.notify(
-			`Pi Pi loaded — ${experts.size} experts: ${expertNames}\n\n` +
+			`Eitri loaded — ${experts.size} experts: ${expertNames}\n\n` +
 			`/experts          List experts and status\n` +
 			`/experts-grid N   Set grid columns (1-5)\n\n` +
 			`Ask me to build any Pi agent component!`,
@@ -895,7 +899,7 @@ Each query specifies an expert name and a specific question. Ask about WHAT to b
 
 				const left = theme.fg("dim", ` ${model}`) +
 					theme.fg("muted", " · ") +
-					theme.fg("accent", "Pi Pi");
+					theme.fg("accent", "Eitri");
 				const mid = active > 0
 					? theme.fg("accent", ` ◉ ${active} researching`)
 					: done > 0

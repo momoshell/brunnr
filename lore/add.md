@@ -78,8 +78,8 @@ Prompts are installed to `.pi/prompts/<prompt-name>.md`.
 Pi extensions are TypeScript modules loaded with `pi -e <path>`. They register tools, commands, shortcuts, and custom UI:
 
 ```bash
-# Add the pi-pi meta-agent that builds Pi agents
-just -f ~/.config/brunnr/justfile add extension pi-pi
+# Add the eitri meta-agent that builds Pi agents
+just -f ~/.config/brunnr/justfile add extension eitri
 ```
 
 Single-file extensions install to `.pi/extensions/<name>.ts`. **Directory-style extensions** route their files across multiple targets per the brunnr convention:
@@ -90,7 +90,7 @@ Single-file extensions install to `.pi/extensions/<name>.ts`. **Directory-style 
 | `agents/<sub>/...` | `.pi/agents/<sub>/...` |
 | `themes/<sub>/...` | `.pi/themes/<sub>/...` |
 
-For example, `add extension pi-pi` installs `pi-pi.ts` to `.pi/extensions/` *and* the `agents/pi-pi/` expert tree to `.pi/agents/pi-pi/`.
+For example, `add extension eitri` installs `eitri.ts` to `.pi/extensions/` *and* the `agents/eitri/` expert tree to `.pi/agents/eitri/`.
 
 ## Adding Themes
 

@@ -323,10 +323,10 @@ prompts:
 # Override default install path via `install_to` if needed.
 # =============================================================================
 extensions:
-  - name: pi-pi
-    description: "Meta-agent that builds Pi agents — orchestrator + parallel/chain research across domain experts (extensions, themes, skills, settings, TUI, prompts, agents, keybindings, CLI). Hardened with ctx.signal abort handling, user/project agent scope split, truncateHead helper, theme-token UI, chain mode with {previous} substitution, usage stats, and a 4-way concurrency cap."
-    source: extensions/pi-pi/
-    tags: [meta-agent, parallel-research, pi-builder, orchestrator]
+  - name: eitri
+    description: "Meta-agent that builds Pi agents — orchestrator + parallel/chain research across domain experts (extensions, themes, skills, settings, TUI, prompts, agents, keybindings, CLI). Hardened with ctx.signal abort handling, user/project agent scope split, truncateHead helper, theme-token UI, chain mode with {previous} substitution, usage stats, and a 4-way concurrency cap. Named after Eitri, the master dwarf smith of Norse myth — counterpart to brunnr (the well of wisdom the experts draw from)."
+    source: extensions/eitri/
+    tags: [meta-agent, parallel-research, smith, orchestrator]
     origin: https://github.com/badlogic/pi-vs-claude-code
     dependencies:
       skills: []

@@ -323,7 +323,7 @@ Add an item from brunnr to the current project.
 just -f $BRUNNR_HOME/justfile add skill code-reviewer
 just -f $BRUNNR_HOME/justfile add agent security-auditor
 just -f $BRUNNR_HOME/justfile add prompt pr-description
-just -f $BRUNNR_HOME/justfile add extension pi-pi
+just -f $BRUNNR_HOME/justfile add extension eitri
 just -f $BRUNNR_HOME/justfile add theme rose-pine
 ```
 
@@ -347,7 +347,7 @@ Remove an item from the current project.
 **Usage**:
 ```bash
 just -f $BRUNNR_HOME/justfile remove skill code-reviewer
-just -f $BRUNNR_HOME/justfile remove extension pi-pi
+just -f $BRUNNR_HOME/justfile remove extension eitri
 ```
 
 ### push <section> <name>

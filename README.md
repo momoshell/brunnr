@@ -151,10 +151,10 @@ brunnr/
 │   ├── skill-status.md              # /skill-status
 │   └── agent-status.md              # /agent-status
 ├── extensions/         # Pi TypeScript extensions (single files OR directory packages)
-│   └── pi-pi/                       # Meta-agent that builds Pi agents (parallel/chain expert research)
-│       ├── pi-pi.ts
-│       └── agents/pi-pi/            # → routed to .pi/agents/pi-pi/ on install
-│           ├── pi-orchestrator.md
+│   └── eitri/                       # Meta-agent that builds Pi agents (parallel/chain expert research)
+│       ├── eitri.ts
+│       └── agents/eitri/            # → routed to .pi/agents/eitri/ on install
+│           ├── eitri-orchestrator.md
 │           └── *-expert.md          # 9 domain experts
 ├── themes/             # Pi colour themes (.json files; empty for now)
 └── lore/              # Usage guides
@@ -207,24 +207,24 @@ brunnr sync
 brunnr install
 ```
 
-## Building Pi components with pi-pi
+## Building Pi components with Eitri
 
-The `pi-pi` extension is a meta-agent that **builds new Pi components** — extensions, skills, agents, prompts, themes, settings — by dispatching a team of research experts that fetch fresh upstream Pi docs, then synthesizing their findings and writing the files. Reach for it whenever the alternative is reading half a dozen pages of [pi-mono](https://github.com/badlogic/pi-mono) docs to figure out how to register a tool, wire a custom widget, or set up a new theme.
+The `eitri` extension is a meta-agent that **builds new Pi components** — extensions, skills, agents, prompts, themes, settings — by dispatching a team of research experts that fetch fresh upstream Pi docs, then synthesizing their findings and writing the files. Reach for it whenever the alternative is reading half a dozen pages of [pi-mono](https://github.com/badlogic/pi-mono) docs to figure out how to register a tool, wire a custom widget, or set up a new theme. (Eitri is the master dwarf smith of Norse myth — the natural counterpart to brunnr, the well of wisdom the experts draw from.)
 
 ### Install and launch
 
 ```bash
-# Add the pi-pi extension to your project — directory-routed install
-brunnr add extension pi-pi
+# Add the eitri extension to your project — directory-routed install
+brunnr add extension eitri
 # This drops:
-#   .pi/extensions/pi-pi.ts
-#   .pi/agents/pi-pi/{pi-orchestrator,ext,theme,skill,config,tui,prompt,agent,keybinding,cli}-expert.md
+#   .pi/extensions/eitri.ts
+#   .pi/agents/eitri/{eitri-orchestrator,ext,theme,skill,config,tui,prompt,agent,keybinding,cli}-expert.md
 
-# Launch Pi with pi-pi loaded
-pi -e .pi/extensions/pi-pi.ts
+# Launch Pi with eitri loaded
+pi -e .pi/extensions/eitri.ts
 ```
 
-You'll see a grid of expert cards above the editor and a `Pi Pi (9 experts)` status. Type a build request:
+You'll see a grid of expert cards above the editor and an `Eitri (9 experts)` status. Type a build request:
 
 ```
 Build a Pi extension that watches `.trigger` and replays its contents into the editor on save.
@@ -261,25 +261,25 @@ Each expert fetches fresh docs from `pi-mono` on first query (firecrawl with `cu
 
 ### Where experts live (and the safety check)
 
-pi-pi loads expert definitions from two locations:
+Eitri loads expert definitions from two locations:
 
 | Path | Trusted? |
 |---|---|
-| `~/.pi/agent/agents/pi-pi/` | Yes — user-installed, always loaded |
-| `<project>/.pi/agents/pi-pi/` | No — pi-pi prompts via `ctx.ui.confirm()` before loading; project-level entries shadow user-level on name collision |
+| `~/.pi/agent/agents/eitri/` | Yes — user-installed, always loaded |
+| `<project>/.pi/agents/eitri/` | No — Eitri prompts via `ctx.ui.confirm()` before loading; project-level entries shadow user-level on name collision |
 
 In headless mode (`--mode json`) project-level experts are never auto-loaded. Project-controlled experts can execute arbitrary subagent system prompts, so the confirmation prompt is the safety gate.
 
-### pi-pi vs. the optimizers
+### Eitri vs. the optimizers
 
 | You want to… | Use |
 |---|---|
-| Build a *new* Pi component from scratch | `pi-pi` |
+| Build a *new* Pi component from scratch | `eitri` |
 | Improve an *existing* skill against evals | `/autoresearch-skill` → `/autoresearch-skill-gepa` if it plateaus, or `/autoresearch-pipeline` for hands-off |
 | Improve an *existing* agent `.md` against trajectory evals | `/autoresearch-agent` |
 | Generate evals before optimizing | `/gen-evals` (skills) or `/gen-evals-agent` (agents) |
 
-Build first with pi-pi, then sharpen with the optimizers.
+Build first with Eitri, then sharpen with the optimizers.
 
 ## Skill Optimization (autoresearch + GEPA)
 
