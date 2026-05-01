@@ -30,10 +30,10 @@ AI: [security-auditor skill activates based on keywords]
 
 ### Skill Location
 
-Installed skills are in `.claude/skills/<skill-name>/`:
+Installed skills are in `.pi/skills/<skill-name>/`:
 
 ```
-.claude/skills/
+.pi/skills/
 ├── code-reviewer/
 │   └── SKILL.md
 ├── test-writer/
@@ -60,10 +60,10 @@ AI: [activates as security-auditor agent]
 
 ### Agent Location
 
-Installed agents are in `.claude/agents/`:
+Installed agents are in `.pi/agents/`:
 
 ```
-.claude/agents/
+.pi/agents/
 ├── security-auditor.md
 ├── performance-reviewer.md
 └── docs-checker.md
@@ -91,10 +91,10 @@ AI: [applies commit-message prompt template]
 
 ### Prompt Location
 
-Installed prompts are in `.claude/commands/`:
+Installed prompts are in `.pi/prompts/`:
 
 ```
-.claude/commands/
+.pi/prompts/
 ├── pr-description.md
 ├── commit-message.md
 └── code-explain.md
@@ -176,7 +176,7 @@ Install any required dependencies using `just add`.
 
 Verify the skill is installed:
 ```bash
-ls .claude/skills/
+ls .pi/skills/
 ```
 
 If missing, install it:
@@ -188,14 +188,14 @@ just -f ~/.config/brunnr/justfile add skill <name>
 
 Check that the agent file exists and is valid:
 ```bash
-cat .claude/agents/<agent-name>.md
+cat .pi/agents/<agent-name>.md
 ```
 
 ### "Prompt not recognized"
 
 Ensure the prompt is in the correct location:
 ```bash
-ls .claude/commands/
+ls .pi/prompts/
 ```
 
 ## See Also

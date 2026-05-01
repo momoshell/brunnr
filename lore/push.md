@@ -31,7 +31,7 @@ Where:
 just -f ~/.config/brunnr/justfile push skill my-improved-skill
 ```
 
-This copies `.claude/skills/my-improved-skill/` to `~/.config/brunnr/skills/`.
+This copies `.pi/skills/my-improved-skill/` to `~/.config/brunnr/skills/`.
 
 ## Pushing Agents
 
@@ -40,7 +40,7 @@ This copies `.claude/skills/my-improved-skill/` to `~/.config/brunnr/skills/`.
 just -f ~/.config/brunnr/justfile push agent my-improved-agent
 ```
 
-This copies `.claude/agents/my-improved-agent.md` to `~/.config/brunnr/agents/`.
+This copies `.pi/agents/my-improved-agent.md` to `~/.config/brunnr/agents/`.
 
 ## Pushing Prompts
 
@@ -49,7 +49,7 @@ This copies `.claude/agents/my-improved-agent.md` to `~/.config/brunnr/agents/`.
 just -f ~/.config/brunnr/justfile push prompt my-improved-prompt
 ```
 
-This copies `.claude/commands/my-improved-prompt.md` to `~/.config/brunnr/prompts/`.
+This copies `.pi/prompts/my-improved-prompt.md` to `~/.config/brunnr/prompts/`.
 
 ## Safety Behavior
 
@@ -97,14 +97,14 @@ $ just -f ~/.config/brunnr/justfile push skill code-reviewer
 Warning: skill 'code-reviewer' already exists in brunnr
 Review differences manually before overwriting.
 Source: ~/.config/brunnr/skills/code-reviewer
-Target: .claude/skills/code-reviewer
+Target: .pi/skills/code-reviewer
 ```
 
 To update an existing item, manually compare and copy:
 
 1. **Compare versions**:
    ```bash
-   diff -r ~/.config/brunnr/skills/code-reviewer .claude/skills/code-reviewer
+   diff -r ~/.config/brunnr/skills/code-reviewer .pi/skills/code-reviewer
    # or use a visual diff tool
    ```
 
@@ -113,7 +113,7 @@ To update an existing item, manually compare and copy:
 3. **Manually copy after reviewing**:
    ```bash
    # Copy from your project to brunnr
-   cp -r .claude/skills/code-reviewer ~/.config/brunnr/skills/
+   cp -r .pi/skills/code-reviewer ~/.config/brunnr/skills/
    ```
 
 4. **Update library.yaml if needed** (e.g., description, tags)

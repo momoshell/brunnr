@@ -103,13 +103,13 @@ To search only items installed in your current project:
 
 ```bash
 # Search installed skills
-grep -r "search-term" .claude/skills/
+grep -r "search-term" .pi/skills/
 
 # Search installed agents
-grep -r "search-term" .claude/agents/
+grep -r "search-term" .pi/agents/
 
 # Search installed prompts
-grep -r "search-term" .claude/commands/
+grep -r "search-term" .pi/prompts/
 ```
 
 ## Finding Dependencies

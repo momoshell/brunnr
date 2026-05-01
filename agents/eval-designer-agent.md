@@ -15,8 +15,8 @@ You generate eval suites for **agent** `.md` files. Unlike skill evals (single p
 
 | Target | Use |
 |---|---|
-| `.claude/skills/<name>/SKILL.md` | `eval-designer` (skill evals) |
-| `.claude/agents/<name>.md` | **`eval-designer-agent` (this agent)** |
+| `.pi/skills/<name>/SKILL.md` | `eval-designer` (skill evals) |
+| `.pi/agents/<name>.md` | **`eval-designer-agent` (this agent)** |
 
 Agent evals cost more to run (multi-turn + tool calls) and need more setup (fixtures, reset commands), so the eval suite is typically smaller (5–15 cases) and leans even harder on deterministic checks.
 
@@ -34,7 +34,7 @@ Agent evals cost more to run (multi-turn + tool calls) and need more setup (fixt
 
 | Parameter | Example | Notes |
 |---|---|---|
-| `AGENT_PATH` | `.claude/agents/code-reviewer.md` | Path to the agent file to design evals for |
+| `AGENT_PATH` | `.pi/agents/code-reviewer.md` | Path to the agent file to design evals for |
 | `EVAL_OUTPUT` | `evals/evals.json` | Where to write the eval file |
 | `FIXTURES_DIR` | `evals/fixtures/` | Where to put fixture directories |
 

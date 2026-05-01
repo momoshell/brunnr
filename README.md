@@ -1,8 +1,8 @@
 # brunnr
 
-> A reference-first catalog for skills, agents, prompts, and multi-agent prompts.
+> A reference-first catalog for [Pi](https://github.com/badlogic/pi-mono) — skills, agents, prompts, extensions, and themes.
 
-brunnr is your team's central well of agentic knowledge. The `library.yaml` file is the single source of truth—it catalogs what exists and where to find it. Content can be stored in the brunnr repository (repo-backed) or referenced from external locations (local paths or remote URLs).
+brunnr is your team's central well of agentic knowledge for the Pi coding agent. The `library.yaml` file is the single source of truth—it catalogs what exists and where to find it. Content can be stored in the brunnr repository (repo-backed) or referenced from external locations (local paths or remote URLs).
 
 ## Why brunnr?
 
@@ -12,6 +12,7 @@ brunnr is your team's central well of agentic knowledge. The `library.yaml` file
 - **Cross-device**: Sync your personal catalog across machines
 - **Team sharing**: Share vetted prompts and workflows with your entire team
 - **Versioned**: Track changes to your AI components like any other code
+- **Pi-native**: Default install paths land in the directories Pi reads natively — no auxiliary extension or settings shim required
 
 ## Prerequisites
 
@@ -19,9 +20,9 @@ brunnr is your team's central well of agentic knowledge. The `library.yaml` file
 |------|---------------|---------|
 | **git** | Version control, syncing brunnr across devices | [git-scm.com](https://git-scm.com) |
 | **just** | Runs brunnr commands (modern make alternative) | `brew install just` or [just.systems](https://just.systems) |
-| **Claude Code** | AI assistant that uses your skills, agents, and prompts | [claude.ai/code](https://claude.ai/code) |
+| **Pi** | The coding agent that uses your skills, agents, prompts, extensions, themes | [pi-mono](https://github.com/badlogic/pi-mono) |
 
-brunnr manages files that Claude Code reads from `.claude/` in your project. The `just` commands handle copying files between brunnr and your projects. Claude Code reads the installed skills/agents/prompts at runtime.
+brunnr manages files that Pi reads from `.pi/` in your project (and `~/.pi/agent/` globally). The `just` commands handle copying files between brunnr and your projects. Pi reads the installed content at runtime — `.pi/skills/`, `.pi/agents/`, `.pi/prompts/`, `.pi/extensions/`, `.pi/themes/` are all native discovery paths.
 
 ## Quick Start
 
@@ -43,7 +44,7 @@ brunnr install
 brunnr add skill code-reviewer
 ```
 
-After `install`, your project will have `.claude/skills/`, `.claude/agents/`, and `.claude/commands/` directories. Claude Code automatically picks up anything placed there.
+After `install`, your project will have `.pi/skills/`, `.pi/agents/`, `.pi/prompts/`, `.pi/extensions/`, and `.pi/themes/` directories. Pi automatically discovers anything placed there.
 
 ## Core Concepts
 
@@ -52,9 +53,11 @@ After `install`, your project will have `.claude/skills/`, `.claude/agents/`, an
 | **brunnr** | A reference-first catalog where `library.yaml` is the authority pointing to content |
 | **library.yaml** | The catalog index—source of truth for what exists and where to find it |
 | **Source types** | Repo-backed (in brunnr), local reference (`file://`), remote reference (GitHub URL) |
-| **Skills** | Reusable capabilities stored in directories and installed to `.claude/skills/` |
-| **Agents** | Specialized AI configurations stored as files and installed to `.claude/agents/` |
-| **Prompts** | Single-shot instructions stored as files and installed to `.claude/commands/` |
+| **Skills** | Reusable capabilities stored in directories and installed to `.pi/skills/` |
+| **Agents** | Specialized AI configurations stored as files and installed to `.pi/agents/` |
+| **Prompts** | Single-shot instructions stored as files and installed to `.pi/prompts/` |
+| **Extensions** | Pi TypeScript extensions installed to `.pi/extensions/` (single file or directory tree) |
+| **Themes** | Pi colour themes (.json) installed to `.pi/themes/` |
 | **Multi-agent prompts** | Orchestrated workflows using `type: multi-agent`; stored alongside regular prompts |
 | **SKILL.md** | The specification document defining the brunnr format and behavior |
 | **lore/** | Task-oriented guides for common operations |
@@ -108,15 +111,17 @@ agents:
 
 ## Catalog Sections
 
-brunnr organizes content into three top-level sections:
+brunnr organizes content into five top-level sections:
 
 | Section | Location in brunnr | Installs to | Description |
 |---------|-------------------|-------------|-------------|
-| **skills** | `skills/` or external | `.claude/skills/` | Reusable capabilities (analysis, generation, review) |
-| **agents** | `agents/` or external | `.claude/agents/` | Specialized agent configurations |
-| **prompts** | `prompts/` or external | `.claude/commands/` | Single-shot prompts and templates |
+| **skills** | `skills/` or external | `.pi/skills/` | Reusable capabilities (analysis, generation, review) |
+| **agents** | `agents/` or external | `.pi/agents/` | Specialized agent configurations |
+| **prompts** | `prompts/` or external | `.pi/prompts/` | Single-shot prompts and templates |
+| **extensions** | `extensions/` or external | `.pi/extensions/` (+ routed subtree) | Pi TypeScript extensions, single file or directory tree |
+| **themes** | `themes/` or external | `.pi/themes/` | Pi colour themes (.json with all 51 tokens) |
 
-> **Note**: Multi-agent prompts are a prompt subtype (use `type: multi-agent`), not a separate section.
+> **Note**: Multi-agent prompts are a prompt subtype (use `type: multi-agent`), not a separate section. Directory-style extensions route their files across multiple install dirs per the convention in `SKILL.md`.
 
 ## Repository Structure
 
@@ -145,6 +150,13 @@ brunnr/
 │   ├── fork-agent.md                # /fork-agent
 │   ├── skill-status.md              # /skill-status
 │   └── agent-status.md              # /agent-status
+├── extensions/         # Pi TypeScript extensions (single files OR directory packages)
+│   └── pi-pi/                       # Meta-agent that builds Pi agents (parallel/chain expert research)
+│       ├── pi-pi.ts
+│       └── agents/pi-pi/            # → routed to .pi/agents/pi-pi/ on install
+│           ├── pi-orchestrator.md
+│           └── *-expert.md          # 9 domain experts
+├── themes/             # Pi colour themes (.json files; empty for now)
 └── lore/              # Usage guides
     ├── install.md      # Install brunnr into a project
     ├── add.md          # Add items to your project
@@ -169,7 +181,7 @@ brunnr add skill code-reviewer
 brunnr add skill test-writer
 
 # 3. Use them in your project
-# (Skills are now available to Claude in .claude/skills/)
+# (Skills are now available to Pi in .pi/skills/)
 
 # 4. Push improvements back to brunnr (for repo-backed skills)
 brunnr push skill code-reviewer
@@ -277,7 +289,7 @@ The agent takes these parameters:
 | Parameter | Example | Purpose |
 |---|---|---|
 | `SKILL` | `code-reviewer` | Skill name |
-| `SKILL_PATH` | `.claude/skills/code-reviewer/SKILL.md` | File to optimize |
+| `SKILL_PATH` | `.pi/skills/code-reviewer/SKILL.md` | File to optimize |
 | `EVAL_FILE` | `evals/evals.json` | Eval suite to score against |
 | `RUNS` | `3` | Times to run the full eval suite per experiment (averaged for stability) |
 | `RUN_TAG` | `apr14` | Short tag for the git branch |
@@ -393,7 +405,7 @@ Same keep/discard loop, same git-based experiment tracking — just without the 
 
 ### Agents and prompts
 
-**Agents** are autonomous AI configurations — they define how Claude behaves during a task. Install them with `brunnr add agent <name>`, which places them in `.claude/agents/`. You can then invoke an agent in Claude Code by selecting it from the agent picker or referencing it directly.
+**Agents** are autonomous AI configurations — they define how the underlying agent behaves during a task. Install them with `brunnr add agent <name>`, which places them in `.pi/agents/`. Pi discovers agents in this directory natively; reference them via the system-select extension or via the `/system` command picker.
 
 | Agent | Purpose |
 |-------|---------|
@@ -404,21 +416,21 @@ Same keep/discard loop, same git-based experiment tracking — just without the 
 | `eval-designer` | Generate `evals.json` with binary assertions for a skill |
 | `eval-designer-agent` | Generate trajectory-style `evals.json` for an agent (fixtures, reset, turn caps, safety checks) |
 
-**Prompts** are slash commands you type in Claude Code. Install them with `brunnr add prompt <name>`, which places them in `.claude/commands/`. Then type the command in any Claude Code session to run it.
+**Prompts** are slash commands you type at the Pi prompt. Install them with `brunnr add prompt <name>`, which places them in `.pi/prompts/`. Then type the command in any Pi session to run it.
 
 | Prompt | How to use | What it does |
 |--------|-----------|--------------|
-| `/autoresearch` | Type in Claude Code | Collects target, metric, and run command, then starts the generic optimization loop |
-| `/autoresearch-skill` | Type in Claude Code | Hill-climb skill optimization; stops at plateau with diagnosis |
-| `/autoresearch-skill-gepa` | Type in Claude Code | GEPA-style skill optimization — reflection + Pareto front. Run after `/autoresearch-skill` plateaus. |
-| `/autoresearch-pipeline` | Type in Claude Code | Runs hill-climb → GEPA → compaction with auto-escalation. Default for "best result, hands-off." |
-| `/autoresearch-agent` | Type in Claude Code | GEPA-style optimization for an agent .md file (skips hill-climb stage) |
-| `/gen-evals` | Type in Claude Code | Generates `evals.json` for a skill |
-| `/gen-evals-agent` | Type in Claude Code | Generates trajectory-style `evals.json` for an agent |
-| `/fork-skill` | Type in Claude Code | Copies an external skill into brunnr so it can be edited and optimized |
-| `/fork-agent` | Type in Claude Code | Copies an external agent into brunnr so it can be edited and optimized |
-| `/skill-status` | Type in Claude Code | Scans all skills and reports which ones need optimization next |
-| `/agent-status` | Type in Claude Code | Scans all agents and reports which ones need optimization next (safety-aware) |
+| `/autoresearch` | Type in Pi | Collects target, metric, and run command, then starts the generic optimization loop |
+| `/autoresearch-skill` | Type in Pi | Hill-climb skill optimization; stops at plateau with diagnosis |
+| `/autoresearch-skill-gepa` | Type in Pi | GEPA-style skill optimization — reflection + Pareto front. Run after `/autoresearch-skill` plateaus. |
+| `/autoresearch-pipeline` | Type in Pi | Runs hill-climb → GEPA → compaction with auto-escalation. Default for "best result, hands-off." |
+| `/autoresearch-agent` | Type in Pi | GEPA-style optimization for an agent .md file (skips hill-climb stage) |
+| `/gen-evals` | Type in Pi | Generates `evals.json` for a skill |
+| `/gen-evals-agent` | Type in Pi | Generates trajectory-style `evals.json` for an agent |
+| `/fork-skill` | Type in Pi | Copies an external skill into brunnr so it can be edited and optimized |
+| `/fork-agent` | Type in Pi | Copies an external agent into brunnr so it can be edited and optimized |
+| `/skill-status` | Type in Pi | Scans all skills and reports which ones need optimization next |
+| `/agent-status` | Type in Pi | Scans all agents and reports which ones need optimization next (safety-aware) |
 
 ## Safety & Consistency
 
@@ -435,11 +447,13 @@ brunnr prioritizes safe operations:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `BRUNNR_HOME` | `~/.config/brunnr` | Path to brunnr repository |
-| `BRUNNR_SKILLS_DIR` | `.claude/skills` | Where to install skills |
-| `BRUNNR_AGENTS_DIR` | `.claude/agents` | Where to install agents |
-| `BRUNNR_PROMPTS_DIR` | `.claude/commands` | Where to install prompts |
+| `BRUNNR_SKILLS_DIR` | `.pi/skills` | Where to install skills |
+| `BRUNNR_AGENTS_DIR` | `.pi/agents` | Where to install agents |
+| `BRUNNR_PROMPTS_DIR` | `.pi/prompts` | Where to install prompts |
+| `BRUNNR_EXTENSIONS_DIR` | `.pi/extensions` | Where to install Pi extensions |
+| `BRUNNR_THEMES_DIR` | `.pi/themes` | Where to install Pi themes |
 
-The defaults work out of the box for most setups. If you need to override them, add the variables to your shell profile:
+The defaults work out of the box — Pi reads each of these paths natively. If you need to override them, add the variables to your shell profile:
 
 **bash** (`~/.bashrc` or `~/.bash_profile`):
 ```bash
@@ -458,7 +472,7 @@ set -gx BRUNNR_HOME $HOME/.config/brunnr
 
 You only need to set variables that differ from the defaults. The most common override is `BRUNNR_HOME` if you cloned brunnr somewhere other than `~/.config/brunnr`.
 
-The `BRUNNR_SKILLS_DIR`, `BRUNNR_AGENTS_DIR`, and `BRUNNR_PROMPTS_DIR` variables are relative to your project root and control where `brunnr install` and `brunnr add` place files. Change these only if your project uses a non-standard `.claude/` layout.
+The five `BRUNNR_*_DIR` variables are relative to your project root and control where `brunnr install` and `brunnr add` place files. Change these only if your project uses a non-standard `.pi/` layout — Pi's native discovery is the reason these defaults exist.
 
 ### library.yaml
 

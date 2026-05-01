@@ -23,7 +23,7 @@ Where:
 just -f ~/.config/brunnr/justfile remove skill code-reviewer
 ```
 
-This removes `.claude/skills/code-reviewer/` and its contents.
+This removes `.pi/skills/code-reviewer/` and its contents.
 
 ## Removing Agents
 
@@ -32,7 +32,7 @@ This removes `.claude/skills/code-reviewer/` and its contents.
 just -f ~/.config/brunnr/justfile remove agent security-auditor
 ```
 
-This removes `.claude/agents/security-auditor.md`.
+This removes `.pi/agents/security-auditor.md`.
 
 ## Removing Prompts
 
@@ -41,7 +41,7 @@ This removes `.claude/agents/security-auditor.md`.
 just -f ~/.config/brunnr/justfile remove prompt pr-description
 ```
 
-This removes `.claude/commands/pr-description.md`.
+This removes `.pi/prompts/pr-description.md`.
 
 ## Safety Behavior
 
@@ -78,14 +78,14 @@ just -f ~/.config/brunnr/justfile remove skill orphaned-skill
 
 | Section | Target Location | What Gets Removed |
 |---------|----------------|-------------------|
-| skill | `.claude/skills/<name>/` | Entire directory and contents |
-| agent | `.claude/agents/<name>.md` | Single markdown file |
-| prompt | `.claude/commands/<name>.md` | Single markdown file |
+| skill | `.pi/skills/<name>/` | Entire directory and contents |
+| agent | `.pi/agents/<name>.md` | Single markdown file |
+| prompt | `.pi/prompts/<name>.md` | Single markdown file |
 
 ## What Does NOT Get Removed
 
 The `remove` command will never:
-- Remove files outside `.claude/skills/`, `.claude/agents/`, or `.claude/commands/`
+- Remove files outside `.pi/skills/`, `.pi/agents/`, or `.pi/prompts/`
 - Remove files not installed by brunnr
 - Remove directories that contain non-brunnr files
 - Delete parent directories
@@ -101,7 +101,7 @@ Error: skill 'nonexistent' is not installed
 
 Verify the item exists:
 ```bash
-ls .claude/skills/
+ls .pi/skills/
 ```
 
 ### "Permission denied"
@@ -110,10 +110,10 @@ If files are read-only or owned by another user:
 
 ```bash
 # Check permissions
-ls -la .claude/skills/<name>/
+ls -la .pi/skills/<name>/
 
 # Fix if needed
-chmod -R u+w .claude/skills/<name>/
+chmod -R u+w .pi/skills/<name>/
 ```
 
 ## Best Practices
@@ -130,7 +130,7 @@ chmod -R u+w .claude/skills/<name>/
 just -f ~/.config/brunnr/justfile list skill
 
 # 2. Check for dependents (review library.yaml or SKILL.md files)
-grep -r "code-reviewer" .claude/
+grep -r "code-reviewer" .pi/
 
 # 3. Remove dependent items first
 just -f ~/.config/brunnr/justfile remove agent security-auditor

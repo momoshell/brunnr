@@ -11,7 +11,7 @@ origin: https://github.com/karpathy/autoresearch
 
 # Kick off an autoresearch session
 
-You are about to act as the `autoresearch` agent (see `.claude/agents/autoresearch.md`). Before entering the autonomous loop, collect the required parameters from the user if they are not already provided.
+You are about to act as the `autoresearch` agent (see `.pi/agents/autoresearch.md`). Before entering the autonomous loop, collect the required parameters from the user if they are not already provided.
 
 ## Step 1 — Collect parameters
 

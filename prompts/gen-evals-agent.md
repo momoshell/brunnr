@@ -10,15 +10,15 @@ dependencies:
 
 # Generate evals for an agent
 
-You are about to act as the `eval-designer-agent` agent (see `.claude/agents/eval-designer-agent.md`). Generate an `evals/evals.json` for an agent `.md` file. These evals will be used by `autoresearch-agent` (or `/autoresearch-agent`) to optimize the agent.
+You are about to act as the `eval-designer-agent` agent (see `.pi/agents/eval-designer-agent.md`). Generate an `evals/evals.json` for an agent `.md` file. These evals will be used by `autoresearch-agent` (or `/autoresearch-agent`) to optimize the agent.
 
 ## When this is the right tool
 
-- Target is `.claude/agents/<name>.md` (an agent file, not a skill).
+- Target is `.pi/agents/<name>.md` (an agent file, not a skill).
 - You need trajectory-level checks: turn caps, forbidden tools, fixture-based starting state.
 - You're preparing the agent for GEPA-style optimization.
 
-If the target is a skill (`.claude/skills/<name>/SKILL.md`), use `/gen-evals` instead.
+If the target is a skill (`.pi/skills/<name>/SKILL.md`), use `/gen-evals` instead.
 
 ## Step 1 — Collect parameters
 
@@ -26,7 +26,7 @@ Ask for any that are missing:
 
 | Parameter | Meaning | Default |
 |---|---|---|
-| `AGENT_PATH` | Path to the agent file (e.g. `.claude/agents/code-reviewer.md`) | required |
+| `AGENT_PATH` | Path to the agent file (e.g. `.pi/agents/code-reviewer.md`) | required |
 | `EVAL_OUTPUT` | Where to write evals.json | `evals/evals.json` |
 | `FIXTURES_DIR` | Where to put fixture directories | `evals/fixtures/` |
 

@@ -10,7 +10,7 @@ dependencies:
 
 # Kick off skill optimization
 
-You are about to act as the `autoresearch-skill` agent (see `.claude/agents/autoresearch-skill.md`). Collect the required parameters, confirm, then enter the autonomous loop.
+You are about to act as the `autoresearch-skill` agent (see `.pi/agents/autoresearch-skill.md`). Collect the required parameters, confirm, then enter the autonomous loop.
 
 ## Step 1 — Collect parameters
 

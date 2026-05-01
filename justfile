@@ -1,4 +1,4 @@
-# justfile — brunnr terminal shortcuts
+# justfile — brunnr terminal shortcuts (Pi runtime)
 #
 # Usage: just -f ~/.config/brunnr/justfile <command>
 # Or: alias brunnr='just -f ~/.config/brunnr/justfile'
@@ -6,25 +6,29 @@
 # Default path to brunnr repository
 export BRUNNR_HOME := env_var_or_default("BRUNNR_HOME", "~/.config/brunnr")
 
-# Target directories in the current project
-export SKILLS_DIR := env_var_or_default("BRUNNR_SKILLS_DIR", ".claude/skills")
-export AGENTS_DIR := env_var_or_default("BRUNNR_AGENTS_DIR", ".claude/agents")
-export PROMPTS_DIR := env_var_or_default("BRUNNR_PROMPTS_DIR", ".claude/commands")
+# Target directories in the current project (Pi defaults — Pi reads these natively)
+export SKILLS_DIR := env_var_or_default("BRUNNR_SKILLS_DIR", ".pi/skills")
+export AGENTS_DIR := env_var_or_default("BRUNNR_AGENTS_DIR", ".pi/agents")
+export PROMPTS_DIR := env_var_or_default("BRUNNR_PROMPTS_DIR", ".pi/prompts")
+export EXTENSIONS_DIR := env_var_or_default("BRUNNR_EXTENSIONS_DIR", ".pi/extensions")
+export THEMES_DIR := env_var_or_default("BRUNNR_THEMES_DIR", ".pi/themes")
 
 # Source directories in brunnr
 SKILLS_SRC := BRUNNR_HOME / "skills"
 AGENTS_SRC := BRUNNR_HOME / "agents"
 PROMPTS_SRC := BRUNNR_HOME / "prompts"
+EXTENSIONS_SRC := BRUNNR_HOME / "extensions"
+THEMES_SRC := BRUNNR_HOME / "themes"
 
 # Default recipe — show help
 @default:
-    echo "brunnr — Private catalog for skills, agents, and prompts"
+    echo "brunnr — Pi catalog for skills, agents, prompts, extensions, themes"
     echo ""
     echo "Usage: just -f {{BRUNNR_HOME}}/justfile <command>"
     echo ""
     echo "Commands:"
     echo "  install              Initialize brunnr in current project"
-    echo "  add <section> <name> Add item to current project (section: skill, agent, prompt)"
+    echo "  add <section> <name> Add item to current project (section: skill, agent, prompt, extension, theme)"
     echo "  remove <section> <name> Remove item from current project"
     echo "  push <section> <name> Push local changes back to brunnr"
     echo "  list [section]       List available/installed items"
@@ -32,11 +36,13 @@ PROMPTS_SRC := BRUNNR_HOME / "prompts"
     echo "  search <query>       Search the catalog"
     echo "  help                 Show this help message"
     echo ""
-    echo "Environment variables:"
-    echo "  BRUNNR_HOME          Path to brunnr repository (default: ~/.config/brunnr)"
-    echo "  BRUNNR_SKILLS_DIR    Target directory for skills (default: .claude/skills)"
-    echo "  BRUNNR_AGENTS_DIR    Target directory for agents (default: .claude/agents)"
-    echo "  BRUNNR_PROMPTS_DIR   Target directory for prompts (default: .claude/commands)"
+    echo "Environment variables (Pi defaults — Pi reads these natively):"
+    echo "  BRUNNR_HOME             Path to brunnr repository (default: ~/.config/brunnr)"
+    echo "  BRUNNR_SKILLS_DIR       Target directory for skills      (default: .pi/skills)"
+    echo "  BRUNNR_AGENTS_DIR       Target directory for agents      (default: .pi/agents)"
+    echo "  BRUNNR_PROMPTS_DIR      Target directory for prompts     (default: .pi/prompts)"
+    echo "  BRUNNR_EXTENSIONS_DIR   Target directory for extensions  (default: .pi/extensions)"
+    echo "  BRUNNR_THEMES_DIR       Target directory for themes      (default: .pi/themes)"
 
 # Show help
 @help: default
@@ -44,11 +50,13 @@ PROMPTS_SRC := BRUNNR_HOME / "prompts"
 # Install brunnr into the current project
 @install:
     echo "Installing brunnr into current project..."
-    mkdir -p {{SKILLS_DIR}} {{AGENTS_DIR}} {{PROMPTS_DIR}}
+    mkdir -p {{SKILLS_DIR}} {{AGENTS_DIR}} {{PROMPTS_DIR}} {{EXTENSIONS_DIR}} {{THEMES_DIR}}
     echo "Created target directories:"
     echo "  - {{SKILLS_DIR}}"
     echo "  - {{AGENTS_DIR}}"
     echo "  - {{PROMPTS_DIR}}"
+    echo "  - {{EXTENSIONS_DIR}}"
+    echo "  - {{THEMES_DIR}}"
     echo ""
     echo "brunnr is ready. Use 'just -f {{BRUNNR_HOME}}/justfile add <section> <name>' to install items."
 
@@ -75,9 +83,17 @@ add section name:
             DST="{{PROMPTS_DIR}}"
             YAML_KEY="prompts"
             ;;
+        extension)
+            DST="{{EXTENSIONS_DIR}}"
+            YAML_KEY="extensions"
+            ;;
+        theme)
+            DST="{{THEMES_DIR}}"
+            YAML_KEY="themes"
+            ;;
         *)
             echo "Error: Unknown section '$SECTION'"
-            echo "Valid sections: skill, agent, prompt"
+            echo "Valid sections: skill, agent, prompt, extension, theme"
             exit 1
             ;;
     esac
@@ -123,13 +139,21 @@ add section name:
         SKILL_NAME="${SOURCE#skills/}"
         SKILL_NAME="${SKILL_NAME%/SKILL.md}"
         RESOLVED_SRC="$BRUNNR_HOME/skills/$SKILL_NAME"
-        
+
         # Validate that resolved source is a directory for skills
         if [ ! -d "$RESOLVED_SRC" ]; then
             echo "Error: Skill source is not a directory: $RESOLVED_SRC"
             echo "Expected directory for skill: $SKILL_NAME"
             exit 1
         fi
+    elif [[ "$SOURCE" == extensions/* ]]; then
+        # Repo-backed extension — may be a single .ts file or a directory tree
+        EXT_PATH="${SOURCE#extensions/}"
+        EXT_PATH="${EXT_PATH%/}"
+        RESOLVED_SRC="$BRUNNR_HOME/extensions/$EXT_PATH"
+    elif [[ "$SOURCE" == themes/* ]]; then
+        # Repo-backed theme — single .json file
+        RESOLVED_SRC="$BRUNNR_HOME/$SOURCE"
     elif [[ "$SOURCE" == agents/* ]] || [[ "$SOURCE" == prompts/* ]]; then
         # Repo-backed agent/prompt - relative to BRUNNR_HOME
         RESOLVED_SRC="$BRUNNR_HOME/$SOURCE"
@@ -146,27 +170,53 @@ add section name:
     fi
     
     # Check if target already exists
-    if [ -e "$DST/$NAME" ] || [ -e "$DST/$NAME.md" ]; then
+    if [ "$SECTION" = "extension" ] && [ -d "$RESOLVED_SRC" ]; then
+        # Directory-style extensions install to multiple targets — check for the
+        # canonical .ts file at EXTENSIONS_DIR/<name>.ts as the conflict marker.
+        if [ -e "{{EXTENSIONS_DIR}}/$NAME.ts" ]; then
+            echo "Error: extension '$NAME' already installed (found {{EXTENSIONS_DIR}}/$NAME.ts)"
+            echo "Use 'push' to update brunnr with local changes, or remove first."
+            exit 1
+        fi
+    elif [ -e "$DST/$NAME" ] || [ -e "$DST/$NAME.md" ] || [ -e "$DST/$NAME.ts" ] || [ -e "$DST/$NAME.json" ]; then
         echo "Error: $SECTION '$NAME' already installed"
         echo "Use 'push' to update brunnr with local changes, or remove first."
         exit 1
     fi
-    
+
     # Copy files
     echo "Adding $SECTION '$NAME'..."
-    
-    # Ensure destination directory exists
-    mkdir -p "$DST"
-    
-    if [ -d "$RESOLVED_SRC" ]; then
-        # For directories (skills), copy the entire directory to target
-        cp -r "$RESOLVED_SRC" "$DST/"
+
+    if [ "$SECTION" = "extension" ] && [ -d "$RESOLVED_SRC" ]; then
+        # Directory-style extension: route per the brunnr convention.
+        #   <src>/*.ts            → {{EXTENSIONS_DIR}}/   (just the .ts file at top level)
+        #   <src>/agents/<sub>/   → {{AGENTS_DIR}}/<sub>/  (preserves subdir structure)
+        #   <src>/themes/<sub>/   → {{THEMES_DIR}}/<sub>/
+        # Other top-level files (README.md etc.) are ignored.
+        mkdir -p "{{EXTENSIONS_DIR}}" "{{AGENTS_DIR}}" "{{THEMES_DIR}}"
+        shopt -s nullglob
+        for ts in "$RESOLVED_SRC"/*.ts; do
+            [ -f "$ts" ] && cp "$ts" "{{EXTENSIONS_DIR}}/"
+        done
+        if [ -d "$RESOLVED_SRC/agents" ]; then
+            cp -r "$RESOLVED_SRC/agents/." "{{AGENTS_DIR}}/"
+        fi
+        if [ -d "$RESOLVED_SRC/themes" ]; then
+            cp -r "$RESOLVED_SRC/themes/." "{{THEMES_DIR}}/"
+        fi
+        echo "Installed extension '$NAME' (routed to {{EXTENSIONS_DIR}}/, {{AGENTS_DIR}}/, {{THEMES_DIR}}/)"
     else
-        # For files (agents, prompts), copy the file
-        cp "$RESOLVED_SRC" "$DST/"
+        # Ensure destination directory exists
+        mkdir -p "$DST"
+        if [ -d "$RESOLVED_SRC" ]; then
+            # For directories (skills), copy the entire directory to target
+            cp -r "$RESOLVED_SRC" "$DST/"
+        else
+            # For files (agents, prompts, themes, single-file extensions)
+            cp "$RESOLVED_SRC" "$DST/"
+        fi
+        echo "Installed $SECTION '$NAME' to $DST/"
     fi
-    
-    echo "Installed $SECTION '$NAME' to $DST/"
     echo "Dependencies (if any) are documented in library.yaml - install manually if needed."
 
 # Remove an item from the current project
@@ -175,40 +225,61 @@ remove section name:
     set -euo pipefail
     SECTION="{{section}}"
     NAME="{{name}}"
-    
+
     # Map section to target directory
     case "$SECTION" in
-        skill)
-            DST="{{SKILLS_DIR}}"
-            ;;
-        agent)
-            DST="{{AGENTS_DIR}}"
-            ;;
-        prompt)
-            DST="{{PROMPTS_DIR}}"
-            ;;
+        skill)    DST="{{SKILLS_DIR}}" ;;
+        agent)    DST="{{AGENTS_DIR}}" ;;
+        prompt)   DST="{{PROMPTS_DIR}}" ;;
+        extension) DST="{{EXTENSIONS_DIR}}" ;;
+        theme)    DST="{{THEMES_DIR}}" ;;
         *)
             echo "Error: Unknown section '$SECTION'"
-            echo "Valid sections: skill, agent, prompt"
+            echo "Valid sections: skill, agent, prompt, extension, theme"
             exit 1
             ;;
     esac
-    
-    # Check if target exists
-    if [ ! -e "$DST/$NAME" ] && [ ! -e "$DST/$NAME.md" ]; then
-        echo "Error: $SECTION '$NAME' is not installed"
-        exit 1
-    fi
-    
-    # Remove files (safely)
-    echo "Removing $SECTION '$NAME'..."
-    if [ -d "$DST/$NAME" ]; then
-        rm -r "$DST/$NAME"
+
+    if [ "$SECTION" = "extension" ]; then
+        # Directory-style extension: remove the .ts file plus the matching
+        # agents/<name>/ and themes/<name>/ subdirs that were created on install.
+        REMOVED_ANY=0
+        if [ -e "{{EXTENSIONS_DIR}}/$NAME.ts" ]; then
+            rm "{{EXTENSIONS_DIR}}/$NAME.ts"
+            echo "Removed {{EXTENSIONS_DIR}}/$NAME.ts"
+            REMOVED_ANY=1
+        fi
+        if [ -d "{{AGENTS_DIR}}/$NAME" ]; then
+            rm -r "{{AGENTS_DIR}}/$NAME"
+            echo "Removed {{AGENTS_DIR}}/$NAME/"
+            REMOVED_ANY=1
+        fi
+        if [ -d "{{THEMES_DIR}}/$NAME" ]; then
+            rm -r "{{THEMES_DIR}}/$NAME"
+            echo "Removed {{THEMES_DIR}}/$NAME/"
+            REMOVED_ANY=1
+        fi
+        if [ "$REMOVED_ANY" = "0" ]; then
+            echo "Error: extension '$NAME' is not installed"
+            exit 1
+        fi
+        echo "Removed extension '$NAME'"
     else
-        rm "$DST/$NAME.md"
+        # File or directory removal (skill/agent/prompt/theme)
+        if [ ! -e "$DST/$NAME" ] && [ ! -e "$DST/$NAME.md" ] && [ ! -e "$DST/$NAME.json" ]; then
+            echo "Error: $SECTION '$NAME' is not installed"
+            exit 1
+        fi
+        echo "Removing $SECTION '$NAME'..."
+        if [ -d "$DST/$NAME" ]; then
+            rm -r "$DST/$NAME"
+        elif [ -e "$DST/$NAME.json" ]; then
+            rm "$DST/$NAME.json"
+        else
+            rm "$DST/$NAME.md"
+        fi
+        echo "Removed $SECTION '$NAME' from $DST/"
     fi
-    
-    echo "Removed $SECTION '$NAME' from $DST/"
     echo "Note: Dependencies are not automatically removed."
 
 # Push local changes back to brunnr
@@ -237,15 +308,34 @@ push section name:
             DST="{{PROMPTS_DIR}}"
             YAML_KEY="prompts"
             ;;
+        extension)
+            SRC="{{EXTENSIONS_SRC}}"
+            DST="{{EXTENSIONS_DIR}}"
+            YAML_KEY="extensions"
+            ;;
+        theme)
+            SRC="{{THEMES_SRC}}"
+            DST="{{THEMES_DIR}}"
+            YAML_KEY="themes"
+            ;;
         *)
             echo "Error: Unknown section '$SECTION'"
-            echo "Valid sections: skill, agent, prompt"
+            echo "Valid sections: skill, agent, prompt, extension, theme"
             exit 1
             ;;
     esac
+
+    # Directory-style extensions cannot be auto-pushed because their files are
+    # routed across multiple project directories on install. Guide the user.
+    if [ "$SECTION" = "extension" ] && [ -d "$SRC/$NAME" ]; then
+        echo "Error: directory-style extensions cannot be auto-pushed."
+        echo "Files for '$NAME' live in {{EXTENSIONS_DIR}}/, {{AGENTS_DIR}}/, {{THEMES_DIR}}/."
+        echo "Edit them in $SRC/$NAME/ directly, then run: cd {{BRUNNR_HOME}} && git diff"
+        exit 1
+    fi
     
     # Check if local version exists
-    if [ ! -e "$DST/$NAME" ] && [ ! -e "$DST/$NAME.md" ]; then
+    if [ ! -e "$DST/$NAME" ] && [ ! -e "$DST/$NAME.md" ] && [ ! -e "$DST/$NAME.ts" ] && [ ! -e "$DST/$NAME.json" ]; then
         echo "Error: $SECTION '$NAME' not found in current project"
         exit 1
     fi
@@ -329,10 +419,14 @@ push section name:
     echo "Pushing $SECTION '$NAME' to brunnr..."
     if [ -d "$DST/$NAME" ]; then
         cp -r "$DST/$NAME" "$SRC/"
+    elif [ -e "$DST/$NAME.ts" ]; then
+        cp "$DST/$NAME.ts" "$SRC/"
+    elif [ -e "$DST/$NAME.json" ]; then
+        cp "$DST/$NAME.json" "$SRC/"
     else
         cp "$DST/$NAME.md" "$SRC/"
     fi
-    
+
     echo "Pushed $SECTION '$NAME' to $SRC/"
     echo ""
     echo "IMPORTANT: If this is a new item, you must update library.yaml"
@@ -371,34 +465,22 @@ list section="":
     if [ -z "$SECTION" ]; then
         echo "brunnr catalog sections:"
         echo ""
-        
-        # Read from library.yaml
+
         if [ -f "$LIBRARY" ]; then
-            echo "skills:"
-            ruby -ryaml -e "
-                require 'yaml'
-                catalog = YAML.safe_load(File.read('$LIBRARY'), permitted_classes: [], permitted_symbols: [], aliases: false)
-                items = catalog['skills'] || []
-                items.each { |i| puts \"  #{i['name']} - #{i['description']}\" }
-            " 2>/dev/null || echo "  (none)"
-            
-            echo ""
-            echo "agents:"
-            ruby -ryaml -e "
-                require 'yaml'
-                catalog = YAML.safe_load(File.read('$LIBRARY'), permitted_classes: [], permitted_symbols: [], aliases: false)
-                items = catalog['agents'] || []
-                items.each { |i| puts \"  #{i['name']} - #{i['description']}\" }
-            " 2>/dev/null || echo "  (none)"
-            
-            echo ""
-            echo "prompts:"
-            ruby -ryaml -e "
-                require 'yaml'
-                catalog = YAML.safe_load(File.read('$LIBRARY'), permitted_classes: [], permitted_symbols: [], aliases: false)
-                items = catalog['prompts'] || []
-                items.each { |i| puts \"  #{i['name']} - #{i['description']}\" }
-            " 2>/dev/null || echo "  (none)"
+            for sec in skills agents prompts extensions themes; do
+                echo "$sec:"
+                ruby -ryaml -e "
+                    require 'yaml'
+                    catalog = YAML.safe_load(File.read('$LIBRARY'), permitted_classes: [], permitted_symbols: [], aliases: false)
+                    items = catalog['$sec'] || []
+                    if items.empty?
+                        puts '  (none)'
+                    else
+                        items.each { |i| puts \"  #{i['name']} - #{i['description']}\" }
+                    end
+                " 2>/dev/null || echo "  (none)"
+                echo ""
+            done
         else
             echo "  Error: library.yaml not found"
         fi
@@ -452,9 +534,41 @@ list section="":
                 echo "Installed prompts:"
                 list_installed "{{PROMPTS_DIR}}" ".md" | sed 's/^/  /' || echo "  (none)"
                 ;;
+            extension)
+                echo "Available extensions:"
+                if [ -f "$LIBRARY" ]; then
+                    ruby -ryaml -e "
+                        require 'yaml'
+                        catalog = YAML.safe_load(File.read('$LIBRARY'), permitted_classes: [], permitted_symbols: [], aliases: false)
+                        items = catalog['extensions'] || []
+                        items.each { |i| puts \"  #{i['name']} - #{i['description']}\" }
+                    " 2>/dev/null || echo "  (none)"
+                else
+                    echo "  (none)"
+                fi
+                echo ""
+                echo "Installed extensions:"
+                list_installed "{{EXTENSIONS_DIR}}" ".ts" | sed 's/^/  /' || echo "  (none)"
+                ;;
+            theme)
+                echo "Available themes:"
+                if [ -f "$LIBRARY" ]; then
+                    ruby -ryaml -e "
+                        require 'yaml'
+                        catalog = YAML.safe_load(File.read('$LIBRARY'), permitted_classes: [], permitted_symbols: [], aliases: false)
+                        items = catalog['themes'] || []
+                        items.each { |i| puts \"  #{i['name']} - #{i['description']}\" }
+                    " 2>/dev/null || echo "  (none)"
+                else
+                    echo "  (none)"
+                fi
+                echo ""
+                echo "Installed themes:"
+                list_installed "{{THEMES_DIR}}" ".json" | sed 's/^/  /' || echo "  (none)"
+                ;;
             *)
                 echo "Error: Unknown section '$SECTION'"
-                echo "Valid sections: skill, agent, prompt"
+                echo "Valid sections: skill, agent, prompt, extension, theme"
                 exit 1
                 ;;
         esac
@@ -554,25 +668,25 @@ search query:
         require 'yaml'
         catalog = YAML.safe_load(File.read('$LIBRARY'), permitted_classes: [], permitted_symbols: [], aliases: false)
         query = ARGV[0].downcase
-        
+
         found = false
-        
-        ['skills', 'agents', 'prompts'].each do |section|
+
+        ['skills', 'agents', 'prompts', 'extensions', 'themes'].each do |section|
           items = catalog[section] || []
           items.each do |item|
             name = item['name'].to_s.downcase
             desc = item['description'].to_s.downcase
             tags = item['tags'].to_a.map(&:to_s).map(&:downcase)
-            
+
             if name.include?(query) || desc.include?(query) || tags.any? { |t| t.include?(query) }
               found = true
-              section_name = section[0..-2]  # Remove 's' for singular
+              section_name = section.sub(/s$/, '')  # Remove final 's' for singular
               puts \"#{section_name}: #{item['name']} - #{item['description']}\"
               puts \"  tags: #{item['tags'].join(', ')}\" if item['tags'] && !item['tags'].empty?
               puts
             end
           end
         end
-        
+
         exit(found ? 0 : 1)
     " "$QUERY" || echo "No matches found in catalog"

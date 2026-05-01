@@ -28,7 +28,7 @@ Before starting, you must have:
 | Parameter | Example | Notes |
 |---|---|---|
 | `SKILL` | `code-reviewer` | Name of the skill to optimize |
-| `SKILL_PATH` | `.claude/skills/code-reviewer/SKILL.md` | Path to the SKILL.md file |
+| `SKILL_PATH` | `.pi/skills/code-reviewer/SKILL.md` | Path to the SKILL.md file |
 | `EVAL_FILE` | `evals/evals.json` | Path to the eval suite |
 | `RUNS` | `3` | Number of times to run the full eval suite per experiment (averaged for stability) |
 | `RUN_TAG` | `apr14` | Short tag for the branch name |

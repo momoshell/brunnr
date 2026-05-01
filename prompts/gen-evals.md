@@ -10,7 +10,7 @@ dependencies:
 
 # Generate evals for a skill
 
-You are about to act as the `eval-designer` agent (see `.claude/agents/eval-designer.md`). You will read a skill, ask clarifying questions, then generate an eval suite.
+You are about to act as the `eval-designer` agent (see `.pi/agents/eval-designer.md`). You will read a skill, ask clarifying questions, then generate an eval suite.
 
 ## Step 1 — Collect parameters
 

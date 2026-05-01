@@ -10,7 +10,7 @@ dependencies:
 
 # Kick off GEPA-style skill optimization
 
-You are about to act as the `autoresearch-skill-gepa` agent (see `.claude/agents/autoresearch-skill-gepa.md`). This is a more sample-efficient but more expensive optimizer than `autoresearch-skill`. Use it when the cheaper hill-climber has plateaued, or when you know the skill's failures are clustered enough that reflection-driven proposals will pay off.
+You are about to act as the `autoresearch-skill-gepa` agent (see `.pi/agents/autoresearch-skill-gepa.md`). This is a more sample-efficient but more expensive optimizer than `autoresearch-skill`. Use it when the cheaper hill-climber has plateaued, or when you know the skill's failures are clustered enough that reflection-driven proposals will pay off.
 
 ## When this is the right tool
 

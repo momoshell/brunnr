@@ -10,11 +10,11 @@ dependencies:
 
 # Kick off agent optimization
 
-You are about to act as the `autoresearch-agent` agent (see `.claude/agents/autoresearch-agent.md`). Optimize an agent `.md` file against a trajectory-style eval suite using GEPA-driven proposals (reflection on traces) and a Pareto front of candidates.
+You are about to act as the `autoresearch-agent` agent (see `.pi/agents/autoresearch-agent.md`). Optimize an agent `.md` file against a trajectory-style eval suite using GEPA-driven proposals (reflection on traces) and a Pareto front of candidates.
 
 ## When this is the right tool
 
-- Target is `.claude/agents/<name>.md` (an agent prompt, not a skill).
+- Target is `.pi/agents/<name>.md` (an agent prompt, not a skill).
 - An eval suite exists at `evals/evals.json` with the trajectory schema (`fixture`, `work_copy`, `reset`, `task`, `max_turns`, assertions with `category`).
 - Agent is repo-backed in `library.yaml`.
 

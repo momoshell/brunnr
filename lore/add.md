@@ -13,7 +13,7 @@ just -f ~/.config/brunnr/justfile add <section> <name>
 ```
 
 Where:
-- `<section>` is one of: `skill`, `agent`, `prompt`
+- `<section>` is one of: `skill`, `agent`, `prompt`, `extension`, `theme`
 - `<name>` is the item name as listed in `library.yaml`
 
 ## How It Works
@@ -43,7 +43,7 @@ just -f ~/.config/brunnr/justfile add skill test-writer
 just -f ~/.config/brunnr/justfile add skill doc-generator
 ```
 
-Skills are installed to `.claude/skills/<skill-name>/`.
+Skills are installed to `.pi/skills/<skill-name>/`.
 
 ## Adding Agents
 
@@ -57,7 +57,7 @@ just -f ~/.config/brunnr/justfile add agent security-auditor
 just -f ~/.config/brunnr/justfile add agent performance-reviewer
 ```
 
-Agents are installed to `.claude/agents/<agent-name>.md`.
+Agents are installed to `.pi/agents/<agent-name>.md`.
 
 ## Adding Prompts
 
@@ -71,7 +71,37 @@ just -f ~/.config/brunnr/justfile add prompt pr-description
 just -f ~/.config/brunnr/justfile add prompt commit-message
 ```
 
-Prompts are installed to `.claude/commands/<prompt-name>.md`.
+Prompts are installed to `.pi/prompts/<prompt-name>.md`.
+
+## Adding Extensions
+
+Pi extensions are TypeScript modules loaded with `pi -e <path>`. They register tools, commands, shortcuts, and custom UI:
+
+```bash
+# Add the pi-pi meta-agent that builds Pi agents
+just -f ~/.config/brunnr/justfile add extension pi-pi
+```
+
+Single-file extensions install to `.pi/extensions/<name>.ts`. **Directory-style extensions** route their files across multiple targets per the brunnr convention:
+
+| Source path inside `<extension-dir>/` | Install target |
+|---|---|
+| `*.ts` (top level) | `.pi/extensions/` |
+| `agents/<sub>/...` | `.pi/agents/<sub>/...` |
+| `themes/<sub>/...` | `.pi/themes/<sub>/...` |
+
+For example, `add extension pi-pi` installs `pi-pi.ts` to `.pi/extensions/` *and* the `agents/pi-pi/` expert tree to `.pi/agents/pi-pi/`.
+
+## Adding Themes
+
+Pi themes are .json files defining all 51 colour tokens:
+
+```bash
+# Add a theme (single-file install)
+just -f ~/.config/brunnr/justfile add theme rose-pine
+```
+
+Themes are installed to `.pi/themes/<theme-name>.json`.
 
 ## Adding Multi-Agent Prompts
 
@@ -128,13 +158,19 @@ After adding an item, verify it was installed correctly:
 
 ```bash
 # List installed skills
-ls -la .claude/skills/
+ls -la .pi/skills/
 
 # List installed agents
-ls -la .claude/agents/
+ls -la .pi/agents/
 
 # List installed prompts
-ls -la .claude/commands/
+ls -la .pi/prompts/
+
+# List installed extensions (.ts files)
+ls -la .pi/extensions/
+
+# List installed themes (.json files)
+ls -la .pi/themes/
 ```
 
 ## See Also

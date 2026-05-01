@@ -1,6 +1,6 @@
 # Install brunnr into a Project
 
-> Initialize brunnr in your current project to start using skills, agents, and prompts.
+> Initialize brunnr in your Pi project to start using skills, agents, prompts, extensions, and themes.
 
 ## Quick Install
 
@@ -10,9 +10,13 @@ just -f ~/.config/brunnr/justfile install
 ```
 
 This creates the target directories in your project:
-- `.claude/skills/` — for skills
-- `.claude/agents/` — for agents  
-- `.claude/commands/` — for prompts
+- `.pi/skills/` — for skills
+- `.pi/agents/` — for agents
+- `.pi/prompts/` — for prompts
+- `.pi/extensions/` — for Pi extensions (.ts files)
+- `.pi/themes/` — for Pi themes (.json files)
+
+Pi reads each of these paths natively — no extra extension or settings shim required.
 
 ## What Gets Created
 
@@ -20,10 +24,12 @@ After running `install`, your project will have:
 
 ```
 your-project/
-├── .claude/
-│   ├── skills/     # (empty, ready for skills)
-│   ├── agents/     # (empty, ready for agents)
-│   └── commands/   # (empty, ready for prompts)
+├── .pi/
+│   ├── skills/      # (empty, ready for skills)
+│   ├── agents/      # (empty, ready for agents)
+│   ├── prompts/     # (empty, ready for prompts)
+│   ├── extensions/  # (empty, ready for Pi extensions)
+│   └── themes/      # (empty, ready for Pi themes)
 └── ...
 ```
 
@@ -31,12 +37,14 @@ your-project/
 
 ```bash
 # List the created directories
-ls -la .claude/
+ls -la .pi/
 
 # Should show:
 # skills/
 # agents/
-# commands/
+# prompts/
+# extensions/
+# themes/
 ```
 
 ## Customizing Target Directories
@@ -48,6 +56,8 @@ If you prefer different target directories, set environment variables before run
 export BRUNNR_SKILLS_DIR=".ai/skills"
 export BRUNNR_AGENTS_DIR=".ai/agents"
 export BRUNNR_PROMPTS_DIR=".ai/prompts"
+export BRUNNR_EXTENSIONS_DIR=".ai/extensions"
+export BRUNNR_THEMES_DIR=".ai/themes"
 
 just -f ~/.config/brunnr/justfile install
 ```
@@ -59,6 +69,8 @@ Once installed, you can:
 1. **Add skills** — `just -f ~/.config/brunnr/justfile add skill <name>`
 2. **Add agents** — `just -f ~/.config/brunnr/justfile add agent <name>`
 3. **Add prompts** — `just -f ~/.config/brunnr/justfile add prompt <name>`
+4. **Add extensions** — `just -f ~/.config/brunnr/justfile add extension <name>`
+5. **Add themes** — `just -f ~/.config/brunnr/justfile add theme <name>`
 
 See [`add.md`](add.md) for detailed instructions.
 

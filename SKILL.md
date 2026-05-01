@@ -1,10 +1,10 @@
-# SKILL.md — brunnr Specification v2.0
+# SKILL.md — brunnr Specification v3.0
 
-> Specification for the brunnr meta-skill: a reference-first catalog for skills, agents, prompts, and multi-agent prompts.
+> Specification for the brunnr meta-skill: a reference-first catalog for Pi (badlogic/pi-mono) — skills, agents, prompts, extensions, themes.
 
 ## Overview
 
-brunnr is a **reference-first** catalog system for managing reusable AI components. The `library.yaml` file is the single source of truth for what exists in your catalog and where to find it. Content may be stored in the brunnr repository (repo-backed) or referenced from external locations (local paths or remote URLs).
+brunnr is a **reference-first** catalog system for managing reusable Pi components. The `library.yaml` file is the single source of truth for what exists in your catalog and where to find it. Content may be stored in the brunnr repository (repo-backed) or referenced from external locations (local paths or remote URLs).
 
 ### Key Principles
 
@@ -12,20 +12,34 @@ brunnr is a **reference-first** catalog system for managing reusable AI componen
 2. **Flexible sourcing**: Content can be repo-backed, local, or remote
 3. **Minimal schema**: Only `name`, `description`, and `source` are required
 4. **Safe operations**: No blind overwrites; explicit dependencies; atomic transactions
+5. **Pi-native paths**: Default install targets are the directories Pi reads natively (`.pi/skills/`, `.pi/agents/`, `.pi/prompts/`, `.pi/extensions/`, `.pi/themes/`) — no auxiliary extensions or settings shims required
 
 ## Catalog Structure
 
 ### Top-Level Sections
 
-brunnr organizes content into three top-level sections:
+brunnr organizes content into five top-level sections:
 
 | Section | Description | Install Target |
 |---------|-------------|----------------|
-| **skills** | Reusable capabilities with their own directories | `.claude/skills/<name>/` |
-| **agents** | Specialized AI configurations (single files) | `.claude/agents/<name>.md` |
-| **prompts** | Single-shot prompts and templates | `.claude/commands/<name>.md` |
+| **skills** | Reusable capabilities with their own directories | `.pi/skills/<name>/` |
+| **agents** | Specialized AI configurations (single markdown files) | `.pi/agents/<name>.md` |
+| **prompts** | Single-shot prompts and templates | `.pi/prompts/<name>.md` |
+| **extensions** | Pi TypeScript extensions (single file or directory tree) | `.pi/extensions/<name>.ts` (+ routed subtree) |
+| **themes** | Pi colour themes (single .json file with all 51 tokens) | `.pi/themes/<name>.json` |
 
 **Multi-agent prompts** are a subtype of prompts (use `type: multi-agent`), not a separate section.
+
+### Directory-style extension sources
+
+Extension entries may point to a single `.ts` file (`source: extensions/foo.ts`) or to a directory (`source: extensions/foo/`). Directory-style packages let an extension ship with sibling artefacts that need to land at known runtime locations — for example, agent definitions that the extension reads at startup. On install, files route per the brunnr convention:
+
+| Source path inside `<extension-dir>/` | Install target |
+|---|---|
+| `*.ts` (top level) | `.pi/extensions/` |
+| `agents/<sub>/...` | `.pi/agents/<sub>/...` |
+| `themes/<sub>/...` | `.pi/themes/<sub>/...` |
+| Other top-level files (e.g. `README.md`) | ignored |
 
 ### Source Semantics
 
@@ -250,20 +264,24 @@ agents:
 
 | Section | Default Source | Default Target |
 |---------|---------------|----------------|
-| skills | `skills/<name>/` | `.claude/skills/<name>/` |
-| agents | `agents/<name>.md` | `.claude/agents/<name>.md` |
-| prompts | `prompts/<name>.md` | `.claude/commands/<name>.md` |
+| skills | `skills/<name>/` | `.pi/skills/<name>/` |
+| agents | `agents/<name>.md` | `.pi/agents/<name>.md` |
+| prompts | `prompts/<name>.md` | `.pi/prompts/<name>.md` |
+| extensions | `extensions/<name>.ts` or `extensions/<name>/` | `.pi/extensions/<name>.ts` (single) or routed (directory) |
+| themes | `themes/<name>.json` | `.pi/themes/<name>.json` |
 
-> **Note**: Prompts install to `.claude/commands/` following Claude's convention for executable instructions.
+> **Note**: All defaults match Pi's native discovery paths so installed content is found by Pi without any settings.json shim or auxiliary extension.
 
 ## Variables
 
 | Variable | Environment | Default | Description |
 |----------|-------------|---------|-------------|
 | `BRUNNR_HOME` | `BRUNNR_HOME` | `~/.config/brunnr` | Path to brunnr repository |
-| `SKILLS_DIR` | `BRUNNR_SKILLS_DIR` | `.claude/skills` | Target directory for skills |
-| `AGENTS_DIR` | `BRUNNR_AGENTS_DIR` | `.claude/agents` | Target directory for agents |
-| `PROMPTS_DIR` | `BRUNNR_PROMPTS_DIR` | `.claude/commands` | Target directory for prompts |
+| `SKILLS_DIR` | `BRUNNR_SKILLS_DIR` | `.pi/skills` | Target directory for skills |
+| `AGENTS_DIR` | `BRUNNR_AGENTS_DIR` | `.pi/agents` | Target directory for agents |
+| `PROMPTS_DIR` | `BRUNNR_PROMPTS_DIR` | `.pi/prompts` | Target directory for prompts |
+| `EXTENSIONS_DIR` | `BRUNNR_EXTENSIONS_DIR` | `.pi/extensions` | Target directory for extensions |
+| `THEMES_DIR` | `BRUNNR_THEMES_DIR` | `.pi/themes` | Target directory for themes |
 
 ## Commands
 
@@ -286,12 +304,13 @@ just -f $BRUNNR_HOME/justfile install
 Add an item from brunnr to the current project.
 
 **Parameters**:
-- `section`: One of `skill`, `agent`, `prompt`
+- `section`: One of `skill`, `agent`, `prompt`, `extension`, `theme`
 - `name`: The item name as listed in `library.yaml`
 
 **Behavior**:
 - Resolves the source from `library.yaml`
 - Copies files from source to project target
+- For directory-style extensions, routes files per the convention table above (`.ts` → `EXTENSIONS_DIR`, `agents/` → `AGENTS_DIR`, `themes/` → `THEMES_DIR`)
 - Fails if item doesn't exist in catalog
 - Fails if target already exists (use `push` to update)
 
@@ -304,6 +323,8 @@ Add an item from brunnr to the current project.
 just -f $BRUNNR_HOME/justfile add skill code-reviewer
 just -f $BRUNNR_HOME/justfile add agent security-auditor
 just -f $BRUNNR_HOME/justfile add prompt pr-description
+just -f $BRUNNR_HOME/justfile add extension pi-pi
+just -f $BRUNNR_HOME/justfile add theme rose-pine
 ```
 
 ### remove <section> <name>
@@ -311,11 +332,12 @@ just -f $BRUNNR_HOME/justfile add prompt pr-description
 Remove an item from the current project.
 
 **Parameters**:
-- `section`: One of `skill`, `agent`, `prompt`
+- `section`: One of `skill`, `agent`, `prompt`, `extension`, `theme`
 - `name`: The installed item name
 
 **Behavior**:
 - Removes files from project target directory
+- For extensions, removes the `.ts` file plus the matching `agents/<name>/` and `themes/<name>/` subdirs that were created on install
 - Fails if item is not installed
 
 **Safety rules**:
@@ -325,6 +347,7 @@ Remove an item from the current project.
 **Usage**:
 ```bash
 just -f $BRUNNR_HOME/justfile remove skill code-reviewer
+just -f $BRUNNR_HOME/justfile remove extension pi-pi
 ```
 
 ### push <section> <name>
@@ -332,13 +355,14 @@ just -f $BRUNNR_HOME/justfile remove skill code-reviewer
 Push local changes back to brunnr.
 
 **Parameters**:
-- `section`: One of `skill`, `agent`, `prompt`
+- `section`: One of `skill`, `agent`, `prompt`, `extension`, `theme`
 - `name`: The item name
 
 **Behavior**:
 - Looks up item in `library.yaml` to verify source type
 - For repo-backed sources: copies files from project to brunnr
 - For local/remote sources (`file://` or `https://`): fails with error
+- For directory-style extensions: fails with guidance (multi-target routing can't be auto-reversed; edit files in brunnr directly)
 - If item already exists in brunnr: fails with warning (no overwrite)
 - After push, instructs user to manually update `library.yaml` for new items
 
@@ -350,6 +374,7 @@ Push local changes back to brunnr.
 **Usage**:
 ```bash
 just -f $BRUNNR_HOME/justfile push skill my-new-skill
+just -f $BRUNNR_HOME/justfile push theme my-theme
 ```
 
 ### list [section]
@@ -452,5 +477,6 @@ When implementing brunnr commands, ensure:
 
 ## Version History
 
+- **3.0.0** — Pi pivot: install paths default to `.pi/*`, `extensions:` and `themes:` top-level sections added, directory-style extension sources route per convention
 - **2.0.0** — Reference-first redesign: `library.yaml` as catalog authority, explicit source semantics (repo-backed, local, remote)
 - **1.0.0** — Initial specification with skills, agents, prompts, and multi-agent prompt support

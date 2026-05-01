@@ -23,7 +23,7 @@ You generate eval suites for skills. Your output is an `evals/evals.json` file c
 
 | Parameter | Example | Notes |
 |---|---|---|
-| `SKILL_PATH` | `.claude/skills/code-reviewer/SKILL.md` | Path to the skill to design evals for |
+| `SKILL_PATH` | `.pi/skills/code-reviewer/SKILL.md` | Path to the skill to design evals for |
 | `EVAL_OUTPUT` | `evals/evals.json` | Where to write the eval file |
 | `FIXTURES_DIR` | `evals/fixtures/` | Where to put test fixture files |
 

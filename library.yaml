@@ -1,10 +1,10 @@
 # brunnr Catalog
-# Reference-first catalog for skills, agents, and prompts
+# Reference-first catalog for Pi (badlogic/pi-mono) — skills, agents, prompts, extensions, themes
 # This file is the authoritative source of truth for what exists in the catalog
 
 name: brunnr
-description: Private catalog for skills, agents, prompts, and multi-agent prompts
-version: "2.0.0"
+description: Reference-first catalog for Pi — skills, agents, prompts, extensions, themes
+version: "3.0.0"
 
 # =============================================================================
 # SOURCE SEMANTICS
@@ -55,7 +55,8 @@ version: "2.0.0"
 # =============================================================================
 # Skills are reusable capabilities with their own directory and SKILL.md file.
 # Each skill directory may contain additional files (scripts, templates, etc.).
-# Default install path: .claude/skills/<name>/
+# Default install path: .pi/skills/<name>/   (Pi reads this natively;
+#   ~/.agents/skills/ is also recognised as the Agent Skills standard path)
 # =============================================================================
 skills:
   # Example: Repo-backed skill (content stored in brunnr)
@@ -79,7 +80,7 @@ skills:
 # AGENTS
 # =============================================================================
 # Agents are specialized AI configurations stored as single markdown files.
-# Default install path: .claude/agents/<name>.md
+# Default install path: .pi/agents/<name>.md
 # =============================================================================
 agents:
   - name: autoresearch
@@ -162,7 +163,7 @@ agents:
 # =============================================================================
 # Prompts are single-shot instructions or templates stored as markdown files.
 # Multi-agent prompts use type: multi-agent and include orchestration logic.
-# Default install path: .claude/commands/<name>.md
+# Default install path: .pi/prompts/<name>.md
 # =============================================================================
 prompts:
   - name: autoresearch
@@ -303,3 +304,42 @@ prompts:
     type: single
     tags: [personal, standup]
     sync: manual
+
+# =============================================================================
+# EXTENSIONS  (Pi-only)
+# =============================================================================
+# Pi extensions are TypeScript modules loaded by `pi -e <path>`. They register
+# tools, commands, shortcuts, event handlers, and custom UI components.
+#
+# Extension entries can be EITHER a single file (e.g. `extensions/foo.ts`) or
+# a directory (e.g. `extensions/foo/`). Directory-style packages ship the .ts
+# alongside any extra runtime artefacts the extension needs at known paths.
+#
+# Default install convention (for directory-style extensions):
+#   <source-dir>/<name>.ts        →  .pi/extensions/<name>.ts
+#   <source-dir>/agents/<sub>/    →  .pi/agents/<sub>/
+#   <source-dir>/themes/<sub>/    →  .pi/themes/<sub>/
+#
+# Override default install path via `install_to` if needed.
+# =============================================================================
+extensions:
+  - name: pi-pi
+    description: "Meta-agent that builds Pi agents — orchestrator + parallel/chain research across domain experts (extensions, themes, skills, settings, TUI, prompts, agents, keybindings, CLI). Hardened with ctx.signal abort handling, user/project agent scope split, truncateHead helper, theme-token UI, chain mode with {previous} substitution, usage stats, and a 4-way concurrency cap."
+    source: extensions/pi-pi/
+    tags: [meta-agent, parallel-research, pi-builder, orchestrator]
+    origin: https://github.com/badlogic/pi-vs-claude-code
+    dependencies:
+      skills: []
+      agents: []
+    sync: auto
+
+# =============================================================================
+# THEMES  (Pi-only)
+# =============================================================================
+# Pi themes are .json files defining all 51 colour tokens (core UI, markdown,
+# syntax, tool diffs, thinking borders, bash mode). Hot-reloaded when the
+# active theme file changes.
+#
+# Default install path: .pi/themes/<name>.json
+# =============================================================================
+themes: []

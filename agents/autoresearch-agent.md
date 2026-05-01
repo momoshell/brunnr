@@ -30,7 +30,7 @@ You are the agent equivalent of `autoresearch-skill-gepa`. Same algorithm, diffe
 | Parameter | Example | Notes |
 |---|---|---|
 | `AGENT` | `code-reviewer` | Name of the agent to optimize |
-| `AGENT_PATH` | `.claude/agents/code-reviewer.md` | Path to the agent .md file |
+| `AGENT_PATH` | `.pi/agents/code-reviewer.md` | Path to the agent .md file |
 | `EVAL_FILE` | `evals/evals.json` | Path to the trajectory-style eval suite |
 | `RUNS` | `2` | Eval runs per experiment. **Default 2 for agents** (vs. 3 for skills) — runs are expensive. |
 | `RUN_TAG` | `apr14-agent` | Short tag for the branch name |

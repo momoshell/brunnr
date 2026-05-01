@@ -1,4 +1,4 @@
-# brunnr — guidance for Claude Code sessions
+# brunnr — guidance for AI agent sessions (Pi-targeted; also read by Claude Code)
 
 brunnr is a reference-first catalog of skills, agents, and prompts. `library.yaml` is the authoritative index; everything else points to or describes content. Read `README.md` for the user-facing overview and `SKILL.md` for the catalog format spec — this file only captures conventions a future session can't derive from those.
 

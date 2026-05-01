@@ -128,13 +128,13 @@ To see if installed items differ from brunnr:
 
 ```bash
 # Compare a skill
-diff -r ~/.config/brunnr/skills/code-reviewer .claude/skills/code-reviewer
+diff -r ~/.config/brunnr/skills/code-reviewer .pi/skills/code-reviewer
 
 # Compare an agent
-diff ~/.config/brunnr/agents/security-auditor.md .claude/agents/security-auditor.md
+diff ~/.config/brunnr/agents/security-auditor.md .pi/agents/security-auditor.md
 
 # Compare a prompt
-diff ~/.config/brunnr/prompts/pr-description.md .claude/commands/pr-description.md
+diff ~/.config/brunnr/prompts/pr-description.md .pi/prompts/pr-description.md
 ```
 
 ## Finding Dependencies
@@ -170,7 +170,7 @@ Check for dependents before removing:
 
 ```bash
 # List installed items that might depend on this
-grep -r "code-reviewer" .claude/
+grep -r "code-reviewer" .pi/
 ```
 
 ### After Syncing
