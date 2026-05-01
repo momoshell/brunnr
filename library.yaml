@@ -93,10 +93,30 @@ agents:
     sync: auto
 
   - name: autoresearch-skill
-    description: Autonomous skill optimizer — iteratively edits a SKILL.md against binary eval assertions, keeps only changes that improve pass rate
+    description: Autonomous skill optimizer — iteratively edits a SKILL.md against binary eval assertions, keeps only changes that improve pass rate. Stops at plateau with a diagnostic report.
     source: agents/autoresearch-skill.md
     tags: [autonomous, experimentation, optimization, skills, evals]
     origin: https://github.com/karpathy/autoresearch
+    dependencies:
+      skills: []
+      agents: []
+    sync: auto
+
+  - name: autoresearch-skill-gepa
+    description: GEPA-style skill optimizer — reflection on failing traces and Pareto front of candidates. Use when autoresearch-skill plateaus. More sample-efficient on hard skills, more expensive per experiment.
+    source: agents/autoresearch-skill-gepa.md
+    tags: [autonomous, experimentation, optimization, skills, evals, gepa, reflection]
+    origin: https://github.com/gepa-ai/gepa
+    dependencies:
+      skills: []
+      agents: []
+    sync: auto
+
+  - name: autoresearch-agent
+    description: GEPA-style optimizer for agent .md files — reflection on full trajectory traces (tool calls, turn count, final state) plus a Pareto front. The right tool for agent prompts; skips the hill-climb stage that exists for skills.
+    source: agents/autoresearch-agent.md
+    tags: [autonomous, experimentation, optimization, agents, evals, gepa, reflection, trajectory]
+    origin: https://github.com/gepa-ai/gepa
     dependencies:
       skills: []
       agents: []
@@ -106,6 +126,15 @@ agents:
     description: Generates binary eval assertions for a skill — produces evals.json with deterministic checks and flagged semantic fallbacks
     source: agents/eval-designer.md
     tags: [evals, testing, skills, assertions, quality]
+    dependencies:
+      skills: []
+      agents: []
+    sync: auto
+
+  - name: eval-designer-agent
+    description: Generates trajectory-style binary evals for an agent .md file — fixtures, reset commands, turn caps, forbidden-tool checks, final-state assertions
+    source: agents/eval-designer-agent.md
+    tags: [evals, testing, agents, assertions, quality, trajectory]
     dependencies:
       skills: []
       agents: []
@@ -157,6 +186,36 @@ prompts:
       agents: [autoresearch-skill]
     sync: auto
 
+  - name: autoresearch-skill-gepa
+    description: Kick off GEPA-style skill optimization — uses reflection on failing eval traces and a Pareto front. Run when autoresearch-skill has plateaued.
+    source: prompts/autoresearch-skill-gepa.md
+    type: single
+    tags: [autonomous, experimentation, optimization, skills, evals, gepa, reflection]
+    dependencies:
+      skills: []
+      agents: [autoresearch-skill-gepa]
+    sync: auto
+
+  - name: autoresearch-pipeline
+    description: Run the full skill-optimization pipeline — autoresearch-skill (hill-climb) → autoresearch-skill-gepa (reflection) → autoresearch-skill in delete-only mode (compaction) — with plateau-based escalation. One pass per epoch.
+    source: prompts/autoresearch-pipeline.md
+    type: multi-agent
+    tags: [autonomous, optimization, skills, evals, pipeline, orchestration]
+    dependencies:
+      skills: []
+      agents: [autoresearch-skill, autoresearch-skill-gepa]
+    sync: auto
+
+  - name: autoresearch-agent
+    description: Kick off GEPA-style optimization for an agent .md file — reflection on trajectory traces and a Pareto front of candidates. Skips the hill-climb stage that exists for skills.
+    source: prompts/autoresearch-agent.md
+    type: single
+    tags: [autonomous, experimentation, optimization, agents, evals, gepa, reflection, trajectory]
+    dependencies:
+      skills: []
+      agents: [autoresearch-agent]
+    sync: auto
+
   - name: gen-evals
     description: Generate binary eval assertions for a skill — creates evals.json before running autoresearch-skill
     source: prompts/gen-evals.md
@@ -165,6 +224,16 @@ prompts:
     dependencies:
       skills: []
       agents: [eval-designer]
+    sync: auto
+
+  - name: gen-evals-agent
+    description: Generate trajectory-style binary evals for an agent .md file — fixtures, reset commands, turn caps, safety checks. Run before autoresearch-agent.
+    source: prompts/gen-evals-agent.md
+    type: single
+    tags: [evals, testing, agents, assertions, quality, trajectory]
+    dependencies:
+      skills: []
+      agents: [eval-designer-agent]
     sync: auto
 
   - name: fork-skill
@@ -177,11 +246,31 @@ prompts:
       agents: []
     sync: auto
 
+  - name: fork-agent
+    description: Fork an externally-referenced agent into the brunnr repo — converts remote or local reference to repo-backed for editing and optimization
+    source: prompts/fork-agent.md
+    type: single
+    tags: [agents, fork, import, catalog]
+    dependencies:
+      skills: []
+      agents: []
+    sync: auto
+
   - name: skill-status
     description: Report which skills need optimization — scans evals.json history and ranks by staleness, pass rate, and run count. Use this to decide which skill to autoresearch next.
     source: prompts/skill-status.md
     type: single
     tags: [evals, optimization, skills, status, staleness]
+    dependencies:
+      skills: []
+      agents: []
+    sync: auto
+
+  - name: agent-status
+    description: Report which agents need optimization — scans evals.json history and ranks by safety violations, staleness, pass rate, and turn-count efficiency
+    source: prompts/agent-status.md
+    type: single
+    tags: [evals, optimization, agents, status, staleness, safety]
     dependencies:
       skills: []
       agents: []

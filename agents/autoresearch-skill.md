@@ -119,6 +119,27 @@ For each eval case in the suite:
 5. **Record** pass/fail for each assertion.
 6. **Repeat `RUNS` times** and average the pass rate for stability.
 
+**Persist per-eval data.** After each experiment, write `results/per-eval/exp-<N>.json` with the per-eval, per-run, per-assertion results:
+
+```json
+{
+  "experiment": <N>,
+  "commit": "<sha>",
+  "split": "train",
+  "results": [
+    {
+      "eval_id": 1,
+      "runs": [
+        { "run": 1, "assertions": [{ "id": 0, "pass": true }, { "id": 1, "pass": false }] },
+        { "run": 2, "assertions": [{ "id": 0, "pass": true }, { "id": 1, "pass": false }] }
+      ]
+    }
+  ]
+}
+```
+
+This file is what the plateau diagnosis reads to classify failure patterns. Without it, only `overfit` is detectable from `results.tsv` alone. Add `results/` to `.gitignore` if not already.
+
 **Secondary metrics** (tracked, not optimized):
 - Total tokens used across all eval runs (proxy for skill verbosity/cost)
 - Count of semantic assertions invoked (track the ratio)
@@ -137,6 +158,8 @@ Propose one focused change to `SKILL_PATH`. Alternate between these experiment t
 - **Simplify**: rewrite a complex section more concisely
 
 Each experiment should be motivated by a hypothesis tied to specific eval failures. Read recent failures to decide what to try.
+
+**Delete-only mode.** When the user (or an orchestrator like `/autoresearch-pipeline`) starts you with the explicit instruction *"run in delete-only mode"*, restrict every experiment to a `Delete` or `Simplify` action only. No `Add` or `Tweak`. This mode is used for compaction passes after another optimizer has grown the skill. Stop the loop when no deletion or simplification has been kept in the last 5 experiments — there is no further compaction available.
 
 ### 2. Edit and commit
 
@@ -194,6 +217,59 @@ You continue indefinitely unless:
 - You hit the same crash three experiments in a row and cannot diagnose it.
 - Train pass rate reaches 100% on 3 consecutive runs — announce and pause (you may have saturated the eval suite).
 - Holdout regression triggers a revert and you cannot find a path forward after 5 more experiments.
+- **Plateau detected** (see next section).
+
+## Plateau detection
+
+A plateau is a signal that further hill-climbing on the current setup is unlikely to help. Throwing more experiments at it usually overfits to the train split without raising real quality.
+
+**Detection rule.** Pause the loop when *all* of these hold:
+- The last 10 consecutive experiments were all `discard` or `crash` (no kept experiments).
+- The current best train pass rate has not changed in those 10 experiments.
+- You have not just reverted from a holdout regression in the last 3 experiments (give the loop room to recover).
+
+When this triggers, **do not start the next experiment.** Run the diagnosis below and report.
+
+### Plateau diagnosis
+
+Classify the plateau into one of four patterns by inspecting `results.tsv` (overall trajectory) and `results/per-eval/exp-<N>.json` for the recent experiments (per-eval, per-run pass/fail):
+
+| Pattern | Signal | Right move (recommend to user, do not act) |
+|---|---|---|
+| **Overfit** | Train pass rate ≥85% and holdout ≥10 points below train | Add diverse evals; rotate train/holdout assignment; do not run another pass without input change |
+| **Single-cluster** | Failures concentrate on 1–2 evals or one assertion theme (e.g. all "must mention X" failures) | Hand-edit a targeted instruction or fixture in the skill; then user can resume the loop for one polish pass |
+| **Scattered ceiling** | Failures spread evenly across evals; both splits plateau | The skill's text-only format may have hit its ceiling. Suggest decomposing into sub-skills, adding examples/fixtures *inside* the skill, or accepting the result and shipping |
+| **Eval-quality** | In `results/per-eval/exp-<N>.json`, the same assertion's `pass` field flips across runs of the same experiment (semantic checks especially) | Rewrite flaky assertions before any further optimization. Suggest user re-run `/gen-evals` to tighten checks |
+
+The classification is your judgment based on the data. When two patterns overlap (e.g. overfit *and* single-cluster), report both and let the user choose.
+
+### Plateau report format
+
+Output exactly this report and stop the loop:
+
+```
+PLATEAU DETECTED at experiment N
+
+Best train pass rate: X% (unchanged for last 10 experiments)
+Holdout pass rate:    Y%
+Holdout gap:          (X - Y) points
+
+Pattern: <overfit | single-cluster | scattered-ceiling | eval-quality>
+
+Failing evals (top 5 by failure rate):
+  - eval #3 "Review SQL injection fixture": 0/3 runs passed assertion "output contains 'parameterized'"
+  - eval #7 ...
+
+Recommended next step:
+  <one of the moves from the table above, specific to this skill>
+
+Resume guidance:
+  <when it is OK to resume the loop after the user makes the change>
+```
+
+After printing the report, stop. Do not propose further experiments. The user decides whether to change inputs (evals, fixtures, the skill itself, the optimizer) or to ship.
+
+> **Why stop instead of trying harder?** A plateau means the optimizer has sampled the local search space without finding a winning edit. Continuing past it is how overfitting happens — train improves while real quality stalls. The fix is almost always *outside* the optimizer's reach (better evals, better skill structure, or a different optimization approach like `/autoresearch-skill-gepa`).
 
 ## Reporting
 
@@ -223,6 +299,7 @@ Read `EVAL_FILE` and append to (or create) the `history` array:
   "history": [
     {
       "run_tag": "apr14",
+      "method": "autoresearch",
       "date": "2026-04-14",
       "experiments_total": 47,
       "experiments_kept": 12,
@@ -237,6 +314,8 @@ Read `EVAL_FILE` and append to (or create) the `history` array:
   "evals": [...]
 }
 ```
+
+The `method` field distinguishes hill-climb runs (`autoresearch`) from GEPA runs (`gepa`) and pipeline runs (`pipeline`) in `/skill-status` rankings. When running in delete-only mode, set `method: "autoresearch-compact"`.
 
 This is the permanent record. The `/skill-status` prompt reads these to determine which skills are stale or need attention.
 

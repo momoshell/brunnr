@@ -127,15 +127,24 @@ brunnr/
 ├── library.yaml        # Catalog index (the authority)
 ├── justfile            # Terminal shortcuts
 ├── agents/             # Agent configurations
-│   ├── autoresearch.md         # Generic autonomous optimizer
-│   ├── autoresearch-skill.md   # Skill-specific optimizer
-│   └── eval-designer.md        # Eval suite generator
+│   ├── autoresearch.md              # Generic autonomous optimizer
+│   ├── autoresearch-skill.md        # Skill hill-climb optimizer (with plateau diagnosis)
+│   ├── autoresearch-skill-gepa.md   # Skill GEPA-style optimizer (reflection + Pareto front)
+│   ├── autoresearch-agent.md        # Agent GEPA-style optimizer (trajectory-aware)
+│   ├── eval-designer.md             # Skill eval suite generator
+│   └── eval-designer-agent.md       # Agent (trajectory-style) eval suite generator
 ├── prompts/            # Kickoff prompts
-│   ├── autoresearch.md         # /autoresearch
-│   ├── autoresearch-skill.md   # /autoresearch-skill
-│   ├── fork-skill.md           # /fork-skill
-│   ├── gen-evals.md            # /gen-evals
-│   └── skill-status.md         # /skill-status
+│   ├── autoresearch.md              # /autoresearch
+│   ├── autoresearch-skill.md        # /autoresearch-skill
+│   ├── autoresearch-skill-gepa.md   # /autoresearch-skill-gepa
+│   ├── autoresearch-pipeline.md     # /autoresearch-pipeline (chains the three skill stages)
+│   ├── autoresearch-agent.md        # /autoresearch-agent
+│   ├── gen-evals.md                 # /gen-evals (skills)
+│   ├── gen-evals-agent.md           # /gen-evals-agent (agents)
+│   ├── fork-skill.md                # /fork-skill
+│   ├── fork-agent.md                # /fork-agent
+│   ├── skill-status.md              # /skill-status
+│   └── agent-status.md              # /agent-status
 └── lore/              # Usage guides
     ├── install.md      # Install brunnr into a project
     ├── add.md          # Add items to your project
@@ -186,9 +195,17 @@ brunnr sync
 brunnr install
 ```
 
-## Skill Optimization (autoresearch)
+## Skill Optimization (autoresearch + GEPA)
 
-brunnr includes an autonomous skill optimization pipeline inspired by [karpathy/autoresearch](https://github.com/karpathy/autoresearch). An agent iteratively edits a SKILL.md, runs binary eval assertions, and keeps only the changes that improve pass rate — the same way autoresearch optimizes a neural network training script overnight.
+brunnr includes two optimization algorithms and a pipeline orchestrator for skills, drawn from [karpathy/autoresearch](https://github.com/karpathy/autoresearch) and [gepa-ai/gepa](https://github.com/gepa-ai/gepa). An agent iteratively edits a SKILL.md, runs binary eval assertions, and keeps only the changes that improve pass rate.
+
+| Optimizer | Algorithm | When to use |
+|---|---|---|
+| `/autoresearch-skill` | Hill-climb on a single best candidate; cheap delete-and-test | First pass on a new or untouched skill — clears the obvious wins |
+| `/autoresearch-skill-gepa` | Reflection on failing traces; Pareto front of candidates | After hill-climb plateaus, or for skills with clustered failure patterns |
+| `/autoresearch-pipeline` | Runs both, then a compaction pass, with plateau-based escalation | Default choice for "best result without micromanaging which optimizer to run" |
+
+The hill-climb optimizer is fast and good enough for easy skills. GEPA-style optimization is more sample-efficient but more expensive per experiment because each proposal involves reading and reasoning about full failure traces. The pipeline orchestrates them so you don't have to decide manually.
 
 ### Eval philosophy
 
@@ -203,10 +220,12 @@ Assertions are **binary** (pass/fail, not scores) and **deterministic first** (s
 ### The pipeline
 
 ```
-/fork-skill         → (if external) copy skill into brunnr repo
-/gen-evals          → eval-designer creates evals.json        → you review
-/autoresearch-skill → agent optimizes SKILL.md against evals   → you review results
-/skill-status       → shows which skills need attention next
+/fork-skill              → (if external) copy skill into brunnr repo
+/gen-evals               → eval-designer creates evals.json                 → you review
+/autoresearch-pipeline   → hill-climb → GEPA → compaction with auto-escalation
+                           (or run /autoresearch-skill or /autoresearch-skill-gepa
+                            individually if you prefer manual control)
+/skill-status            → shows which skills need attention next
 ```
 
 > **Requirement:** Only repo-backed skills can be optimized — the agent needs to edit and commit the SKILL.md. If the skill is a remote or local reference, run `/fork-skill` first to bring it into the brunnr repo.
@@ -318,9 +337,48 @@ Recommended next:
 
 Staleness is ranked: never optimized > low pass rate > stale (>30 days) > holdout drift > current.
 
+### When to escalate from hill-climb to GEPA
+
+`autoresearch-skill` will stop on its own when it hits a plateau and emit a diagnostic report. If the report's pattern is `single-cluster` or `scattered-ceiling`, GEPA's reflection has a real chance of finding the wins hill-climbing missed — `/autoresearch-skill-gepa` is the next step. If the pattern is `overfit` or `eval-quality`, more compute won't help; fix the inputs first (rotate evals, tighten flaky assertions, hand-edit the skill).
+
+`/autoresearch-pipeline` does this escalation automatically: it runs hill-climb, reads the plateau diagnosis, and either advances to GEPA or stops the pipeline depending on what the diagnosis says.
+
+## Agent Optimization
+
+The same machinery applies to **agent `.md` files** with one twist: agent failures happen multiple turns deep into a trajectory, so random hill-climb edits to the agent prompt rarely move the metric. brunnr therefore skips the hill-climb stage entirely for agents and runs GEPA directly, with built-in compaction.
+
+```
+/fork-agent          → (if external) copy agent into brunnr repo
+/gen-evals-agent     → eval-designer-agent creates trajectory-style evals.json → you review
+/autoresearch-agent  → GEPA-driven loop: reflection on traces, Pareto front,
+                       periodic delete-and-test for compaction
+/agent-status        → shows which agents need attention next
+```
+
+### Trajectory-style evals
+
+Agent evals are integration tests, not unit tests. Each case has a fixture (starting state directory), a reset command (idempotent restore between runs), a task, a max-turn cap, and assertions in four categories:
+
+| Category | Examples |
+|---|---|
+| `final-state` | Output text contains X; a specific file was created; git log matches a pattern |
+| `trajectory` | Agent used at most N turns; called Edit on this file; never called Bash with `rm -rf` |
+| `safety` | No destructive git commands; no writes outside the sandbox; no network calls |
+| `quality` | (Semantic) the diagnosis correctly identifies the root cause |
+
+**Every case must have at least one safety assertion.** `autoresearch-agent` hard-discards any candidate that triggers a safety violation, regardless of how good its other metrics look. This lets you optimize aggressively without worrying that the optimizer will sneak a destructive change past you.
+
+### Cost considerations
+
+Agent eval runs are 10–50× more expensive than skill eval runs (multi-turn, tool calls, fixture reset). Keep eval suites small (5–15 cases), default `RUNS=2` instead of 3, and lean hard on deterministic checks. Trajectory and safety assertions are usually cheap to make deterministic — string-match against the trace log.
+
+### When to re-run
+
+Same rule as skills: one optimization epoch per **input change**, not on a timer. The triggers are new evals, hand-edits to the agent, model upgrades, or holdout drift. Re-running over the same inputs without changes leads to overfitting.
+
 ### Generic autoresearch
 
-For non-skill targets — optimizing code, configs, SQL queries, or anything with a measurable metric and a run command — the generic `autoresearch` agent works directly:
+For non-skill, non-agent targets — optimizing code, configs, SQL queries, or anything with a measurable metric and a run command — the generic `autoresearch` agent works directly:
 
 | Parameter | Example |
 |---|---|
@@ -340,18 +398,27 @@ Same keep/discard loop, same git-based experiment tracking — just without the 
 | Agent | Purpose |
 |-------|---------|
 | `autoresearch` | Generic — optimize any file against any run command + metric |
-| `autoresearch-skill` | Specialized — optimize a SKILL.md against binary eval assertions |
+| `autoresearch-skill` | Hill-climb optimizer for SKILL.md against binary eval assertions; stops at plateau with diagnostic report |
+| `autoresearch-skill-gepa` | GEPA-style optimizer for SKILL.md — reflection on traces + Pareto front |
+| `autoresearch-agent` | GEPA-style optimizer for agent .md files — trajectory-aware reflection + safety enforcement |
 | `eval-designer` | Generate `evals.json` with binary assertions for a skill |
+| `eval-designer-agent` | Generate trajectory-style `evals.json` for an agent (fixtures, reset, turn caps, safety checks) |
 
 **Prompts** are slash commands you type in Claude Code. Install them with `brunnr add prompt <name>`, which places them in `.claude/commands/`. Then type the command in any Claude Code session to run it.
 
 | Prompt | How to use | What it does |
 |--------|-----------|--------------|
 | `/autoresearch` | Type in Claude Code | Collects target, metric, and run command, then starts the generic optimization loop |
-| `/autoresearch-skill` | Type in Claude Code | Collects skill name, eval file, and run count, then starts the skill optimization loop |
-| `/gen-evals` | Type in Claude Code | Reads a skill, asks about your goals and failure modes, generates `evals/evals.json` |
+| `/autoresearch-skill` | Type in Claude Code | Hill-climb skill optimization; stops at plateau with diagnosis |
+| `/autoresearch-skill-gepa` | Type in Claude Code | GEPA-style skill optimization — reflection + Pareto front. Run after `/autoresearch-skill` plateaus. |
+| `/autoresearch-pipeline` | Type in Claude Code | Runs hill-climb → GEPA → compaction with auto-escalation. Default for "best result, hands-off." |
+| `/autoresearch-agent` | Type in Claude Code | GEPA-style optimization for an agent .md file (skips hill-climb stage) |
+| `/gen-evals` | Type in Claude Code | Generates `evals.json` for a skill |
+| `/gen-evals-agent` | Type in Claude Code | Generates trajectory-style `evals.json` for an agent |
 | `/fork-skill` | Type in Claude Code | Copies an external skill into brunnr so it can be edited and optimized |
+| `/fork-agent` | Type in Claude Code | Copies an external agent into brunnr so it can be edited and optimized |
 | `/skill-status` | Type in Claude Code | Scans all skills and reports which ones need optimization next |
+| `/agent-status` | Type in Claude Code | Scans all agents and reports which ones need optimization next (safety-aware) |
 
 ## Safety & Consistency
 

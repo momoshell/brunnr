@@ -283,14 +283,26 @@ push section name:
         if [[ "$SOURCE" == file://* ]]; then
             echo "Error: Source is a local reference — cannot push to file:// path"
             echo "Source: $SOURCE"
-            echo "Run /fork-skill {{name}} first to copy it into brunnr, then push."
+            if [ "$SECTION" = "agent" ]; then
+                echo "Run /fork-agent {{name}} first to copy it into brunnr, then push."
+            elif [ "$SECTION" = "skill" ]; then
+                echo "Run /fork-skill {{name}} first to copy it into brunnr, then push."
+            else
+                echo "Copy the content into brunnr's $YAML_KEY/ directory and update library.yaml's source field, then push."
+            fi
             exit 1
         fi
 
         if [[ "$SOURCE" == https://* ]]; then
             echo "Error: Source is a remote reference — cannot push to external repo"
             echo "Source: $SOURCE"
-            echo "Run /fork-skill {{name}} first to copy it into brunnr, then push."
+            if [ "$SECTION" = "agent" ]; then
+                echo "Run /fork-agent {{name}} first to copy it into brunnr, then push."
+            elif [ "$SECTION" = "skill" ]; then
+                echo "Run /fork-skill {{name}} first to copy it into brunnr, then push."
+            else
+                echo "Copy the content into brunnr's $YAML_KEY/ directory and update library.yaml's source field, then push."
+            fi
             exit 1
         fi
         
