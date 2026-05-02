@@ -34,6 +34,7 @@ THEMES_SRC := BRUNNR_HOME / "themes"
     echo "  list [section]       List available/installed items"
     echo "  sync                 Sync brunnr repository with remote"
     echo "  search <query>       Search the catalog"
+    echo "  check                Validate library.yaml integrity (run before commit)"
     echo "  help                 Show this help message"
     echo ""
     echo "Environment variables (Pi defaults — Pi reads these natively):"
@@ -690,3 +691,145 @@ search query:
 
         exit(found ? 0 : 1)
     " "$QUERY" || echo "No matches found in catalog"
+
+# Validate library.yaml integrity (every source resolves, deps reference real entries,
+# frontmatter names match, no orphan files in the catalog directories)
+@check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    BRUNNR_HOME="{{BRUNNR_HOME}}"
+
+    if [ ! -f "$BRUNNR_HOME/library.yaml" ]; then
+        echo "Error: library.yaml not found at $BRUNNR_HOME/library.yaml"
+        exit 1
+    fi
+
+    cd "$BRUNNR_HOME"
+
+    ruby -ryaml <<'RUBY'
+      errors   = []
+      warnings = []
+
+      catalog = YAML.safe_load(
+        File.read("library.yaml"),
+        permitted_classes: [], permitted_symbols: [], aliases: false
+      )
+
+      sections = %w[skills agents prompts extensions themes]
+      required = %w[name description source]
+
+      # Index all entry names per section for dep validation
+      entries_by_section = {}
+      sections.each { |s| entries_by_section[s] = (catalog[s] || []).map { |e| e["name"] }.compact }
+
+      # Track repo-backed source paths so we can detect orphans later
+      known_paths = []
+
+      sections.each do |section|
+        items = catalog[section] || []
+        seen  = {}
+
+        items.each_with_index do |item, idx|
+          label = "#{section}[#{idx}] '#{item["name"] || "<unnamed>"}'"
+
+          required.each do |f|
+            errors << "#{label}: missing required field `#{f}`" if item[f].nil? || item[f].to_s.empty?
+          end
+
+          name = item["name"]
+          next unless name
+
+          if seen[name]
+            errors << "#{section}: duplicate name `#{name}`"
+          end
+          seen[name] = true
+
+          # Dependency targets must exist in the catalog (independent of source check)
+          deps = item["dependencies"] || {}
+          %w[skills agents prompts].each do |dep_section|
+            (deps[dep_section] || []).each do |dep_name|
+              unless entries_by_section[dep_section].include?(dep_name)
+                errors << "#{label}: dependency `#{dep_section}/#{dep_name}` not found in catalog"
+              end
+            end
+          end
+
+          # Prompt `type` must be single or multi-agent if present
+          if section == "prompts" && item["type"] && !%w[single multi-agent].include?(item["type"])
+            errors << "#{label}: prompt type `#{item["type"]}` must be `single` or `multi-agent`"
+          end
+
+          src = item["source"]
+          next unless src
+
+          # External sources skip path/frontmatter checks
+          if src.start_with?("file://") || src.start_with?("https://")
+            next
+          end
+
+          if !File.exist?(src) && !Dir.exist?(src)
+            errors << "#{label}: source path not found: #{src}"
+            next
+          end
+
+          # Normalize for orphan tracking: directory sources end with /
+          known_paths << (Dir.exist?(src) ? src.chomp("/") + "/" : src)
+
+          # Frontmatter `name:` must match library.yaml name (for .md files only)
+          if src.end_with?(".md") && File.file?(src)
+            content = File.read(src)
+            if content =~ /\A---\s*\n(.*?)\n---/m
+              fm = YAML.safe_load($1, permitted_classes: [], permitted_symbols: [], aliases: false) rescue {}
+              fm_name = fm.is_a?(Hash) ? fm["name"] : nil
+              if fm_name && fm_name != name
+                errors << "#{label}: frontmatter name `#{fm_name}` != library.yaml name `#{name}` (#{src})"
+              elsif fm_name.nil?
+                warnings << "#{label}: source has no `name:` frontmatter field (#{src})"
+              end
+            else
+              warnings << "#{label}: source has no YAML frontmatter (#{src})"
+            end
+          end
+        end
+      end
+
+      # Orphan check — files on disk not referenced by library.yaml
+      on_disk = {
+        "skills"     => Dir.glob("skills/*/SKILL.md"),
+        "agents"     => Dir.glob("agents/*.md"),
+        "prompts"    => Dir.glob("prompts/*.md"),
+        "extensions" => Dir.glob("extensions/*.ts") + Dir.glob("extensions/*/").map { |d| d },
+        "themes"     => Dir.glob("themes/*.json"),
+      }
+
+      on_disk.each do |section, paths|
+        paths.each do |p|
+          p_norm = File.directory?(p) ? p.chomp("/") + "/" : p
+          unless known_paths.include?(p_norm)
+            warnings << "orphan: `#{p_norm}` exists on disk but is not registered in library.yaml under `#{section}`"
+          end
+        end
+      end
+
+      # Summary
+      puts "library.yaml: parsed OK"
+      sections.each do |s|
+        puts "  #{s.ljust(11)} #{(catalog[s] || []).length}"
+      end
+      puts ""
+
+      unless warnings.empty?
+        puts "WARNINGS (#{warnings.length}):"
+        warnings.each { |w| puts "  - #{w}" }
+        puts ""
+      end
+
+      if errors.empty?
+        puts warnings.empty? ? "All checks passed." : "All hard checks passed (warnings above)."
+        exit 0
+      else
+        puts "ERRORS (#{errors.length}):"
+        errors.each { |e| puts "  - #{e}" }
+        exit 1
+      end
+    RUBY
