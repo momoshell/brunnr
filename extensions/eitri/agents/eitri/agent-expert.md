@@ -39,7 +39,7 @@ Include detailed instructions about the agent's role, constraints, and behavior.
 
 ### Agent File Locations
 - `.pi/agents/*.md` — project-local (most common)
-- `.claude/agents/*.md` — cross-agent compatible
+- `~/.pi/agent/agents/*.md` — user-level (trusted across all projects)
 - `agents/*.md` — project root
 
 ### Teams Configuration (teams.yaml)

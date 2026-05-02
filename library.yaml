@@ -58,23 +58,8 @@ version: "3.0.0"
 # Default install path: .pi/skills/<name>/   (Pi reads this natively;
 #   ~/.agents/skills/ is also recognised as the Agent Skills standard path)
 # =============================================================================
-skills:
-  # Example: Repo-backed skill (content stored in brunnr)
-  - name: code-reviewer
-    description: Review code for bugs, style, and best practices
-    source: skills/code-reviewer/SKILL.md
-    tags: [review, code-quality, security]
-    dependencies:
-      skills: []
-      agents: []
-    sync: auto
-
-  # Example: Local reference skill (content outside brunnr)
-  - name: my-local-skill
-    description: Personal skill stored outside brunnr
-    source: file:///Users/me/.local/share/brunnr-skills/my-skill/SKILL.md
-    tags: [personal, experimental]
-    sync: manual
+skills: []
+# (No catalog skills yet. See SKILL.md for the format and example entries.)
 
 # =============================================================================
 # AGENTS
@@ -141,23 +126,6 @@ agents:
       agents: []
     sync: auto
 
-  # Example: Repo-backed agent
-  - name: security-auditor
-    description: Audit code for security vulnerabilities
-    source: agents/security-auditor.md
-    tags: [security, audit, review]
-    dependencies:
-      skills: [code-reviewer]
-      agents: []
-
-  # Example: Remote reference agent
-  - name: external-agent
-    description: Reference to an agent from another repo
-    source: https://raw.githubusercontent.com/org/ai-catalog/main/agents/docs-checker.md
-    origin: https://github.com/org/ai-catalog
-    tags: [external, documentation]
-    sync: never
-
 # =============================================================================
 # PROMPTS
 # =============================================================================
@@ -198,13 +166,13 @@ prompts:
     sync: auto
 
   - name: autoresearch-pipeline
-    description: Run the full skill-optimization pipeline — autoresearch-skill (hill-climb) → autoresearch-skill-gepa (reflection) → autoresearch-skill in delete-only mode (compaction) — with plateau-based escalation. One pass per epoch.
+    description: Run the full skill-optimization pipeline — autoresearch-skill (hill-climb) → autoresearch-skill-gepa (reflection) → autoresearch-skill in delete-only mode (compaction) — with plateau-based escalation. One pass per epoch. Note autoresearch-skill is invoked twice (once normally, once in delete-only/compaction mode).
     source: prompts/autoresearch-pipeline.md
     type: multi-agent
     tags: [autonomous, optimization, skills, evals, pipeline, orchestration]
     dependencies:
       skills: []
-      agents: [autoresearch-skill, autoresearch-skill-gepa]
+      agents: [autoresearch-skill, autoresearch-skill-gepa]  # autoresearch-skill runs in both normal and delete-only modes
     sync: auto
 
   - name: autoresearch-agent
@@ -276,34 +244,6 @@ prompts:
       skills: []
       agents: []
     sync: auto
-
-  # Example: Single prompt (type defaults to "single")
-  - name: pr-description
-    description: Generate a pull request description from commits
-    source: prompts/pr-description.md
-    type: single
-    tags: [git, documentation, pr]
-    dependencies:
-      skills: []
-      agents: []
-
-  # Example: Multi-agent prompt (orchestrated workflow)
-  - name: complex-review
-    description: Multi-agent code review with security, perf, and docs
-    source: prompts/complex-review.md
-    type: multi-agent
-    tags: [review, multi-agent, orchestration]
-    dependencies:
-      skills: [code-reviewer]
-      agents: [security-auditor]
-
-  # Example: Local reference prompt
-  - name: my-local-prompt
-    description: Personal prompt stored outside brunnr
-    source: file:///Users/me/.local/share/brunnr-prompts/daily-standup.md
-    type: single
-    tags: [personal, standup]
-    sync: manual
 
 # =============================================================================
 # EXTENSIONS  (Pi-only)

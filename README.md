@@ -40,8 +40,8 @@ alias brunnr='just -f ~/.config/brunnr/justfile'
 cd your-project
 brunnr install
 
-# 5. Add a skill from the catalog
-brunnr add skill code-reviewer
+# 5. Add an item from the catalog (try the eitri extension to start)
+brunnr add extension eitri
 
 # 6. Launch Pi — it picks up everything in .pi/ natively
 pi
@@ -186,15 +186,16 @@ brunnr/
 # 1. Install brunnr into a new project
 brunnr install
 
-# 2. Add skills you need
-brunnr add skill code-reviewer
-brunnr add skill test-writer
+# 2. Add the catalog items you need
+brunnr add agent autoresearch-skill   # autonomous skill optimizer
+brunnr add prompt skill-status        # /skill-status command
+brunnr add extension eitri            # meta-agent for building Pi components
 
-# 3. Use them in your project
-# (Skills are now available to Pi in .pi/skills/)
+# 3. Use them in Pi
+# (Items are now in .pi/agents/, .pi/prompts/, .pi/extensions/ — Pi reads them natively)
 
-# 4. Push improvements back to brunnr (for repo-backed skills)
-brunnr push skill code-reviewer
+# 4. Push improvements back to brunnr (for repo-backed items you've edited)
+brunnr push agent autoresearch-skill
 ```
 
 ### Team Workflow

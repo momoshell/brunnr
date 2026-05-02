@@ -97,10 +97,14 @@ source: https://raw.githubusercontent.com/org/repo/main/skills/my-skill/SKILL.md
 |-------|------|-------------|
 | `type` | string | For prompts: `"single"` (default) or `"multi-agent"` |
 | `install_to` | string | Override default install path (rarely needed) |
-| `tags` | array | Searchable tags for filtering |
+| `tags` | array | Searchable tags for filtering (see Tag Style below) |
 | `dependencies` | object | Required skills/agents and related prompts |
 | `origin` | string | Source attribution (URL, author, etc.) |
 | `sync` | string | `"auto"`, `"manual"`, or `"never"` — update behavior |
+
+### Tag Style
+
+Tags are lowercase, hyphenate multi-word phrases, and singular unless the concept is naturally plural (e.g. `evals`, `skills`, `agents` are plural; `review`, `optimization`, `safety` are singular). Prefer existing tags over inventing near-synonyms — search `library.yaml` first.
 
 ### Example library.yaml
 
@@ -209,6 +213,7 @@ Agents are single markdown files with YAML frontmatter:
 name: Agent Name
 description: What this agent does
 tags: [tag1, tag2]
+origin: https://github.com/org/repo  # optional — attribution if forked/imported
 dependencies:
   skills: [skill-name]
   agents: [agent-name]
@@ -229,6 +234,7 @@ name: prompt-name
 description: What this prompt does
 type: single | multi-agent
 tags: [tag1, tag2]
+origin: https://github.com/org/repo  # optional — attribution if forked/imported
 dependencies:
   skills: [skill-name]
   agents: [agent-name]
@@ -320,11 +326,10 @@ Add an item from brunnr to the current project.
 
 **Usage**:
 ```bash
-just -f $BRUNNR_HOME/justfile add skill code-reviewer
-just -f $BRUNNR_HOME/justfile add agent security-auditor
-just -f $BRUNNR_HOME/justfile add prompt pr-description
+just -f $BRUNNR_HOME/justfile add agent autoresearch-skill
+just -f $BRUNNR_HOME/justfile add prompt skill-status
 just -f $BRUNNR_HOME/justfile add extension eitri
-just -f $BRUNNR_HOME/justfile add theme rose-pine
+# (`add skill <name>` and `add theme <name>` follow the same shape — see library.yaml for catalog contents)
 ```
 
 ### remove <section> <name>
@@ -346,7 +351,7 @@ Remove an item from the current project.
 
 **Usage**:
 ```bash
-just -f $BRUNNR_HOME/justfile remove skill code-reviewer
+just -f $BRUNNR_HOME/justfile remove agent autoresearch-skill
 just -f $BRUNNR_HOME/justfile remove extension eitri
 ```
 
