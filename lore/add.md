@@ -30,17 +30,10 @@ The `add` command follows a catalog-aware resolution process:
 
 ## Adding Skills
 
-Skills are reusable capabilities that enhance your AI assistant:
+Skills are reusable capabilities that enhance your AI assistant. Run `brunnr list skill` to see what the catalog currently offers (skills are added over time):
 
 ```bash
-# Add a code review skill
-just -f ~/.config/brunnr/justfile add skill code-reviewer
-
-# Add a test generation skill
-just -f ~/.config/brunnr/justfile add skill test-writer
-
-# Add a documentation skill
-just -f ~/.config/brunnr/justfile add skill doc-generator
+just -f ~/.config/brunnr/justfile add skill <skill-name>
 ```
 
 Skills are installed to `.pi/skills/<skill-name>/`.
@@ -50,11 +43,11 @@ Skills are installed to `.pi/skills/<skill-name>/`.
 Agents are specialized AI configurations for specific tasks:
 
 ```bash
-# Add a security auditor agent
-just -f ~/.config/brunnr/justfile add agent security-auditor
+# Autonomous skill optimizer
+just -f ~/.config/brunnr/justfile add agent autoresearch-skill
 
-# Add a performance reviewer agent
-just -f ~/.config/brunnr/justfile add agent performance-reviewer
+# Skill eval suite generator
+just -f ~/.config/brunnr/justfile add agent eval-designer
 ```
 
 Agents are installed to `.pi/agents/<agent-name>.md`.
@@ -64,11 +57,11 @@ Agents are installed to `.pi/agents/<agent-name>.md`.
 Prompts are single-shot instructions or templates:
 
 ```bash
-# Add a PR description prompt
-just -f ~/.config/brunnr/justfile add prompt pr-description
+# /skill-status — rank skills by what needs optimization
+just -f ~/.config/brunnr/justfile add prompt skill-status
 
-# Add a commit message prompt
-just -f ~/.config/brunnr/justfile add prompt commit-message
+# /gen-evals — generate binary eval assertions for a skill
+just -f ~/.config/brunnr/justfile add prompt gen-evals
 ```
 
 Prompts are installed to `.pi/prompts/<prompt-name>.md`.
@@ -97,19 +90,18 @@ For example, `add extension eitri` installs `eitri.ts` to `.pi/extensions/` *and
 Pi themes are .json files defining all 51 colour tokens:
 
 ```bash
-# Add a theme (single-file install)
-just -f ~/.config/brunnr/justfile add theme rose-pine
+just -f ~/.config/brunnr/justfile add theme <theme-name>
 ```
 
-Themes are installed to `.pi/themes/<theme-name>.json`.
+Themes are installed to `.pi/themes/<theme-name>.json`. Run `brunnr list theme` to see what's available.
 
 ## Adding Multi-Agent Prompts
 
 Multi-agent prompts are prompts that orchestrate multiple agents. They are stored alongside regular prompts with `type: multi-agent` metadata:
 
 ```bash
-# Add a complex review workflow
-just -f ~/.config/brunnr/justfile add prompt complex-review
+# /autoresearch-pipeline — chains autoresearch-skill (hill-climb) → -gepa (reflection) → -skill (compaction)
+just -f ~/.config/brunnr/justfile add prompt autoresearch-pipeline
 ```
 
 Check library.yaml for required agents and install them manually if needed.
@@ -120,7 +112,7 @@ Dependencies are documented in `library.yaml` but are NOT automatically installe
 
 ```bash
 # Check what dependencies an item requires
-ruby -ryaml -e "puts YAML.load_file('~/.config/brunnr/library.yaml')['agents'].find { |a| a['name'] == 'security-auditor' }['dependencies']"
+ruby -ryaml -e "puts YAML.load_file('~/.config/brunnr/library.yaml')['agents'].find { |a| a['name'] == 'autoresearch-skill' }['dependencies']"
 ```
 
 Install any required dependencies manually before or after adding an item.
@@ -142,8 +134,8 @@ The `add` command fails with clear error messages for:
 If an item already exists:
 
 ```bash
-$ just -f ~/.config/brunnr/justfile add skill code-reviewer
-Error: skill 'code-reviewer' already installed
+$ just -f ~/.config/brunnr/justfile add agent autoresearch-skill
+Error: agent 'autoresearch-skill' already installed
 Use 'push' to update brunnr with local changes, or remove first.
 ```
 

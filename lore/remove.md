@@ -13,35 +13,55 @@ just -f ~/.config/brunnr/justfile remove <section> <name>
 ```
 
 Where:
-- `<section>` is one of: `skill`, `agent`, `prompt`
+- `<section>` is one of: `skill`, `agent`, `prompt`, `extension`, `theme`
 - `<name>` is the installed item name
 
 ## Removing Skills
 
 ```bash
-# Remove a skill from the current project
-just -f ~/.config/brunnr/justfile remove skill code-reviewer
+just -f ~/.config/brunnr/justfile remove skill <skill-name>
 ```
 
-This removes `.pi/skills/code-reviewer/` and its contents.
+This removes `.pi/skills/<skill-name>/` and its contents.
 
 ## Removing Agents
 
 ```bash
-# Remove an agent from the current project
-just -f ~/.config/brunnr/justfile remove agent security-auditor
+just -f ~/.config/brunnr/justfile remove agent autoresearch-skill
 ```
 
-This removes `.pi/agents/security-auditor.md`.
+This removes `.pi/agents/autoresearch-skill.md`.
 
 ## Removing Prompts
 
 ```bash
-# Remove a prompt from the current project
-just -f ~/.config/brunnr/justfile remove prompt pr-description
+just -f ~/.config/brunnr/justfile remove prompt skill-status
 ```
 
-This removes `.pi/prompts/pr-description.md`.
+This removes `.pi/prompts/skill-status.md`.
+
+## Removing Extensions
+
+Directory-style extensions install files across multiple `.pi/` subdirectories. Removal undoes all of those:
+
+```bash
+just -f ~/.config/brunnr/justfile remove extension eitri
+```
+
+This removes:
+- `.pi/extensions/eitri.ts` (the extension entry point)
+- `.pi/agents/eitri/` (any expert agents the extension shipped with)
+- `.pi/themes/eitri/` (any themes the extension shipped with)
+
+Single-file extensions just remove the matching `.ts` file from `.pi/extensions/`.
+
+## Removing Themes
+
+```bash
+just -f ~/.config/brunnr/justfile remove theme <theme-name>
+```
+
+This removes `.pi/themes/<theme-name>.json`.
 
 ## Safety Behavior
 
@@ -81,11 +101,13 @@ just -f ~/.config/brunnr/justfile remove skill orphaned-skill
 | skill | `.pi/skills/<name>/` | Entire directory and contents |
 | agent | `.pi/agents/<name>.md` | Single markdown file |
 | prompt | `.pi/prompts/<name>.md` | Single markdown file |
+| extension | `.pi/extensions/<name>.ts` (+ `.pi/agents/<name>/` and `.pi/themes/<name>/` if present) | All files routed by the original install |
+| theme | `.pi/themes/<name>.json` | Single JSON file |
 
 ## What Does NOT Get Removed
 
 The `remove` command will never:
-- Remove files outside `.pi/skills/`, `.pi/agents/`, or `.pi/prompts/`
+- Remove files outside the configured `.pi/*` target directories
 - Remove files not installed by brunnr
 - Remove directories that contain non-brunnr files
 - Delete parent directories
@@ -127,19 +149,19 @@ chmod -R u+w .pi/skills/<name>/
 
 ```bash
 # 1. Check what's installed
-just -f ~/.config/brunnr/justfile list skill
+just -f ~/.config/brunnr/justfile list agent
 
 # 2. Check for dependents (review library.yaml or SKILL.md files)
-grep -r "code-reviewer" .pi/
+grep -r "autoresearch-skill" .pi/
 
-# 3. Remove dependent items first
-just -f ~/.config/brunnr/justfile remove agent security-auditor
+# 3. Remove dependent items first (e.g. a prompt that wraps the agent)
+just -f ~/.config/brunnr/justfile remove prompt autoresearch-skill
 
 # 4. Remove the dependency
-just -f ~/.config/brunnr/justfile remove skill code-reviewer
+just -f ~/.config/brunnr/justfile remove agent autoresearch-skill
 
 # 5. Verify removal
-just -f ~/.config/brunnr/justfile list skill
+just -f ~/.config/brunnr/justfile list agent
 ```
 
 ## See Also

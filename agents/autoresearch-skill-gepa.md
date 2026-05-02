@@ -343,9 +343,9 @@ Tell the user:
 
 ### 5. Push back to brunnr
 
-After the user merges, **explicitly ask** whether they want to push the improved skill back to brunnr:
+After merge, **explicitly ask** whether to push:
 
-> "The improved skill is merged. Do you want me to run `brunnr push skill <name>` to update the catalog?"
+> "The improved skill is merged. Run `brunnr push skill <name>` to update the catalog?"
 
 - If yes: run `brunnr push skill <SKILL>`.
 - If no: remind them brunnr's copy is now behind.

@@ -21,8 +21,10 @@ just -f ~/.config/brunnr/justfile push <section> <name>
 ```
 
 Where:
-- `<section>` is one of: `skill`, `agent`, `prompt`
+- `<section>` is one of: `skill`, `agent`, `prompt`, `extension`, `theme`
 - `<name>` is the item name
+
+> **Directory-style extensions cannot be auto-pushed.** Their files are routed across `.pi/extensions/`, `.pi/agents/`, and `.pi/themes/` on install, and that routing isn't reversible. Edit those files directly under `~/.config/brunnr/extensions/<name>/` and commit with `git`.
 
 ## Pushing Skills
 
@@ -74,18 +76,27 @@ The push command only works with **repo-backed** sources (items stored in brunnr
 
 ```bash
 $ just -f ~/.config/brunnr/justfile push skill my-local-skill
-Error: Source is external - cannot push to file:// reference
+Error: Source is a local reference — cannot push to file:// path
 Source: file:///Users/me/.local/share/skills/my-skill
-Local references cannot be pushed to brunnr.
+Run /fork-skill my-local-skill first to copy it into brunnr, then push.
 ```
 
 ### If Source is Remote Reference
 
 ```bash
-$ just -f ~/.config/brunnr/justfile push skill external-skill
-Error: Source is remote - cannot push to remote reference
-Source: https://raw.githubusercontent.com/org/repo/main/skills/external-skill.md
-Remote references cannot be pushed to brunnr.
+$ just -f ~/.config/brunnr/justfile push agent external-agent
+Error: Source is a remote reference — cannot push to external repo
+Source: https://raw.githubusercontent.com/org/repo/main/agents/external-agent.md
+Run /fork-agent external-agent first to copy it into brunnr, then push.
+```
+
+### If the Item is a Directory-Style Extension
+
+```bash
+$ just -f ~/.config/brunnr/justfile push extension eitri
+Error: directory-style extensions cannot be auto-pushed.
+Files for 'eitri' live in .pi/extensions/, .pi/agents/, .pi/themes/.
+Edit them in ~/.config/brunnr/extensions/eitri/ directly, then run: cd ~/.config/brunnr && git diff
 ```
 
 ## Updating Existing Items
@@ -93,18 +104,18 @@ Remote references cannot be pushed to brunnr.
 Push will fail if the item already exists in brunnr:
 
 ```bash
-$ just -f ~/.config/brunnr/justfile push skill code-reviewer
-Warning: skill 'code-reviewer' already exists in brunnr
+$ just -f ~/.config/brunnr/justfile push agent autoresearch-skill
+Warning: agent 'autoresearch-skill' already exists in brunnr
 Review differences manually before overwriting.
-Source: ~/.config/brunnr/skills/code-reviewer
-Target: .pi/skills/code-reviewer
+Source: ~/.config/brunnr/agents/autoresearch-skill.md
+Target: .pi/agents/autoresearch-skill.md
 ```
 
 To update an existing item, manually compare and copy:
 
 1. **Compare versions**:
    ```bash
-   diff -r ~/.config/brunnr/skills/code-reviewer .pi/skills/code-reviewer
+   diff ~/.config/brunnr/agents/autoresearch-skill.md .pi/agents/autoresearch-skill.md
    # or use a visual diff tool
    ```
 
@@ -113,7 +124,7 @@ To update an existing item, manually compare and copy:
 3. **Manually copy after reviewing**:
    ```bash
    # Copy from your project to brunnr
-   cp -r .pi/skills/code-reviewer ~/.config/brunnr/skills/
+   cp .pi/agents/autoresearch-skill.md ~/.config/brunnr/agents/
    ```
 
 4. **Update library.yaml if needed** (e.g., description, tags)
@@ -122,7 +133,7 @@ To update an existing item, manually compare and copy:
    ```bash
    cd ~/.config/brunnr
    git add .
-   git commit -m "Update code-reviewer"
+   git commit -m "Update autoresearch-skill"
    ```
 
 ## After Pushing
@@ -158,10 +169,10 @@ For team-maintained brunnr repositories:
 1. **Push to a branch**:
    ```bash
    cd ~/.config/brunnr
-   git checkout -b improve-security-auditor
+   git checkout -b improve-autoresearch-skill
    # ... push changes ...
-   git add . && git commit -m "Improve security-auditor"
-   git push -u origin improve-security-auditor
+   git add . && git commit -m "Improve autoresearch-skill"
+   git push -u origin improve-autoresearch-skill
    ```
 
 2. **Create a pull request** for team review

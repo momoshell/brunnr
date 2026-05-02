@@ -38,14 +38,17 @@ Results show the matching entry with its section, name, description, and tags.
 ## Search Results
 
 ```bash
-$ just -f ~/.config/brunnr/justfile search security
-Searching brunnr catalog for 'security'...
+$ just -f ~/.config/brunnr/justfile search optimization
+Searching brunnr catalog for 'optimization'...
 
-skill: code-reviewer - Review code for bugs, style, and best practices
-  tags: review, code-quality, security
+agent: autoresearch-skill - Skill hill-climb optimizer
+  tags: autonomous, experimentation, optimization, skills, evals
 
-agent: security-auditor - Audit code for security vulnerabilities
-  tags: security, audit, review
+agent: autoresearch-skill-gepa - Skill GEPA-style optimizer (reflection + Pareto front)
+  tags: autonomous, experimentation, optimization, skills, evals, gepa, reflection
+
+prompt: skill-status - Rank skills by what needs optimization
+  tags: evals, optimization, skills, status, staleness
 ```
 
 ## Advanced Search
@@ -122,8 +125,8 @@ ruby -ryaml -e "
   catalog = YAML.load_file('~/.config/brunnr/library.yaml')
   catalog.values.flatten.each do |item|
     deps = item['dependencies'] || {}
-    if deps['skills']&.include?('code-reviewer')
-      puts \"#{item['name']} depends on code-reviewer\"
+    if deps['agents']&.include?('autoresearch-skill')
+      puts \"#{item['name']} depends on autoresearch-skill\"
     end
   end
 "

@@ -6,6 +6,8 @@
 
 Once items are installed in your project (via `just add`), they become available to your AI assistant. This guide explains how to invoke and use each type of item.
 
+> Examples below use names from the current brunnr catalog (`autoresearch-skill`, `eitri`, `skill-status`, etc.). Generic placeholders like `<skill-name>` mark spots where you would substitute your own item name.
+
 ## Using Skills
 
 Skills are reusable capabilities that your AI assistant can apply to tasks.
@@ -15,18 +17,13 @@ Skills are reusable capabilities that your AI assistant can apply to tasks.
 Most skills can be invoked directly by mentioning them:
 
 ```
-User: @code-reviewer please review this function
-AI: [applies code-reviewer skill]
+User: @<skill-name> please review this function
+AI: [applies the skill]
 ```
 
 ### Contextual Activation
 
-Skills may auto-activate based on context:
-
-```
-User: Can you check this code for security issues?
-AI: [security-auditor skill activates based on keywords]
-```
+Skills may auto-activate based on context — Pi loads skill descriptions into the system prompt and the model picks the relevant one based on user keywords.
 
 ### Skill Location
 
@@ -34,11 +31,7 @@ Installed skills are in `.pi/skills/<skill-name>/`:
 
 ```
 .pi/skills/
-├── code-reviewer/
-│   └── SKILL.md
-├── test-writer/
-│   └── SKILL.md
-└── doc-generator/
+└── <skill-name>/
     └── SKILL.md
 ```
 
@@ -51,11 +44,11 @@ Agents are specialized AI configurations. They typically define:
 
 ### Agent Invocation
 
-Agents are usually invoked by name:
+Agents are usually invoked by name (Pi resolves `@<agent>` to the matching `.pi/agents/<agent>.md`):
 
 ```
-User: @security-auditor analyze this authentication code
-AI: [activates as security-auditor agent]
+User: @autoresearch-skill optimize the my-skill capability
+AI: [activates as autoresearch-skill]
 ```
 
 ### Agent Location
@@ -64,9 +57,12 @@ Installed agents are in `.pi/agents/`:
 
 ```
 .pi/agents/
-├── security-auditor.md
-├── performance-reviewer.md
-└── docs-checker.md
+├── autoresearch-skill.md
+├── autoresearch-skill-gepa.md
+├── eval-designer.md
+└── eitri/                     # directory-routed from extensions
+    ├── eitri-orchestrator.md
+    └── *-expert.md
 ```
 
 ## Using Prompts
@@ -75,18 +71,18 @@ Prompts are single-shot instructions or templates.
 
 ### Prompt Invocation
 
-Prompts are typically invoked via command syntax:
+Prompts are typically invoked via slash-command syntax:
 
 ```
-User: /pr-description
-AI: [runs pr-description prompt]
+User: /skill-status
+AI: [runs the skill-status prompt — scans evals.json history and ranks skills]
 ```
 
 Or by direct reference:
 
 ```
-User: Run the commit-message prompt on these changes
-AI: [applies commit-message prompt template]
+User: Run the gen-evals prompt on this skill
+AI: [applies gen-evals prompt template]
 ```
 
 ### Prompt Location
@@ -95,9 +91,9 @@ Installed prompts are in `.pi/prompts/`:
 
 ```
 .pi/prompts/
-├── pr-description.md
-├── commit-message.md
-└── code-explain.md
+├── skill-status.md
+├── gen-evals.md
+└── autoresearch-skill.md
 ```
 
 ## Using Multi-Agent Prompts
@@ -107,8 +103,8 @@ Multi-agent prompts orchestrate multiple agents in a workflow.
 ### Multi-Agent Invocation
 
 ```
-User: /complex-review
-AI: [runs multi-agent workflow]
+User: /autoresearch-pipeline
+AI: [orchestrates a three-stage skill optimization workflow]
 ```
 
 ### What Happens
@@ -119,24 +115,23 @@ A multi-agent prompt typically:
 3. Invokes subsequent agents
 4. Synthesizes a unified response
 
-### Example Workflow
+### Example Workflow (autoresearch-pipeline)
 
 ```markdown
 ---
-name: complex-review
+name: autoresearch-pipeline
 type: multi-agent
 agents:
-  - security-auditor
-  - performance-reviewer
-  - docs-checker
+  - autoresearch-skill
+  - autoresearch-skill-gepa
 ---
 
-# Complex Review
+# Pipeline
 
-1. @security-auditor analyze for vulnerabilities
-2. @performance-reviewer check for bottlenecks  
-3. @docs-checker verify documentation
-4. Synthesize findings into a report
+1. Stage 1: hill-climb via autoresearch-skill until plateau
+2. Stage 2: GEPA reflection via autoresearch-skill-gepa from the plateau seed
+3. Stage 3: compaction via autoresearch-skill in delete-only mode
+4. Surface the winning commit and a Pareto-front summary
 ```
 
 ## Combining Items
@@ -144,8 +139,8 @@ agents:
 You can combine multiple items in a single request:
 
 ```
-User: @security-auditor @performance-reviewer review this API endpoint
-AI: [both agents contribute to the review]
+User: @autoresearch-skill optimize my-skill, then @eval-designer review the results
+AI: [both agents contribute in sequence]
 ```
 
 ## Dependencies
@@ -156,7 +151,7 @@ Dependencies are documented in `library.yaml` but are NOT automatically installe
 # Check dependencies for an item
 ruby -ryaml -e "
   catalog = YAML.load_file('~/.config/brunnr/library.yaml')
-  item = catalog['agents'].find { |a| a['name'] == 'security-auditor' }
+  item = catalog['agents'].find { |a| a['name'] == 'autoresearch-skill' }
   puts 'Dependencies: ' + item['dependencies'].to_s
 "
 ```

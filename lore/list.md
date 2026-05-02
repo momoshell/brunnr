@@ -16,7 +16,7 @@ just -f ~/.config/brunnr/justfile list
 just -f ~/.config/brunnr/justfile list <section>
 ```
 
-Where `<section>` is one of: `skill`, `agent`, `prompt`
+Where `<section>` is one of: `skill`, `agent`, `prompt`, `extension`, `theme`
 
 ## Listing All Sections
 
@@ -30,17 +30,34 @@ Output shows all catalog sections with names and descriptions:
 brunnr catalog sections:
 
 skills:
-  code-reviewer - Review code for bugs, style, and best practices
-  my-local-skill - Personal skill stored outside brunnr
+  (none)
 
 agents:
-  security-auditor - Audit code for security vulnerabilities
-  external-agent - Reference to an agent from another repo
+  autoresearch - Autonomous researcher that iteratively modifies a target
+  autoresearch-skill - Skill hill-climb optimizer (with plateau diagnosis)
+  autoresearch-skill-gepa - Skill GEPA-style optimizer (reflection + Pareto)
+  autoresearch-agent - Agent GEPA-style optimizer (trajectory-aware)
+  eval-designer - Skill eval suite generator
+  eval-designer-agent - Agent (trajectory-style) eval suite generator
 
 prompts:
-  pr-description - Generate a pull request description from commits
-  complex-review - Multi-agent code review with security, perf, and docs
-  my-local-prompt - Personal prompt stored outside brunnr
+  autoresearch - /autoresearch
+  autoresearch-skill - /autoresearch-skill
+  autoresearch-skill-gepa - /autoresearch-skill-gepa
+  autoresearch-pipeline - /autoresearch-pipeline (multi-agent)
+  autoresearch-agent - /autoresearch-agent
+  gen-evals - /gen-evals (skills)
+  gen-evals-agent - /gen-evals-agent (agents)
+  fork-skill - /fork-skill
+  fork-agent - /fork-agent
+  skill-status - /skill-status
+  agent-status - /agent-status
+
+extensions:
+  eitri - Meta-agent that builds Pi components
+
+themes:
+  (none)
 ```
 
 ## Listing Skills
@@ -53,11 +70,10 @@ Output shows both available and installed skills:
 
 ```
 Available skills:
-  code-reviewer - Review code for bugs, style, and best practices
-  my-local-skill - Personal skill stored outside brunnr
+  (none)
 
 Installed skills:
-  code-reviewer
+  (none)
 ```
 
 ## Listing Agents
@@ -70,11 +86,15 @@ Output:
 
 ```
 Available agents:
-  security-auditor - Audit code for security vulnerabilities
-  external-agent - Reference to an agent from another repo
+  autoresearch - Autonomous researcher
+  autoresearch-skill - Skill hill-climb optimizer
+  autoresearch-skill-gepa - Skill GEPA-style optimizer
+  autoresearch-agent - Agent GEPA-style optimizer
+  eval-designer - Skill eval suite generator
+  eval-designer-agent - Agent eval suite generator
 
 Installed agents:
-  security-auditor
+  autoresearch-skill
 ```
 
 ## Listing Prompts
@@ -87,12 +107,21 @@ Output:
 
 ```
 Available prompts:
-  pr-description - Generate a pull request description from commits
-  complex-review - Multi-agent code review with security, perf, and docs
-  my-local-prompt - Personal prompt stored outside brunnr
+  autoresearch - /autoresearch
+  autoresearch-skill - /autoresearch-skill
+  autoresearch-skill-gepa - /autoresearch-skill-gepa
+  autoresearch-pipeline - /autoresearch-pipeline
+  autoresearch-agent - /autoresearch-agent
+  gen-evals - /gen-evals
+  gen-evals-agent - /gen-evals-agent
+  fork-skill - /fork-skill
+  fork-agent - /fork-agent
+  skill-status - /skill-status
+  agent-status - /agent-status
 
 Installed prompts:
-  pr-description
+  skill-status
+  gen-evals
 ```
 
 ## Understanding Status
@@ -119,7 +148,7 @@ The `list` command reads from `library.yaml` which is the authoritative catalog.
 cat ~/.config/brunnr/library.yaml
 
 # View specific item details
-ruby -ryaml -e "puts YAML.load_file('~/.config/brunnr/library.yaml')['skills'].find { |s| s['name'] == 'code-reviewer' }.to_yaml"
+ruby -ryaml -e "puts YAML.load_file('~/.config/brunnr/library.yaml')['agents'].find { |a| a['name'] == 'autoresearch-skill' }.to_yaml"
 ```
 
 ## Checking for Modifications
@@ -127,14 +156,14 @@ ruby -ryaml -e "puts YAML.load_file('~/.config/brunnr/library.yaml')['skills'].f
 To see if installed items differ from brunnr:
 
 ```bash
-# Compare a skill
-diff -r ~/.config/brunnr/skills/code-reviewer .pi/skills/code-reviewer
-
 # Compare an agent
-diff ~/.config/brunnr/agents/security-auditor.md .pi/agents/security-auditor.md
+diff ~/.config/brunnr/agents/autoresearch-skill.md .pi/agents/autoresearch-skill.md
 
 # Compare a prompt
-diff ~/.config/brunnr/prompts/pr-description.md .pi/prompts/pr-description.md
+diff ~/.config/brunnr/prompts/skill-status.md .pi/prompts/skill-status.md
+
+# Compare a directory-style item (skill or extension)
+diff -r ~/.config/brunnr/extensions/eitri .pi/extensions/eitri
 ```
 
 ## Finding Dependencies
@@ -142,13 +171,13 @@ diff ~/.config/brunnr/prompts/pr-description.md .pi/prompts/pr-description.md
 To see what depends on an item:
 
 ```bash
-# Search for references to a skill in library.yaml
+# Search for references to an agent in library.yaml
 ruby -ryaml -e "
   catalog = YAML.load_file('~/.config/brunnr/library.yaml')
   catalog.values.flatten.each do |item|
     deps = item['dependencies'] || {}
-    if deps['skills']&.include?('code-reviewer')
-      puts \"#{item['name']} depends on code-reviewer\"
+    if deps['agents']&.include?('autoresearch-skill')
+      puts \"#{item['name']} depends on autoresearch-skill\"
     end
   end
 "
@@ -161,7 +190,7 @@ ruby -ryaml -e "
 Check if an item is already installed before trying to add it:
 
 ```bash
-just -f ~/.config/brunnr/justfile list skill | grep code-reviewer
+just -f ~/.config/brunnr/justfile list agent | grep autoresearch-skill
 ```
 
 ### Before Removing
@@ -170,7 +199,7 @@ Check for dependents before removing:
 
 ```bash
 # List installed items that might depend on this
-grep -r "code-reviewer" .pi/
+grep -r "autoresearch-skill" .pi/
 ```
 
 ### After Syncing
@@ -187,11 +216,11 @@ just -f ~/.config/brunnr/justfile list
 The list output can be used in scripts:
 
 ```bash
-# Get all available skill names
-just -f ~/.config/brunnr/justfile list skill | ruby -lane "puts $_.split(' - ').first if $_ =~ /^  \w/"
+# Get all available agent names
+just -f ~/.config/brunnr/justfile list agent | ruby -lane "puts $_.split(' - ').first if $_ =~ /^  \w/"
 
-# Check if specific skill is installed
-just -f ~/.config/brunnr/justfile list skill | grep -q "code-reviewer" && echo "Installed"
+# Check if specific agent is installed
+just -f ~/.config/brunnr/justfile list agent | grep -q "autoresearch-skill" && echo "Installed"
 ```
 
 ## Troubleshooting
