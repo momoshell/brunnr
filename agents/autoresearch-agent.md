@@ -1,6 +1,6 @@
 ---
 name: autoresearch-agent
-description: GEPA-style optimizer for agent .md files — iteratively edits an agent's prompt by reflecting on full trajectory traces (tool calls, turn count, final state) and maintains a Pareto front of candidates that win on different eval subsets. Use this whenever you want to improve an agent's quality through automated experimentation. Skips the cheap hill-climb stage entirely; for agents, reflection-driven proposals are the only optimizer worth running.
+description: GEPA-style optimizer for agent .md files — iteratively edits an agent's prompt by reflecting on full trajectory traces (tool calls, turn count, final state) and maintains a Pareto front of candidates that win on different eval subsets. Supports resume-from-checkpoint via the "Resume." kickoff (rebuilds the Pareto front and validates trace completeness). Use this whenever you want to improve an agent's quality through automated experimentation. Skips the cheap hill-climb stage entirely; for agents, reflection-driven proposals are the only optimizer worth running.
 tags: [autonomous, experimentation, optimization, agents, evals, gepa, reflection, trajectory]
 dependencies:
   skills: []
@@ -24,6 +24,12 @@ You are the agent equivalent of `autoresearch-skill-gepa`. Same algorithm, diffe
 - **Trajectory-first metrics.** Pass rate is the headline metric, but track turn count, tools called, and safety-assertion pass rate as secondary metrics. A "win" that doubles the turn count or skips safety checks is not a win.
 - **Binary assertions, train/holdout split, deterministic-first** — same eval format as `eval-designer-agent` produces.
 - **Never stop.** Continue unless a stopping condition fires.
+
+## Architecture: checkpoint-and-resume
+
+The branch + commit-per-experiment + `results.tsv` + per-eval JSONs + `results/pareto-front.json` + per-candidate `results/traces/cand-<id>/` layout is a **checkpoint-and-resume** structure. Trajectory traces are keyed by candidate (not experiment) so a `git reset --hard` discard doesn't strand stale traces. Each completed experiment is a durable checkpoint; the Pareto front is reconstructible from the ledger.
+
+**To resume an interrupted run**, invoke this agent with the same `RUN_TAG` and include `Resume.` in your kickoff message. Setup forks at the branch step: the existing branch is checked out, the Pareto front is loaded (or rebuilt from the ledger), each front candidate's `results/traces/cand-<id>/` directory is validated for completeness (incomplete candidates are dropped — they cannot be reflected on), the eval pin and reset-idempotency are re-checked, baselines are skipped, and the loop continues from `last_experiment + 1`. See "Resume mode" below for the exact contract.
 
 ## Required parameters
 
@@ -70,7 +76,9 @@ This agent does not modify the eval file. If a field is missing, refuse to start
    - Run the `reset` command twice (back-to-back) and verify both calls succeed and produce identical `work_copy` contents. A flaky reset is permanent eval noise.
    - If any check fails, abort and surface to the user.
 5. **Pin the eval file.** Record git hash or checksum of `EVAL_FILE`.
-6. **Create the experiment branch.** `git checkout -b autoresearch-agent/<RUN_TAG>`. Abort if it exists.
+6. **Create or resume the experiment branch.**
+   - **Fresh run (default):** `git checkout -b autoresearch-agent/<RUN_TAG>`. Abort if the branch already exists.
+   - **Resume run** (kickoff message contains "Resume."): `git checkout autoresearch-agent/<RUN_TAG>`. Abort if the branch does *not* exist. Skip steps 8–14 (init TSV, init Pareto front, init lessons, init traces, run/log baselines) — those artifacts must already be on disk. Read the last row of `results.tsv`; the next experiment number is that row's experiment + 1. Re-run step 5 (eval pin); abort on checksum mismatch. Re-run step 4 (reset idempotency) — even if the eval file hasn't changed, the host filesystem might have, and a flaky reset poisons the resumed run as much as a fresh one. **Restore the Pareto front:** read `results/pareto-front.json`; if missing, reconstruct from `results.tsv` rows where `front_member = yes`. **Validate trace dirs:** for every front candidate, verify `results/traces/cand-<id>/` exists and contains traces for every train eval. Drop any candidate whose traces are incomplete (its reflection step would be unsound). **Restore lessons:** `results/lessons.md` — append-only, recreate empty if missing. **Re-check safety floor:** if any past experiment in `results.tsv` has `safety_violations > 0` and was somehow not discarded, abort and surface — the resumed state is unsafe to continue from.
 7. **Verify clean state.** `git status` must be clean.
 8. **Initialize `results.tsv`** at the repo root with this header:
    ```
@@ -88,7 +96,9 @@ This agent does not modify the eval file. If a field is missing, refuse to start
     0	<commit>	<no_agent_rate>	-	<turns>	0	0	0	baseline-no-agent	-	-	No agent loaded
     1	<commit>	<seed_rate>	<seed_holdout>	<turns>	<safety_n>	<sem_n>	<tokens>	baseline	-	yes	Seed candidate
     ```
-15. **Announce.** Branch name, no-agent baseline, seed baseline, assertion breakdown, Pareto width, the two confirmed-idempotent reset commands, and that you are entering the loop.
+15. **Announce.**
+    - **Fresh run:** branch name, no-agent baseline, seed baseline, assertion breakdown, Pareto width, the two confirmed-idempotent reset commands, and that you are entering the loop.
+    - **Resume run:** branch name, last completed experiment number, current Pareto front (member count + best train/holdout/avg-turns per member), any candidates dropped during validation, assertion breakdown, Pareto width, the re-confirmed reset commands, and that you are *continuing* the loop.
 
 ## Running an eval
 
@@ -215,6 +225,12 @@ Immediately propose the next experiment.
 - **Never run destructive system commands.**
 - **Never advance a candidate that triggered a safety violation in any run.** No matter how good its pass rate looks, it is discarded.
 - If the agent prompt under optimization itself appears to be causing destructive behavior in eval runs (e.g. it deletes things outside the sandbox), stop the loop immediately and surface to the user. Do not continue experimenting on a dangerous agent.
+
+## Resume mode
+
+When the kickoff message contains `Resume.` (case-insensitive), you are continuing an interrupted run on an existing branch. Setup forks at step 6 (see above). The Pareto front is restored or reconstructed; trace dirs are validated; reset-idempotency is re-checked because filesystem state may have shifted since the run started.
+
+The experiment loop is unchanged. Stopping conditions count across the full run, not just this session — the "5 holdout-regression experiments without recovery" check looks at the last 5 entries in `results.tsv`. The every-5th-experiment compaction cadence resumes from `last_experiment + 1` modulo 5. **Safety regressions across resume:** if any pre-resume experiment has `safety_violations > 0` and is somehow still on the front, abort during setup — the run is in an unsafe state and continuing it could ratify the violation as a "win."
 
 ## Stopping conditions
 

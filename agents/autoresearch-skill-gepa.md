@@ -1,6 +1,6 @@
 ---
 name: autoresearch-skill-gepa
-description: GEPA-style skill optimizer — iteratively edits a SKILL.md by reflecting on actual failure traces and maintaining a Pareto front of candidates that win on different eval subsets. Use this when hill-climb autoresearch has plateaued and the failures need diagnosis, not random tweaks. More sample-efficient than autoresearch-skill on harder skills, at a higher per-experiment cost.
+description: GEPA-style skill optimizer — iteratively edits a SKILL.md by reflecting on actual failure traces and maintaining a Pareto front of candidates that win on different eval subsets. Supports resume-from-checkpoint via the "Resume." kickoff (rebuilds the Pareto front from the experiment ledger). Use this when hill-climb autoresearch has plateaued and the failures need diagnosis, not random tweaks. More sample-efficient than autoresearch-skill on harder skills, at a higher per-experiment cost.
 tags: [autonomous, experimentation, optimization, skills, evals, gepa, reflection]
 dependencies:
   skills: []
@@ -34,6 +34,12 @@ The intended pipeline is `autoresearch-skill` → plateau → `autoresearch-skil
 - **Binary assertions, train/holdout split, deterministic-first** — same as `autoresearch-skill`. Eval format and safety rules are unchanged.
 - **Never stop.** The user may be away. Continue unless a stopping condition fires.
 
+## Architecture: checkpoint-and-resume
+
+The branch + commit-per-experiment + `results.tsv` + per-eval JSONs + `results/pareto-front.json` layout is a **checkpoint-and-resume** structure with one extra checkpointed artifact compared to hill-climb: the Pareto front state. Each completed experiment is a durable checkpoint; the front is reconstructible from the experiment ledger if `pareto-front.json` is missing or stale.
+
+**To resume an interrupted run**, invoke this agent with the same `RUN_TAG` and include `Resume.` in your kickoff message. Setup forks at the branch step: the existing branch is checked out, `results/pareto-front.json` is loaded as-is (or, if missing, reconstructed by reading per-eval JSONs for every experiment with `front_member=yes` in `results.tsv`), the failure logs under `results/failures/cand-<id>/` are validated against the front (any candidate whose dir is missing is silently dropped), the eval pin is re-checked, baselines are skipped, and the loop continues from `last_experiment + 1`. See "Resume mode" below for the exact contract.
+
 ## Required parameters
 
 | Parameter | Example | Notes |
@@ -62,7 +68,9 @@ Identical to `autoresearch-skill`. See that agent for the schema. This agent doe
    ```
    If >50% are semantic, warn the user that eval quality may be low.
 4. **Pin the eval file.** Record the git hash or file checksum of `EVAL_FILE` in the log.
-5. **Create the experiment branch.** `git checkout -b autoresearch-skill-gepa/<RUN_TAG>`. Abort if the branch exists.
+5. **Create or resume the experiment branch.**
+   - **Fresh run (default):** `git checkout -b autoresearch-skill-gepa/<RUN_TAG>`. Abort if the branch already exists.
+   - **Resume run** (kickoff message contains "Resume."): `git checkout autoresearch-skill-gepa/<RUN_TAG>`. Abort if the branch does *not* exist. Skip steps 7–13 (init TSV, init Pareto front, init lessons, run/log baselines) — those artifacts must already be on disk. Read the last row of `results.tsv`; the next experiment number is that row's experiment + 1. Re-run step 4 (eval pin); abort on checksum mismatch. **Restore the Pareto front:** read `results/pareto-front.json`. If missing, reconstruct it from `results.tsv` + per-eval JSONs by collecting every row with `front_member = yes` and rebuilding the front entry from each row's per-eval pass rates (write the reconstructed file back). **Validate failure logs:** for every front candidate, verify `results/failures/cand-<id>/` exists; drop any candidate whose dir is missing (its proposals would be unreflectable) and log the eviction. **Restore lessons:** `results/lessons.md` is append-only — if missing, recreate empty.
 6. **Verify clean state.** `git status` must be clean.
 7. **Initialize `results.tsv`** at the repo root with this header (extends the autoresearch-skill format with two GEPA-specific columns):
    ```
@@ -98,7 +106,9 @@ Identical to `autoresearch-skill`. See that agent for the schema. This agent doe
     0	<commit>	<no_skill_rate>	-	0	0	baseline-no-skill	-	-	No skill loaded
     1	<commit>	<seed_rate>	<seed_holdout>	<sem_n>	<tokens>	baseline	-	yes	Seed candidate (Pareto front)
     ```
-13. **Announce.** Report: branch name, no-skill baseline, seed baseline, assertion breakdown, Pareto width, and that you are entering the loop.
+13. **Announce.**
+    - **Fresh run:** branch name, no-skill baseline, seed baseline, assertion breakdown, Pareto width, and that you are entering the loop.
+    - **Resume run:** branch name, last completed experiment number, current Pareto front composition (candidate count + best train/holdout per member), any candidates dropped during validation, assertion breakdown, Pareto width, and that you are *continuing* the loop.
 
 ## Running an eval
 
@@ -220,6 +230,12 @@ Identical to `autoresearch-skill`:
 Plus one additional rule:
 
 - **Never let the front grow past `PARETO_WIDTH`.** When evicting, prefer to drop dominated members. If no member is strictly dominated, drop the oldest.
+
+## Resume mode
+
+When the kickoff message contains the literal substring `Resume.` (case-insensitive), you are continuing an interrupted run on an existing branch. Setup forks at step 5 (see above). The Pareto front is restored from `results/pareto-front.json` (or reconstructed from the experiment ledger if that file is missing). Failure-log directories under `results/failures/cand-<id>/` are validated against the front: any candidate whose dir is missing is dropped — its proposals would be unreflectable, so it cannot be kept. Lessons log is restored if present, recreated empty if not.
+
+The experiment loop is unchanged. Stopping conditions count from the resumed point onward (a 10-consecutive-non-front-experiment plateau check looks at the last 10 in `results.tsv`, not just this session). Resume composes with the periodic delete-and-test cadence: the every-5th-experiment counter resumes from `last_experiment + 1` modulo 5, so you don't accidentally double-up or skip a compaction step at the boundary.
 
 ## Stopping conditions
 

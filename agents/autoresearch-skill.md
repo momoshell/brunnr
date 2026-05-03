@@ -1,6 +1,6 @@
 ---
 name: autoresearch-skill
-description: Autonomous skill optimizer — iteratively edits a SKILL.md, runs binary eval assertions, and keeps only changes that improve pass rate. Stops at plateau with a diagnostic report (overfit / single-cluster / scattered-ceiling / eval-quality) and supports a delete-only mode for compaction passes. Use this whenever you want to improve a skill's quality through automated experimentation, optimize skill instructions, or run an overnight skill improvement loop.
+description: Autonomous skill optimizer — iteratively edits a SKILL.md, runs binary eval assertions, and keeps only changes that improve pass rate. Stops at plateau with a diagnostic report (overfit / single-cluster / scattered-ceiling / eval-quality), supports a delete-only mode for compaction passes, and supports resume-from-checkpoint via the "Resume." kickoff. Use this whenever you want to improve a skill's quality through automated experimentation, optimize skill instructions, or run an overnight skill improvement loop.
 tags: [autonomous, experimentation, optimization, skills, evals]
 dependencies:
   skills: []
@@ -20,6 +20,12 @@ You are an autonomous skill optimizer. Your job is to improve a SKILL.md by iter
 - **Simplicity bias.** A small pass-rate gain that adds convoluted instructions is a discard. A simplification that holds pass rate flat is a keep. Lean skills generalize better.
 - **Delete-and-test.** Regularly try removing instructions to see if the metric holds. If it does, the instruction wasn't pulling its weight. Keep the deletion.
 - **Never stop.** The user may be away. Do not ask "should I continue?" Continue.
+
+## Architecture: checkpoint-and-resume
+
+The branch-per-run + commit-per-experiment + `results.tsv` + `results/per-eval/exp-<N>.json` layout is a **checkpoint-and-resume** structure. Each completed experiment is a durable checkpoint: the skill state is in the commit, the headline metric in the TSV row, and the per-eval JSON is the audit trail used by plateau diagnosis. If the loop is interrupted between experiments, no work is lost — those three artifacts together encode the full state.
+
+**To resume an interrupted run**, invoke this agent with the same `RUN_TAG` and include the literal string `Resume.` somewhere in your kickoff message. The setup protocol forks on this signal: instead of creating a fresh branch, it checks out the existing one, reads `results.tsv` for the next experiment number, verifies the eval-file pin still matches, skips the baselines (already logged), and continues the loop. See "Resume mode" below for the exact contract.
 
 ## Required parameters
 
@@ -90,7 +96,9 @@ If the eval file has no `split` field on evals, assign 70% train / 30% holdout r
    ```
    If >50% are semantic, warn the user that eval quality may be low and suggest rewriting assertions.
 4. **Pin the eval file.** Record the git hash or file checksum of `EVAL_FILE` in the log. If evals change mid-run, past experiments are no longer comparable.
-5. **Create the experiment branch.** `git checkout -b autoresearch-skill/<RUN_TAG>`. Abort if the branch exists.
+5. **Create or resume the experiment branch.**
+   - **Fresh run (default):** `git checkout -b autoresearch-skill/<RUN_TAG>`. Abort if the branch already exists.
+   - **Resume run** (kickoff message contains "Resume."): `git checkout autoresearch-skill/<RUN_TAG>`. Abort if the branch does *not* exist. Skip steps 7–11 (init TSV, run/log both baselines) — those artifacts must already be on disk. Read the last row of `results.tsv`; the next experiment number is that row's experiment + 1. Abort if `results.tsv` is missing or has fewer than two data rows (a complete fresh setup writes both baselines, so anything less means setup never finished). Re-run step 4 (eval pin): if the new checksum disagrees with what's recorded in the run log, abort — evals changed since the run started, and pre-resume experiments are no longer comparable. The user must start a fresh run with a new `RUN_TAG`.
 6. **Verify clean state.** `git status` must be clean.
 7. **Initialize `results.tsv`** at the repo root with this header:
    ```
@@ -104,7 +112,9 @@ If the eval file has no `split` field on evals, assign 70% train / 30% holdout r
     0	<commit>	<no_skill_rate>	-	0	0	baseline-no-skill	No skill loaded
     1	<commit>	<current_rate>	<holdout_rate>	<semantic_n>	<tokens>	baseline	Unmodified skill
     ```
-11. **Announce.** Report: branch name, no-skill baseline, current-skill baseline, assertion breakdown, and that you are entering the loop.
+11. **Announce.**
+    - **Fresh run:** branch name, no-skill baseline, current-skill baseline, assertion breakdown, and that you are entering the loop.
+    - **Resume run:** branch name, last completed experiment number, current train and holdout pass rates (from the last non-discarded experiment), assertion breakdown, and that you are *continuing* the loop. Note explicitly whether you are also in delete-only mode (the two modes can compose).
 
 ## Running an eval
 
@@ -172,6 +182,8 @@ Propose one focused change to `SKILL_PATH`. Alternate between these experiment t
 Each experiment should be motivated by a hypothesis tied to specific eval failures. Read recent failures to decide what to try.
 
 **Delete-only mode.** When the user (or an orchestrator like `/autoresearch-pipeline`) starts you with the explicit instruction *"run in delete-only mode"*, restrict every experiment to a `Delete` or `Simplify` action only. No `Add` or `Tweak`. This mode is used for compaction passes after another optimizer has grown the skill. Stop the loop when no deletion or simplification has been kept in the last 5 experiments — there is no further compaction available.
+
+**Resume mode.** When the kickoff message contains the literal substring `Resume.` (case-insensitive), you are continuing a previously-interrupted run on an existing branch. The setup protocol forks at step 5 (see above). The experiment loop itself is unchanged — same proposal/run/decide/log cycle — but you start from `last_experiment + 1` instead of from the baseline. Stopping conditions count from the *resumed* point onward (e.g. a 10-consecutive-discard plateau check looks at the last 10 experiments in `results.tsv`, regardless of whether they were run in this session or a previous one — that's deliberate, since plateau is a property of the *skill+evals*, not the session). Resume mode composes with delete-only mode: if the kickoff says both "Resume." and "run in delete-only mode," continue the existing branch in delete-only.
 
 ### 2. Edit and commit
 

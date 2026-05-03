@@ -34,7 +34,7 @@ Each optimizer creates its own branch with a fixed prefix:
 | `autoresearch-agent` | `autoresearch-agent/<RUN_TAG>` |
 | `autoresearch-pipeline` | three branches per epoch: `<base>/<EPOCH_TAG>-stage1`, `-gepa`, `-compact` |
 
-The agents `git checkout -b` themselves and abort if the branch exists. Orchestrators (the pipeline) must NOT pre-create the branch — use detached-HEAD checkout (`git checkout <commit>`) and let the agent create the branch from there.
+The agents `git checkout -b` themselves and abort if the branch exists — *unless* the kickoff message contains the literal substring `Resume.` (case-insensitive), in which case they require the branch to exist and continue from the last logged experiment. Orchestrators (the pipeline) must NOT pre-create the branch on a fresh run — use detached-HEAD checkout (`git checkout <commit>`) and let the agent create the branch from there. On a resume, the orchestrator should check out the existing branch directly and pass `Resume.` in the handoff prompt.
 
 ## Eval schemas — skill vs agent
 

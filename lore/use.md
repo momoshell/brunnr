@@ -134,6 +134,24 @@ agents:
 4. Surface the winning commit and a Pareto-front summary
 ```
 
+## Resuming an interrupted run
+
+The autoresearch optimizers and the pipeline support **resume from checkpoint**. If a run is interrupted (crash, machine sleep, Ctrl-C), invoke the same agent or pipeline with the same `RUN_TAG` / `EPOCH_TAG` and include the literal substring `Resume.` somewhere in your kickoff message. The agent checks out the existing branch instead of creating a new one, reads `results.tsv` for the next experiment number, restores auxiliary state (Pareto front, failure logs, traces) where applicable, and continues the loop.
+
+```
+# Single agent
+User: @autoresearch-skill SKILL=code-reviewer SKILL_PATH=.pi/skills/code-reviewer/SKILL.md EVAL_FILE=evals/evals.json RUNS=3 RUN_TAG=apr14 Resume.
+AI: [checks out autoresearch-skill/apr14, picks up at experiment N+1]
+
+# Pipeline — auto-detects which stage was interrupted from existing branches + evals.json history
+User: /autoresearch-pipeline SKILL=code-reviewer EPOCH_TAG=apr14 Resume.
+AI: [resumes the in-flight stage; runs subsequent stages fresh from the prior stage's winner]
+```
+
+Resume composes with delete-only mode in `autoresearch-skill` — include both `Resume.` and `Run in delete-only mode.` to continue an interrupted compaction. The pipeline applies this automatically when resuming a Stage 3.
+
+If there is nothing to resume (no branch matches the `RUN_TAG`), the agent aborts. The eval file's checksum is re-verified on resume; if evals have changed since the run started, the agent aborts with a diagnostic — pre-resume experiments would no longer be comparable. In either case, pick a fresh `RUN_TAG` for a new run.
+
 ## Combining Items
 
 You can combine multiple items in a single request:

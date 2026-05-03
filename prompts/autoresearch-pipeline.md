@@ -1,6 +1,6 @@
 ---
 name: autoresearch-pipeline
-description: Run the full skill-optimization pipeline — autoresearch-skill (hill-climb) → autoresearch-skill-gepa (reflection) → autoresearch-skill in delete-only mode (compaction) — with plateau-based escalation between stages. One pass per epoch. Use this instead of running the optimizers individually when you want best-effort results without manually deciding when to escalate.
+description: Run the full skill-optimization pipeline — autoresearch-skill (hill-climb) → autoresearch-skill-gepa (reflection) → autoresearch-skill in delete-only mode (compaction) — with plateau-based escalation between stages. Supports resume-from-checkpoint via the "Resume." kickoff (detects which stage was interrupted from existing branches + evals.json history, resumes that stage, runs subsequent stages fresh). One pass per epoch. Use this instead of running the optimizers individually when you want best-effort results without manually deciding when to escalate.
 type: multi-agent
 tags: [autonomous, optimization, skills, evals, pipeline, orchestration]
 dependencies:
@@ -39,6 +39,12 @@ Each stage writes its own `evals.json` `history` entry with a stage-specific `ru
 
 Each stage runs in its own branch and writes to `results.tsv`. The orchestrator advances stages by reading those logs.
 
+### Architecture: fleet orchestration
+
+The pipeline is a **coordinator + specialists** topology. This prompt is the coordinator — it does not propose experiments, run evals, or edit the skill. It owns the *transitions*: pre-flight checks, plateau detection, seed-commit selection between stages, and the wrap-up summary. The three specialists (`autoresearch-skill` hill-climb, `autoresearch-skill-gepa` reflection, `autoresearch-skill` delete-only) each run in their own branch with their own checkpoint ledger; they communicate back to the coordinator only through `results.tsv`, the branch tip, and their plateau reports. Specialists never call other specialists. This is the same shape Eitri uses (orchestrator + experts) and the same shape the Cloud Next 26 "Fleet Orchestration" pattern names.
+
+The pipeline also supports resume-from-checkpoint: include `Resume.` in the kickoff message and the orchestrator detects which stage was interrupted from the existing branches + `evals.json` history entries, hands `Resume.` to that stage's specialist, and runs subsequent stages fresh. See "Pipeline resume" below.
+
 ## Step 1 — Collect parameters
 
 | Parameter | Meaning | Default |
@@ -63,9 +69,11 @@ The distinct suffixes prevent the per-stage `git checkout -b` from colliding wit
 - Verify `SKILL_PATH` and `EVAL_FILE` exist.
 - Report assertion counts and split.
 - Verify the working tree is clean.
-- Check that the three branch names above don't already exist. If they do: ask the user to choose a new `EPOCH_TAG` rather than overwriting.
-- **In-flight pipeline guard.** Refuse to start if the working tree is currently checked out on any branch matching `autoresearch-skill/*` or `autoresearch-skill-gepa/*` — another optimization may be running.
-- Check `evals.json` history: if a previous epoch ran in the last 7 days and the user has not added new evals or changed the skill, **warn** that a fresh epoch is likely to overfit. Confirm with the user before proceeding.
+- **Branch existence check** — depends on whether this is a fresh run or a resume:
+  - **Fresh (default):** all three branch names (`-stage1`, `-gepa`, `-compact`) must NOT exist. If any does, ask the user to choose a new `EPOCH_TAG` or invoke with `Resume.` to continue the existing run.
+  - **Resume** (kickoff contains `Resume.`): at least one of the three must exist, and the set of existing branches must match a valid resume state (see "Pipeline resume" below). Abort with a diagnostic if the state is inconsistent (e.g. `-stage1` and `-compact` exist but `-gepa` does not).
+- **In-flight pipeline guard.** Refuse to start if the working tree is currently checked out on any branch matching `autoresearch-skill/*` or `autoresearch-skill-gepa/*` belonging to a *different* `EPOCH_TAG` — another optimization may be running. (When resuming, being on this epoch's own branch is expected.)
+- Check `evals.json` history: if a previous epoch ran in the last 7 days and the user has not added new evals or changed the skill, **warn** that a fresh epoch is likely to overfit. Confirm with the user before proceeding. (This warning is suppressed in resume mode — the previous epoch *is* the run being resumed.)
 
 ## Step 3 — Confirm
 
@@ -90,9 +98,38 @@ Stop entire pipeline early if: TARGET reached on train AND holdout in any stage.
 
 Ask for a single "go."
 
+## Pipeline resume
+
+When the kickoff message contains `Resume.`, the pipeline continues an interrupted run rather than starting fresh. The orchestrator's job during resume is to figure out *which stage was interrupted* and which subsequent stages still need to run from scratch. Detection works by combining two signals:
+
+- **Branch existence:** which of `autoresearch-skill/<EPOCH_TAG>-stage1`, `autoresearch-skill-gepa/<EPOCH_TAG>-gepa`, `autoresearch-skill/<EPOCH_TAG>-compact` exist.
+- **`evals.json` history entries:** an entry with `run_tag = <EPOCH_TAG>-stage1` (or `-gepa`, `-compact`) is written by the stage's agent only at its wrap-up. So *entry present = stage finished cleanly; entry absent = stage was interrupted before wrap-up.*
+
+Resume action by state:
+
+| Branches present | History entries present | Resume action |
+|---|---|---|
+| (none) | (none) | "Resume." was given but there is nothing to resume. Surface this and ask the user whether they meant a fresh start. |
+| stage1 | (none) | Resume Stage 1 with `Resume.`. Then run Stage 2 and Stage 3 fresh. |
+| stage1 | stage1 | Stage 1 finished but Stage 2 never started. Skip Step 4; run Stage 2 fresh from the existing stage-1 winner; then Stage 3 fresh. |
+| stage1, gepa | stage1 | Resume Stage 2 with `Resume.`. Then run Stage 3 fresh. |
+| stage1, gepa | stage1, gepa | Stage 2 finished but Stage 3 never started. Skip Steps 4–5; run Stage 3 fresh from the existing stage-2 winner. |
+| stage1, gepa, compact | stage1, gepa | Resume Stage 3 with `Resume.`. |
+| stage1, gepa, compact | stage1, gepa, compact | Pipeline already complete. Abort with a "this epoch is done — pick a new `EPOCH_TAG` for the next epoch" message. |
+| any other combination | — | Inconsistent state (e.g. `-stage1` + `-compact` exist but `-gepa` does not). Abort with a diagnostic listing the existing branches and history entries. The user must clean up manually before resuming. |
+
+When the table calls for **resuming a stage**, modify that stage's handoff (Step 4 / 5 / 6 below) by:
+1. Checking out the existing branch instead of detached-HEAD'ing onto a seed commit (the seed commit is the resumed branch's own root).
+2. Including `Resume.` in the kickoff prompt, in addition to any other kickoff lines that stage uses (e.g. Stage 3 still says `Run in delete-only mode.`).
+3. Skipping the seed-selection step that would normally come before this stage — the seed is implicit in the existing branch.
+
+When the table calls for **running a stage fresh** during a resume (because earlier stages finished but this one never started), follow that stage's normal handoff verbatim, picking the seed commit from the previous stage's branch as usual.
+
 ## Step 4 — Run Stage 1 (autoresearch-skill)
 
-Hand off to the `autoresearch-skill` agent with parameters:
+**Resume case:** if Pipeline resume directs resuming Stage 1 (table above), check out `autoresearch-skill/<EPOCH_TAG>-stage1` and hand off with `Resume.` in the kickoff. Skip the rest of this step's setup. The agent's own resume protocol handles state restoration.
+
+**Fresh case (default):** hand off to the `autoresearch-skill` agent with parameters:
 - `SKILL`, `SKILL_PATH`, `EVAL_FILE`, `RUNS` — as collected
 - `RUN_TAG` = `<EPOCH_TAG>-stage1`
 
@@ -114,7 +151,9 @@ Before advancing, the orchestrator:
 
 ## Step 5 — Run Stage 2 (autoresearch-skill-gepa)
 
-**Position the working tree at the seed commit *without* creating the branch yet** — the agent's setup protocol creates the branch itself and aborts if one already exists. Use `git checkout <seed_commit>` to enter detached-HEAD on the seed commit. Then hand off to the `autoresearch-skill-gepa` agent with parameters:
+**Resume case:** if Pipeline resume directs resuming Stage 2, check out `autoresearch-skill-gepa/<EPOCH_TAG>-gepa` directly (not detached-HEAD on a seed) and hand off with `Resume.` in the kickoff. Skip the seed-selection step — the seed is the resumed branch's own root commit. The agent's resume protocol restores the Pareto front and continues.
+
+**Fresh case (default):** position the working tree at the seed commit *without* creating the branch yet — the agent's setup protocol creates the branch itself and aborts if one already exists. Use `git checkout <seed_commit>` to enter detached-HEAD on the seed commit. Then hand off to the `autoresearch-skill-gepa` agent with parameters:
 - `SKILL`, `SKILL_PATH`, `EVAL_FILE`, `RUNS` — as before
 - `RUN_TAG` = `<EPOCH_TAG>-gepa`
 - `PARETO_WIDTH` = `4`
@@ -137,7 +176,9 @@ On advance, the orchestrator picks the **winner** from the Pareto front using th
 
 GEPA tends to grow the skill. Stage 3 is a compaction pass.
 
-**Position the working tree at the stage-2 winner commit without pre-creating the stage-3 branch** (`git checkout <winner_commit>`). Hand off to the `autoresearch-skill` agent with parameters:
+**Resume case:** if Pipeline resume directs resuming Stage 3, check out `autoresearch-skill/<EPOCH_TAG>-compact` directly and hand off with both kickoff lines: `Run in delete-only mode.` and `Resume.` (order doesn't matter; the agent recognizes both substrings independently). The agent's resume protocol restores state and continues in delete-only.
+
+**Fresh case (default):** position the working tree at the stage-2 winner commit without pre-creating the stage-3 branch (`git checkout <winner_commit>`). Hand off to the `autoresearch-skill` agent with parameters:
 - `SKILL`, `SKILL_PATH`, `EVAL_FILE`, `RUNS` — as before
 - `RUN_TAG` = `<EPOCH_TAG>-compact`
 
