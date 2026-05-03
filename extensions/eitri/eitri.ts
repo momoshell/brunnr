@@ -27,16 +27,16 @@
  * Usage: pi -e extensions/eitri.ts
  *
  * ─────────────────────────────────────────────────────────────────────────
- * Origin: based on https://github.com/badlogic/pi-vs-claude-code (upstream
- * extensions/pi-pi.ts). Renamed Eitri in brunnr after the master dwarf
- * smith — forger of Mjölnir, Draupnir, and Gullinbursti — paired with the
- * brunnr (well of wisdom) that the experts draw from.
+ * Named Eitri after the master dwarf smith — forger of Mjölnir, Draupnir,
+ * and Gullinbursti — paired with brunnr (the well of wisdom that the
+ * experts draw from).
  *
- * Hardened in brunnr: ctx.signal abort handling (SIGTERM→SIGKILL), user/
- * project agent scope split with confirmation, truncateHead helper for tool
- * output, theme-token border colours, promptSnippet/promptGuidelines, cached
- * orchestrator system prompt, chain mode with {previous} substitution, usage
- * stats accumulation, 4-way concurrency cap, malformed-expert warnings.
+ * Features: ctx.signal abort handling (SIGTERM→SIGKILL), user/project
+ * agent scope split with confirmation, truncateHead helper for tool
+ * output, theme-token border colours, promptSnippet/promptGuidelines,
+ * cached orchestrator system prompt, chain mode with {previous}
+ * substitution, usage stats accumulation, 4-way concurrency cap,
+ * malformed-expert warnings.
  * ─────────────────────────────────────────────────────────────────────────
  */
 
@@ -573,7 +573,7 @@ Each query specifies an expert name and a specific question. Ask about WHAT to b
 			queries: Type.Array(
 				Type.Object({
 					expert: Type.String({
-						description: "Expert name. Typical Pi-Pi roster: ext-expert, theme-expert, skill-expert, config-expert, tui-expert, prompt-expert, agent-expert, keybinding-expert, cli-expert.",
+						description: "Expert name. Typical Eitri roster: ext-expert, theme-expert, skill-expert, config-expert, tui-expert, prompt-expert, agent-expert, keybinding-expert, cli-expert.",
 					}),
 					question: Type.String({
 						description: "Specific question. In chain mode, may include {previous} which is replaced with the prior expert's full output.",
