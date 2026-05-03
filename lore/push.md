@@ -1,199 +1,129 @@
 # Push Local Changes to brunnr
 
-> Contribute improvements from your project back to the central brunnr catalog.
+> Forge new skills, agents, and prompts into the central brunnr catalog with a single command.
 
 ## Overview
 
-When you improve a skill, agent, or prompt in your local project, you can push those changes back to brunnr to share them across your devices and team. The `push` command is a **safer reviewed workflow** that checks the catalog before copying.
+`brunnr push` is the one-command workflow for proposing a new item to the brunnr catalog. It copies the file, registers it in `library.yaml` from its frontmatter, runs `brunnr check`, creates a feature branch, commits, pushes, and opens a GitHub pull request.
+
+```bash
+brunnr push <section> <name>
+```
+
+`<section>` is one of: `skill`, `agent`, `prompt`. Auto-push is **not supported** for `extension` or `theme` (no frontmatter metadata to derive entries from — see [Extensions and Themes](#extensions-and-themes)).
 
 ## When to Push
 
-Push changes when:
-- You've created a new item you want to share in brunnr
-- You've fixed bugs or updated documentation in a new item
+Push when you have a new item ready to publish to the catalog. Push is for **new items only** — if the item is already registered in `library.yaml`, push refuses and tells you to edit the entry under `~/.config/brunnr/` directly.
 
-> **Note**: Push is for **new items only**. If the item already exists in brunnr, push will fail. To update an existing item, you must manually copy files after comparing versions (see [Updating Existing Items](#updating-existing-items)).
+## Prerequisites
 
-## Syntax
+| Requirement | Why |
+|---|---|
+| The item exists in your project (e.g. `.pi/skills/<name>/SKILL.md`) | Push reads it from there |
+| Frontmatter has `name`, `description`, `tags` | Used to populate the `library.yaml` entry |
+| `name` in frontmatter matches the push target | Catalog integrity (catches typos) |
+| brunnr's working tree is clean | Push won't commingle stray edits into the auto-commit |
+| `origin` remote configured on brunnr | Push needs somewhere to push to |
+| `gh` CLI installed and authenticated | Required only for opening the PR — branch still pushes without it |
 
-```bash
-just -f ~/.config/brunnr/justfile push <section> <name>
+## What Push Does
+
+```
+brunnr push skill security-review
 ```
 
-Where:
-- `<section>` is one of: `skill`, `agent`, `prompt`, `extension`, `theme`
-- `<name>` is the item name
+Step by step:
 
-> **Directory-style extensions cannot be auto-pushed.** Their files are routed across `.pi/extensions/`, `.pi/agents/`, and `.pi/themes/` on install, and that routing isn't reversible. Edit those files directly under `~/.config/brunnr/extensions/<name>/` and commit with `git`.
+1. **Validates section** — `skill`, `agent`, `prompt` only
+2. **Locates the file** — `.pi/skills/<name>/SKILL.md`, `.pi/agents/<name>.md`, or `.pi/prompts/<name>.md`
+3. **Checks library.yaml** — refuses if the name already exists, even with an external (`file://` / `https://`) source
+4. **Validates frontmatter** — `name`, `description`, `tags` required; `name` must match push target
+5. **Pre-flight git checks** — clean working tree, `origin` remote exists, branch `add-<name>` doesn't already exist
+6. **Branches** — `git checkout -b add-<name> origin/main`
+7. **Copies the file** into the brunnr repo
+8. **Upserts library.yaml** — appends a new entry preserving section comments and ordering. Handles the `<section>: []` → multi-line conversion when adding the first item to an empty section.
+9. **Runs `brunnr check`** — full catalog validation; if it fails, *all* changes are reverted (file copy, library.yaml edit, branch deletion)
+10. **Commits** — message `Add <name> <section>`
+11. **Pushes the branch** to `origin`
+12. **Opens a PR** via `gh pr create` with a generated title and body
 
-## Pushing Skills
+The PR title is `Add <name> <section>` and the body summarises the source path, registry section, and that `brunnr check` passed.
+
+## Output
 
 ```bash
-# Push an improved skill back to brunnr
-just -f ~/.config/brunnr/justfile push skill my-improved-skill
+$ brunnr push skill security-review
+Validating with brunnr check...
+library.yaml: parsed OK
+  skills      4
+  agents      6
+  prompts     11
+  extensions  1
+  themes      0
+
+All checks passed.
+
+Forged: security-review (skill)
+  https://github.com/your-org/brunnr/pull/42
 ```
 
-This copies `.pi/skills/my-improved-skill/` to `~/.config/brunnr/skills/`.
+## Failure Modes
 
-## Pushing Agents
+Push fails fast with a clear error and **never leaves the brunnr repo in a half-modified state**:
 
-```bash
-# Push an improved agent back to brunnr
-just -f ~/.config/brunnr/justfile push agent my-improved-agent
-```
+| Failure | Behavior |
+|---|---|
+| Frontmatter missing required fields | Bails before any git ops |
+| Item already in `library.yaml` | Bails, points you to the existing entry |
+| External source (`file://` / `https://`) | Bails, suggests `/fork-skill` or `/fork-agent` |
+| Working tree dirty | Bails with `git status --porcelain` |
+| Branch `add-<name>` already exists | Bails with delete instructions |
+| `brunnr check` fails after upsert | Reverts file copy + library.yaml change, deletes branch, returns to default branch |
+| `git push` fails (network, auth) | Local commit is preserved; prints manual `git push` hint |
+| `gh` not installed or not authenticated | Branch still pushes; prints manual `gh pr create` hint |
+| `gh pr create` fails | Branch already pushed; prints manual create command |
 
-This copies `.pi/agents/my-improved-agent.md` to `~/.config/brunnr/agents/`.
+## Extensions and Themes
 
-## Pushing Prompts
+Auto-push is unavailable for `extension` and `theme` because:
 
-```bash
-# Push an improved prompt back to brunnr
-just -f ~/.config/brunnr/justfile push prompt my-improved-prompt
-```
+- **Extensions** can be either single-file (`extensions/<name>.ts`) or directory-style (`extensions/<name>/` with routed install paths to `.pi/agents/<name>/` and `.pi/themes/<name>/`). The directory-style routing isn't reversible, and TypeScript files don't carry frontmatter to derive a `library.yaml` entry from.
+- **Themes** are single `.json` files with no metadata channel for `description` or `tags`.
 
-This copies `.pi/prompts/my-improved-prompt.md` to `~/.config/brunnr/prompts/`.
-
-## Safety Behavior
-
-The `push` command follows these safety rules:
-
-1. **Catalog awareness**: Checks `library.yaml` to determine the source type
-2. **Source type enforcement**: Refuses to push to local (`file://`) or remote (`https://`) references
-3. **Conflict detection**: If the item already exists in brunnr, warns and stops
-4. **Clear reporting**: Shows exactly what would change or why push is not allowed
-
-## Source Type Restrictions
-
-The push command only works with **repo-backed** sources (items stored in brunnr):
-
-| Source Type | Example | Push Allowed? |
-|-------------|---------|---------------|
-| Repo-backed | `skills/my-skill/SKILL.md` | Yes |
-| Local reference | `file:///Users/me/path/to/skill.md` | No |
-| Remote reference | `https://raw.githubusercontent.com/...` | No |
-
-### If Source is Local Reference
+For these, edit files directly:
 
 ```bash
-$ just -f ~/.config/brunnr/justfile push skill my-local-skill
-Error: Source is a local reference — cannot push to file:// path
-Source: file:///Users/me/.local/share/skills/my-skill
-Run /fork-skill my-local-skill first to copy it into brunnr, then push.
-```
-
-### If Source is Remote Reference
-
-```bash
-$ just -f ~/.config/brunnr/justfile push agent external-agent
-Error: Source is a remote reference — cannot push to external repo
-Source: https://raw.githubusercontent.com/org/repo/main/agents/external-agent.md
-Run /fork-agent external-agent first to copy it into brunnr, then push.
-```
-
-### If the Item is a Directory-Style Extension
-
-```bash
-$ just -f ~/.config/brunnr/justfile push extension eitri
-Error: directory-style extensions cannot be auto-pushed.
-Files for 'eitri' live in .pi/extensions/, .pi/agents/, .pi/themes/.
-Edit them in ~/.config/brunnr/extensions/eitri/ directly, then run: cd ~/.config/brunnr && git diff
+cd ~/.config/brunnr
+# Edit extensions/<name>/ or themes/<name>.json
+$EDITOR library.yaml          # add/update the entry
+brunnr check                  # validate
+git checkout -b add-<name>
+git add . && git commit -m "Add <name> extension"
+git push -u origin add-<name>
+gh pr create
 ```
 
 ## Updating Existing Items
 
-Push will fail if the item already exists in brunnr:
+`brunnr push` is for new items. To update an existing entry:
 
-```bash
-$ just -f ~/.config/brunnr/justfile push agent autoresearch-skill
-Warning: agent 'autoresearch-skill' already exists in brunnr
-Review differences manually before overwriting.
-Source: ~/.config/brunnr/agents/autoresearch-skill.md
-Target: .pi/agents/autoresearch-skill.md
-```
+1. Edit the file in `~/.config/brunnr/<section>s/<name>...` directly.
+2. Update `library.yaml` if metadata (description, tags, dependencies) changed.
+3. `brunnr check` to validate.
+4. Commit + PR with `git`/`gh`.
 
-To update an existing item, manually compare and copy:
+Reasoning: updates need human judgement on what changed and why. Auto-overwrite would silently clobber the description, tags, or dependencies a maintainer hand-edited.
 
-1. **Compare versions**:
-   ```bash
-   diff ~/.config/brunnr/agents/autoresearch-skill.md .pi/agents/autoresearch-skill.md
-   # or use a visual diff tool
-   ```
+## Solo vs Team Use
 
-2. **Decide which version is authoritative** or merge changes manually
+- **Solo brunnr** (you are the only contributor): self-merge the PR (`gh pr merge --auto --squash`) and you're done. The PR adds a review checkpoint for free without slowing you down.
+- **Team brunnr**: PRs are reviewed by maintainers; merged items become available to all team members after `brunnr sync`.
 
-3. **Manually copy after reviewing**:
-   ```bash
-   # Copy from your project to brunnr
-   cp .pi/agents/autoresearch-skill.md ~/.config/brunnr/agents/
-   ```
-
-4. **Update library.yaml if needed** (e.g., description, tags)
-
-5. **Commit your changes**:
-   ```bash
-   cd ~/.config/brunnr
-   git add .
-   git commit -m "Update autoresearch-skill"
-   ```
-
-## After Pushing
-
-After pushing to brunnr, you **must** update `library.yaml`:
-
-1. **If this is a new item**, add an entry:
-   ```yaml
-   skills:
-     - name: my-new-skill
-       description: What this skill does
-       source: skills/my-new-skill/SKILL.md
-   ```
-
-2. **Commit and push brunnr**:
-   ```bash
-   cd ~/.config/brunnr
-   git add .
-   git commit -m "Add/improve my-new-skill"
-   git push
-   ```
-
-3. **Sync other devices**:
-   ```bash
-   # On other machines
-   just -f ~/.config/brunnr/justfile sync
-   ```
-
-## Team Workflow
-
-For team-maintained brunnr repositories:
-
-1. **Push to a branch**:
-   ```bash
-   cd ~/.config/brunnr
-   git checkout -b improve-autoresearch-skill
-   # ... push changes ...
-   git add . && git commit -m "Improve autoresearch-skill"
-   git push -u origin improve-autoresearch-skill
-   ```
-
-2. **Create a pull request** for team review
-
-3. **Merge after approval**
-
-4. **Team members sync**:
-   ```bash
-   just -f ~/.config/brunnr/justfile sync
-   ```
-
-## Best Practices
-
-1. **Test before pushing**: Verify the item works in your project first
-2. **Check the catalog**: Ensure the item is repo-backed before pushing
-3. **Document changes**: Update descriptions and tags in library.yaml
-4. **Atomic commits**: Push related changes together
-5. **Review before force**: Never blindly overwrite brunnr source
+Run `brunnr status` any time to see the queue of open PRs ("items waiting to be forged").
 
 ## See Also
 
-- [`add.md`](add.md) — How to add items from brunnr
-- [`sync.md`](sync.md) — How to sync brunnr across devices
-- [`remove.md`](remove.md) — How to remove items safely
+- [`add.md`](add.md) — Install items from brunnr into a project
+- [`sync.md`](sync.md) — Sync brunnr across devices
+- [`remove.md`](remove.md) — Remove items safely

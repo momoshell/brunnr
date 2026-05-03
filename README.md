@@ -201,23 +201,41 @@ brunnr push agent autoresearch-skill
 
 ### Team Workflow
 
+Authors propose new items via `brunnr push`. Reviewers see the queue with `brunnr status`. Consumers pick up merged items with `brunnr sync`.
+
 ```bash
-# Team lead maintains brunnr with vetted components
-cd ~/.config/brunnr
+# 1. Author drafts a new skill in their project
+mkdir -p .pi/skills/security-review
+$EDITOR .pi/skills/security-review/SKILL.md   # write content + frontmatter
 
-# Add a new team-approved skill
-cp ~/Downloads/security-review.md skills/
-# Edit library.yaml to register it
+# 2. One command: copies the file, registers it in library.yaml from the
+#    SKILL.md frontmatter, runs `brunnr check`, branches, commits, pushes,
+#    and opens a GitHub PR.
+brunnr push skill security-review
+# Forged: security-review (skill)
+#   https://github.com/your-org/brunnr/pull/42
 
-# Commit and push
-git add .
-git commit -m "Add security-review skill"
-git push
+# 3. Reviewers check the queue
+brunnr status   # lists open PRs awaiting review
 
-# Team members sync and install
+# 4. After merge, consumers sync and install
 brunnr sync
-brunnr install
+brunnr add skill security-review
 ```
+
+**What `brunnr push` does** (skill / agent / prompt only):
+
+1. Validates the source file exists and has frontmatter with `name`, `description`, `tags`
+2. Refuses if the item already exists in `library.yaml` (push is for new items)
+3. Copies the file into the brunnr repo (`skills/<name>/`, `agents/`, `prompts/`)
+4. Appends a `library.yaml` entry derived from frontmatter, preserving comments and ordering
+5. Runs `brunnr check` — reverts everything if validation fails
+6. Creates branch `add-<name>` from `origin/main`, commits, pushes
+7. Opens a PR via `gh pr create`
+
+If `gh` isn't installed or authenticated, the branch still gets pushed and you get the manual `gh pr create` command to run.
+
+**Extensions and themes** still need manual edits (no frontmatter metadata source). Edit files under `~/.config/brunnr/extensions/` or `~/.config/brunnr/themes/`, register in `library.yaml`, and commit with `git`.
 
 ### Checking the catalog queue
 

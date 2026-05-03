@@ -284,7 +284,9 @@ remove section name:
     fi
     echo "Note: Dependencies are not automatically removed."
 
-# Push local changes back to brunnr
+# Push a new item to brunnr — copies file, upserts library.yaml from frontmatter,
+# runs `brunnr check`, branches, commits, pushes, and opens a GitHub PR.
+# For new skills/agents/prompts. Extensions/themes need manual edits in $BRUNNR_HOME.
 push section name:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -292,147 +294,277 @@ push section name:
     NAME="{{name}}"
     BRUNNR_HOME="{{BRUNNR_HOME}}"
     LIBRARY="$BRUNNR_HOME/library.yaml"
-    
-    # Map section to source and target directories
+
+    # ---- 1. Validate section + map paths -----------------------------------
     case "$SECTION" in
-        skill)
-            SRC="{{SKILLS_SRC}}"
-            DST="{{SKILLS_DIR}}"
-            YAML_KEY="skills"
-            ;;
-        agent)
-            SRC="{{AGENTS_SRC}}"
-            DST="{{AGENTS_DIR}}"
-            YAML_KEY="agents"
-            ;;
-        prompt)
-            SRC="{{PROMPTS_SRC}}"
-            DST="{{PROMPTS_DIR}}"
-            YAML_KEY="prompts"
-            ;;
-        extension)
-            SRC="{{EXTENSIONS_SRC}}"
-            DST="{{EXTENSIONS_DIR}}"
-            YAML_KEY="extensions"
-            ;;
-        theme)
-            SRC="{{THEMES_SRC}}"
-            DST="{{THEMES_DIR}}"
-            YAML_KEY="themes"
+        skill)  SRC="{{SKILLS_SRC}}";  DST="{{SKILLS_DIR}}";  YAML_KEY="skills";  SRC_PATH="skills/$NAME/SKILL.md" ;;
+        agent)  SRC="{{AGENTS_SRC}}";  DST="{{AGENTS_DIR}}";  YAML_KEY="agents";  SRC_PATH="agents/$NAME.md" ;;
+        prompt) SRC="{{PROMPTS_SRC}}"; DST="{{PROMPTS_DIR}}"; YAML_KEY="prompts"; SRC_PATH="prompts/$NAME.md" ;;
+        extension|theme)
+            echo "Error: auto-push only supports skill, agent, prompt."
+            echo "  For $SECTION, edit files under $BRUNNR_HOME/${SECTION}s/ directly,"
+            echo "  register in library.yaml, then commit + open a PR with git/gh."
+            exit 1
             ;;
         *)
-            echo "Error: Unknown section '$SECTION'"
-            echo "Valid sections: skill, agent, prompt, extension, theme"
+            echo "Error: Unknown section '$SECTION' (valid: skill, agent, prompt)"
             exit 1
             ;;
     esac
 
-    # Directory-style extensions cannot be auto-pushed because their files are
-    # routed across multiple project directories on install. Guide the user.
-    if [ "$SECTION" = "extension" ] && [ -d "$SRC/$NAME" ]; then
-        echo "Error: directory-style extensions cannot be auto-pushed."
-        echo "Files for '$NAME' live in {{EXTENSIONS_DIR}}/, {{AGENTS_DIR}}/, {{THEMES_DIR}}/."
-        echo "Edit them in $SRC/$NAME/ directly, then run: cd {{BRUNNR_HOME}} && git diff"
-        exit 1
+    # ---- 2. Locate item in user's project ----------------------------------
+    if [ "$SECTION" = "skill" ]; then
+        if [ ! -f "$DST/$NAME/SKILL.md" ]; then
+            echo "Error: skill '$NAME' not found at $DST/$NAME/SKILL.md"
+            exit 1
+        fi
+        PROJECT_FILE="$DST/$NAME/SKILL.md"
+    else
+        if [ ! -f "$DST/$NAME.md" ]; then
+            echo "Error: $SECTION '$NAME' not found at $DST/$NAME.md"
+            exit 1
+        fi
+        PROJECT_FILE="$DST/$NAME.md"
     fi
-    
-    # Check if local version exists
-    if [ ! -e "$DST/$NAME" ] && [ ! -e "$DST/$NAME.md" ] && [ ! -e "$DST/$NAME.ts" ] && [ ! -e "$DST/$NAME.json" ]; then
-        echo "Error: $SECTION '$NAME' not found in current project"
-        exit 1
-    fi
-    
-    # Check library.yaml exists
+
+    # ---- 3. Validate library.yaml + reject existing entry -------------------
     if [ ! -f "$LIBRARY" ]; then
         echo "Error: library.yaml not found at $LIBRARY"
         exit 1
     fi
-    
-    # Look up entry in library.yaml using Ruby (safe YAML parsing)
-    ENTRY=$(ruby -ryaml -e "
-        require 'yaml'
-        catalog = YAML.safe_load(File.read('$LIBRARY'), permitted_classes: [], permitted_symbols: [], aliases: false)
-        items = catalog['$YAML_KEY'] || []
-        item = items.find { |i| i['name'] == ARGV[0] }
-        if item
-          puts item.to_yaml
-        else
-          exit 1
+
+    EXISTING=$(ruby -ryaml -e '
+        catalog = YAML.safe_load(File.read(ARGV[0]), permitted_classes: [], permitted_symbols: [], aliases: false)
+        items = catalog[ARGV[1]] || []
+        item = items.find { |i| i["name"] == ARGV[2] }
+        puts(item ? item["source"].to_s : "")
+    ' "$LIBRARY" "$YAML_KEY" "$NAME")
+
+    if [ -n "$EXISTING" ]; then
+        if [[ "$EXISTING" == file://* ]] || [[ "$EXISTING" == https://* ]]; then
+            echo "Error: '$NAME' has external source — cannot push to external reference"
+            echo "  source: $EXISTING"
+            if [ "$SECTION" = "skill" ]; then
+                echo "  Run /fork-skill $NAME first to bring it into brunnr."
+            elif [ "$SECTION" = "agent" ]; then
+                echo "  Run /fork-agent $NAME first to bring it into brunnr."
+            fi
+            exit 1
+        fi
+        echo "Error: $SECTION '$NAME' already exists in brunnr (source: $EXISTING)"
+        echo "  Push is for new items only. Edit the entry under $BRUNNR_HOME/ directly."
+        exit 1
+    fi
+
+    # ---- 4. Validate frontmatter on project file ---------------------------
+    ruby -ryaml -e '
+        path = ARGV[0]
+        expected_name = ARGV[1]
+        section = ARGV[2]
+        content = File.read(path)
+        unless content =~ /\A---\s*\n(.*?)\n---/m
+            STDERR.puts "Error: source file has no YAML frontmatter: #{path}"
+            exit 1
         end
-    " "$NAME" 2>/dev/null) || {
-        echo "Error: $SECTION '$NAME' not found in library.yaml"
-        echo "This item may not be in the catalog yet."
-        echo "After pushing, you must add an entry to library.yaml."
-        echo ""
-        echo "Proceeding with push to create new entry in brunnr..."
+        fm = YAML.safe_load($1, permitted_classes: [], permitted_symbols: [], aliases: false) rescue {}
+        fm = {} unless fm.is_a?(Hash)
+        missing = []
+        ["name", "description", "tags"].each do |f|
+            v = fm[f]
+            missing << f if v.nil? || (v.respond_to?(:empty?) && v.empty?)
+        end
+        unless missing.empty?
+            STDERR.puts "Error: frontmatter missing required field(s): #{missing.join(", ")}"
+            STDERR.puts "  file: #{path}"
+            STDERR.puts "  Required for push: name, description, tags"
+            exit 1
+        end
+        if fm["name"] != expected_name
+            STDERR.puts "Error: frontmatter name #{fm["name"].inspect} does not match push target #{expected_name.inspect}"
+            STDERR.puts "  file: #{path}"
+            exit 1
+        end
+        if section == "prompt" && fm["type"] && !["single", "multi-agent"].include?(fm["type"])
+            STDERR.puts "Error: prompt type #{fm["type"].inspect} must be \"single\" or \"multi-agent\""
+            exit 1
+        end
+    ' "$PROJECT_FILE" "$NAME" "$SECTION"
+
+    # ---- 5. Pre-flight git/gh checks ---------------------------------------
+    if [ ! -d "$BRUNNR_HOME/.git" ]; then
+        echo "Error: $BRUNNR_HOME is not a git repository"
+        exit 1
+    fi
+
+    cd "$BRUNNR_HOME"
+
+    if [ -n "$(git status --porcelain)" ]; then
+        echo "Error: brunnr has uncommitted changes — clean working tree required"
+        echo "  $BRUNNR_HOME"
+        git status --porcelain
+        exit 1
+    fi
+
+    if ! git remote get-url origin >/dev/null 2>&1; then
+        echo "Error: brunnr has no 'origin' remote"
+        echo "  Add one: cd $BRUNNR_HOME && git remote add origin <url>"
+        exit 1
+    fi
+
+    BRANCH="add-$NAME"
+    if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
+        echo "Error: branch '$BRANCH' already exists in brunnr"
+        echo "  Delete it: git -C $BRUNNR_HOME branch -D $BRANCH"
+        exit 1
+    fi
+
+    # ---- 6. Branch from origin/main (or master) ----------------------------
+    git fetch origin --quiet 2>/dev/null || true
+    if git show-ref --verify --quiet refs/remotes/origin/main; then
+        git checkout -b "$BRANCH" origin/main >/dev/null 2>&1
+    elif git show-ref --verify --quiet refs/remotes/origin/master; then
+        git checkout -b "$BRANCH" origin/master >/dev/null 2>&1
+    else
+        git checkout -b "$BRANCH" >/dev/null 2>&1
+    fi
+
+    # Cleanup if anything fails before commit lands
+    SUCCESS=0
+    DEFAULT_BRANCH="main"
+    git show-ref --verify --quiet refs/heads/main || DEFAULT_BRANCH="master"
+    cleanup_local() {
+        if [ "$SUCCESS" = "0" ]; then
+            cd "$BRUNNR_HOME"
+            git checkout "$DEFAULT_BRANCH" >/dev/null 2>&1 || true
+            git restore . >/dev/null 2>&1 || true
+            git clean -fd >/dev/null 2>&1 || true
+            git branch -D "$BRANCH" >/dev/null 2>&1 || true
+        fi
     }
-    
-    # Extract source from entry if it exists (safe YAML parsing)
-    if [ -n "$ENTRY" ]; then
-        SOURCE=$(echo "$ENTRY" | ruby -ryaml -e "require 'yaml'; puts YAML.safe_load(STDIN.read, permitted_classes: [], permitted_symbols: [], aliases: false)['source']")
-        
-        # Check source type and fail for non-repo-backed sources
-        if [[ "$SOURCE" == file://* ]]; then
-            echo "Error: Source is a local reference — cannot push to file:// path"
-            echo "Source: $SOURCE"
-            if [ "$SECTION" = "agent" ]; then
-                echo "Run /fork-agent {{name}} first to copy it into brunnr, then push."
-            elif [ "$SECTION" = "skill" ]; then
-                echo "Run /fork-skill {{name}} first to copy it into brunnr, then push."
-            else
-                echo "Copy the content into brunnr's $YAML_KEY/ directory and update library.yaml's source field, then push."
-            fi
-            exit 1
-        fi
+    trap cleanup_local EXIT
 
-        if [[ "$SOURCE" == https://* ]]; then
-            echo "Error: Source is a remote reference — cannot push to external repo"
-            echo "Source: $SOURCE"
-            if [ "$SECTION" = "agent" ]; then
-                echo "Run /fork-agent {{name}} first to copy it into brunnr, then push."
-            elif [ "$SECTION" = "skill" ]; then
-                echo "Run /fork-skill {{name}} first to copy it into brunnr, then push."
-            else
-                echo "Copy the content into brunnr's $YAML_KEY/ directory and update library.yaml's source field, then push."
-            fi
-            exit 1
-        fi
-        
-        # For repo-backed sources, check if item exists in brunnr
-        if [ -e "$SRC/$NAME" ] || [ -e "$SRC/$NAME.md" ]; then
-            echo "Warning: $SECTION '$NAME' already exists in brunnr"
-            echo "Review differences manually before overwriting."
-            echo "Source: $SRC/$NAME"
-            echo "Target: $DST/$NAME"
-            exit 1
-        fi
-    else
-        # No entry in library.yaml - check if item exists in brunnr anyway
-        if [ -e "$SRC/$NAME" ] || [ -e "$SRC/$NAME.md" ]; then
-            echo "Warning: $SECTION '$NAME' already exists in brunnr"
-            echo "Review differences manually before overwriting."
-            echo "Source: $SRC/$NAME"
-            echo "Target: $DST/$NAME"
-            exit 1
-        fi
-    fi
-    
-    # Copy files to brunnr
-    echo "Pushing $SECTION '$NAME' to brunnr..."
-    if [ -d "$DST/$NAME" ]; then
+    # ---- 7. Copy file(s) into brunnr ---------------------------------------
+    if [ "$SECTION" = "skill" ]; then
         cp -r "$DST/$NAME" "$SRC/"
-    elif [ -e "$DST/$NAME.ts" ]; then
-        cp "$DST/$NAME.ts" "$SRC/"
-    elif [ -e "$DST/$NAME.json" ]; then
-        cp "$DST/$NAME.json" "$SRC/"
     else
-        cp "$DST/$NAME.md" "$SRC/"
+        mkdir -p "$SRC"
+        cp "$PROJECT_FILE" "$SRC/"
     fi
 
-    echo "Pushed $SECTION '$NAME' to $SRC/"
+    # ---- 8. Upsert library.yaml entry --------------------------------------
+    ruby -ryaml -e '
+        section = ARGV[0]; name = ARGV[1]; library = ARGV[2]; src_file = ARGV[3]; src_path = ARGV[4]
+        section_pl = { "skill" => "skills", "agent" => "agents", "prompt" => "prompts" }[section]
+
+        content = File.read(src_file)
+        fm = {}
+        fm = (YAML.safe_load($1, permitted_classes: [], permitted_symbols: [], aliases: false) || {}) if content =~ /\A---\s*\n(.*?)\n---/m
+
+        emit = ->(v) {
+            s = v.to_s
+            if s =~ /[:#\[\]{}|>&*!?%@`]/ || s.start_with?(" ") || s.end_with?(" ") || s.empty?
+                YAML.dump(s).sub(/\A---\s*\n?/, "").chomp
+            else
+                s
+            end
+        }
+
+        e = []
+        e << "  - name: #{name}"
+        e << "    description: #{emit.call(fm["description"])}"
+        e << "    source: #{src_path}"
+        e << "    type: #{fm["type"] || "single"}" if section == "prompt"
+        e << "    tags: [#{(fm["tags"] || []).map(&:to_s).join(", ")}]"
+        e << "    origin: #{fm["origin"]}" if fm["origin"]
+        deps = fm["dependencies"] || {}
+        e << "    dependencies:"
+        e << "      skills: [#{(deps["skills"] || []).join(", ")}]"
+        e << "      agents: [#{(deps["agents"] || []).join(", ")}]"
+        e << "      prompts: [#{deps["prompts"].join(", ")}]" if section == "prompt" && deps["prompts"] && !deps["prompts"].empty?
+        e << "    sync: auto"
+        entry_text = e.join("\n") + "\n"
+
+        lines = File.readlines(library)
+        section_keys = ["skills", "agents", "prompts", "extensions", "themes"]
+        section_lines = {}
+        lines.each_with_index do |l, i|
+            section_keys.each { |s| section_lines[s] = i if l =~ /\A#{Regexp.escape(s)}:/ && !section_lines.key?(s) }
+        end
+
+        start_idx = section_lines[section_pl] or raise "section #{section_pl} not found in library.yaml"
+
+        # Convert empty-array form to multi-line and drop placeholder comment
+        if lines[start_idx] =~ /\A#{Regexp.escape(section_pl)}:\s*\[\]\s*$/
+            lines[start_idx] = "#{section_pl}:\n"
+            lines.delete_at(start_idx + 1) if lines[start_idx + 1] && lines[start_idx + 1] =~ /\A# \(/
+        end
+
+        # Find next "# ====" header block boundary
+        next_block = nil
+        ((start_idx + 1)...lines.length).each do |i|
+            (next_block = i; break) if lines[i] =~ /\A# ==========/
+        end
+
+        end_idx = next_block ? next_block - 1 : lines.length - 1
+        end_idx -= 1 while end_idx > start_idx && lines[end_idx].strip.empty?
+
+        section_had_content = end_idx > start_idx
+        insert_text = (section_had_content ? "\n" : "") + entry_text + (next_block ? "\n" : "")
+        lines.insert(end_idx + 1, insert_text)
+
+        File.write(library, lines.join)
+    ' "$SECTION" "$NAME" "$LIBRARY" "$PROJECT_FILE" "$SRC_PATH"
+
+    # ---- 9. Validate with brunnr check -------------------------------------
+    echo "Validating with brunnr check..."
+    if ! just -f "$BRUNNR_HOME/justfile" check; then
+        echo ""
+        echo "Error: brunnr check failed — reverting all changes"
+        exit 1
+    fi
     echo ""
-    echo "IMPORTANT: If this is a new item, you must update library.yaml"
-    echo "with an entry for '$NAME' and commit your changes."
+
+    # ---- 10. Commit ---------------------------------------------------------
+    git add -A
+    git commit -m "Add $NAME $SECTION" >/dev/null
+
+    # Past this point we keep the local branch even if push/PR fail
+    SUCCESS=1
+    trap - EXIT
+
+    # ---- 11. Push branch ----------------------------------------------------
+    if ! git push -u origin "$BRANCH" >/dev/null 2>&1; then
+        echo "Branch '$BRANCH' committed locally, but 'git push' failed."
+        echo "  Push manually: cd $BRUNNR_HOME && git push -u origin $BRANCH"
+        exit 1
+    fi
+
+    # ---- 12. Open PR via gh -------------------------------------------------
+    PR_TITLE="Add $NAME $SECTION"
+    PR_BODY=$(printf 'Adds the **`%s`** %s to the brunnr catalog.\n\n- File: `%s`\n- library.yaml: registered under `%s:`\n- Validated with `brunnr check`\n\nForged via `brunnr push %s %s`.' "$NAME" "$SECTION" "$SRC_PATH" "$YAML_KEY" "$SECTION" "$NAME")
+
+    if ! command -v gh >/dev/null 2>&1; then
+        echo "Branch pushed; 'gh' CLI not installed (brew install gh)."
+        echo "  Open the PR manually, or install gh and run:"
+        echo "  cd $BRUNNR_HOME && gh pr create"
+        exit 0
+    fi
+
+    if ! gh auth status >/dev/null 2>&1; then
+        echo "Branch pushed; 'gh' is not authenticated."
+        echo "  Run 'gh auth login', then: cd $BRUNNR_HOME && gh pr create"
+        exit 0
+    fi
+
+    PR_URL=$(gh pr create --title "$PR_TITLE" --body "$PR_BODY" 2>&1) || {
+        echo "Branch pushed but 'gh pr create' failed:"
+        echo "$PR_URL"
+        echo "Try manually: cd $BRUNNR_HOME && gh pr create --title \"$PR_TITLE\""
+        exit 1
+    }
+
+    echo "Forged: $NAME ($SECTION)"
+    echo "  $PR_URL"
 
 # List available or installed items
 list section="":
