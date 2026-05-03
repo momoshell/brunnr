@@ -30,7 +30,8 @@ THEMES_SRC := BRUNNR_HOME / "themes"
     echo "  install              Initialize brunnr in current project"
     echo "  add <section> <name> Add item to current project (section: skill, agent, prompt, extension, theme)"
     echo "  remove <section> <name> Remove item from current project"
-    echo "  push <section> <name> Push local changes back to brunnr"
+    echo "  push <section> <name> Push a new item to brunnr (opens a PR)"
+    echo "  retire <section> <name> Open a PR removing an item from brunnr"
     echo "  list [section]       List available/installed items"
     echo "  sync                 Sync brunnr repository with remote"
     echo "  status               Show open PRs in brunnr (skills awaiting review)"
@@ -564,6 +565,278 @@ push section name:
     }
 
     echo "Forged: $NAME ($SECTION)"
+    echo "  $PR_URL"
+
+# Retire an item from brunnr — opens a PR that removes the file + library.yaml
+# entry. Refuses if other catalog items depend on it.
+retire section name:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    SECTION="{{section}}"
+    NAME="{{name}}"
+    BRUNNR_HOME="{{BRUNNR_HOME}}"
+    LIBRARY="$BRUNNR_HOME/library.yaml"
+
+    # ---- 1. Validate section + map paths -----------------------------------
+    case "$SECTION" in
+        skill)  YAML_KEY="skills";  REPO_PATH="skills/$NAME";          IS_DIR=1 ;;
+        agent)  YAML_KEY="agents";  REPO_PATH="agents/$NAME.md";       IS_DIR=0 ;;
+        prompt) YAML_KEY="prompts"; REPO_PATH="prompts/$NAME.md";      IS_DIR=0 ;;
+        extension|theme)
+            echo "Error: auto-retire only supports skill, agent, prompt."
+            echo "  For $SECTION, edit files under $BRUNNR_HOME/${SECTION}s/ directly,"
+            echo "  remove the library.yaml entry, then commit + open a PR with git/gh."
+            exit 1
+            ;;
+        *)
+            echo "Error: Unknown section '$SECTION' (valid: skill, agent, prompt)"
+            exit 1
+            ;;
+    esac
+
+    # ---- 2. Validate library.yaml + entry exists ---------------------------
+    if [ ! -f "$LIBRARY" ]; then
+        echo "Error: library.yaml not found at $LIBRARY"
+        exit 1
+    fi
+
+    EXISTING=$(ruby -ryaml -e '
+        catalog = YAML.safe_load(File.read(ARGV[0]), permitted_classes: [], permitted_symbols: [], aliases: false)
+        items = catalog[ARGV[1]] || []
+        item = items.find { |i| i["name"] == ARGV[2] }
+        puts(item ? item["source"].to_s : "")
+    ' "$LIBRARY" "$YAML_KEY" "$NAME")
+
+    if [ -z "$EXISTING" ]; then
+        echo "Error: $SECTION '$NAME' not found in library.yaml"
+        exit 1
+    fi
+
+    if [[ "$EXISTING" == file://* ]] || [[ "$EXISTING" == https://* ]]; then
+        echo "Error: '$NAME' has external source — cannot auto-retire"
+        echo "  source: $EXISTING"
+        echo "  Remove the library.yaml entry manually."
+        exit 1
+    fi
+
+    # ---- 3. Dependency check -----------------------------------------------
+    DEPENDENTS=$(ruby -ryaml -e '
+        library = ARGV[0]; section_pl = ARGV[1]; name = ARGV[2]
+        catalog = YAML.safe_load(File.read(library), permitted_classes: [], permitted_symbols: [], aliases: false)
+        found = []
+        %w[skills agents prompts].each do |s|
+            (catalog[s] || []).each do |item|
+                deps = item["dependencies"] || {}
+                if (deps[section_pl] || []).include?(name)
+                    found << "#{s}/#{item["name"]}"
+                end
+            end
+        end
+        puts found.join("\n")
+    ' "$LIBRARY" "$YAML_KEY" "$NAME")
+
+    if [ -n "$DEPENDENTS" ]; then
+        echo "Error: $SECTION '$NAME' is a dependency of:"
+        echo "$DEPENDENTS" | sed 's/^/  - /'
+        echo ""
+        echo "Retire those items first, or remove the dependency from their library.yaml entry."
+        exit 1
+    fi
+
+    # ---- 4. Pre-flight git/gh checks ---------------------------------------
+    if [ ! -d "$BRUNNR_HOME/.git" ]; then
+        echo "Error: $BRUNNR_HOME is not a git repository"
+        exit 1
+    fi
+
+    cd "$BRUNNR_HOME"
+
+    if [ -n "$(git status --porcelain)" ]; then
+        echo "Error: brunnr has uncommitted changes — clean working tree required"
+        echo "  $BRUNNR_HOME"
+        git status --porcelain
+        exit 1
+    fi
+
+    if ! git remote get-url origin >/dev/null 2>&1; then
+        echo "Error: brunnr has no 'origin' remote"
+        echo "  Add one: cd $BRUNNR_HOME && git remote add origin <url>"
+        exit 1
+    fi
+
+    BRANCH="retire-$NAME"
+    if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
+        echo "Error: branch '$BRANCH' already exists in brunnr"
+        echo "  Delete it: git -C $BRUNNR_HOME branch -D $BRANCH"
+        exit 1
+    fi
+
+    # Verify the file we'll delete actually exists
+    if [ "$IS_DIR" = "1" ]; then
+        if [ ! -d "$BRUNNR_HOME/$REPO_PATH" ]; then
+            echo "Error: source directory missing: $BRUNNR_HOME/$REPO_PATH"
+            echo "  library.yaml has the entry but the file is gone — delete the entry manually."
+            exit 1
+        fi
+    else
+        if [ ! -f "$BRUNNR_HOME/$REPO_PATH" ]; then
+            echo "Error: source file missing: $BRUNNR_HOME/$REPO_PATH"
+            echo "  library.yaml has the entry but the file is gone — delete the entry manually."
+            exit 1
+        fi
+    fi
+
+    # ---- 5. Branch from origin/main (or master) ----------------------------
+    git fetch origin --quiet 2>/dev/null || true
+    if git show-ref --verify --quiet refs/remotes/origin/main; then
+        git checkout -b "$BRANCH" origin/main >/dev/null 2>&1
+    elif git show-ref --verify --quiet refs/remotes/origin/master; then
+        git checkout -b "$BRANCH" origin/master >/dev/null 2>&1
+    else
+        git checkout -b "$BRANCH" >/dev/null 2>&1
+    fi
+
+    SUCCESS=0
+    DEFAULT_BRANCH="main"
+    git show-ref --verify --quiet refs/heads/main || DEFAULT_BRANCH="master"
+    cleanup_local() {
+        if [ "$SUCCESS" = "0" ]; then
+            cd "$BRUNNR_HOME"
+            git checkout "$DEFAULT_BRANCH" >/dev/null 2>&1 || true
+            git restore . >/dev/null 2>&1 || true
+            git clean -fd >/dev/null 2>&1 || true
+            git branch -D "$BRANCH" >/dev/null 2>&1 || true
+        fi
+    }
+    trap cleanup_local EXIT
+
+    # ---- 6. Delete file(s) -------------------------------------------------
+    if [ "$IS_DIR" = "1" ]; then
+        rm -rf "$BRUNNR_HOME/$REPO_PATH"
+    else
+        rm "$BRUNNR_HOME/$REPO_PATH"
+    fi
+
+    # ---- 7. Remove library.yaml entry --------------------------------------
+    ruby -e '
+        section = ARGV[0]; name = ARGV[1]; library = ARGV[2]
+        section_pl = { "skill" => "skills", "agent" => "agents", "prompt" => "prompts" }[section]
+
+        lines = File.readlines(library)
+        section_keys = ["skills", "agents", "prompts", "extensions", "themes"]
+        section_lines = {}
+        lines.each_with_index do |l, i|
+            section_keys.each { |s| section_lines[s] = i if l =~ /\A#{Regexp.escape(s)}:/ && !section_lines.key?(s) }
+        end
+        section_start = section_lines[section_pl] or raise "section #{section_pl} not found"
+
+        next_block = nil
+        ((section_start + 1)...lines.length).each do |i|
+            (next_block = i; break) if lines[i] =~ /\A# ==========/
+        end
+        section_end = next_block ? next_block - 1 : lines.length - 1
+
+        target_start = nil
+        ((section_start + 1)..section_end).each do |i|
+            if lines[i] =~ /\A  - name:\s*#{Regexp.escape(name)}\s*$/
+                target_start = i; break
+            end
+        end
+        raise "entry #{name.inspect} not found in section #{section_pl}" unless target_start
+
+        # Find target end: next "  - name:" within the section, or section_end + 1
+        target_end = section_end + 1
+        ((target_start + 1)..section_end).each do |i|
+            if lines[i] =~ /\A  - name:/
+                target_end = i; break
+            end
+        end
+
+        lines.slice!(target_start, target_end - target_start)
+
+        # Recompute section state — was that the last entry?
+        new_section_lines = {}
+        lines.each_with_index do |l, i|
+            section_keys.each { |s| new_section_lines[s] = i if l =~ /\A#{Regexp.escape(s)}:/ && !new_section_lines.key?(s) }
+        end
+        new_section_start = new_section_lines[section_pl]
+        new_next_block = nil
+        ((new_section_start + 1)...lines.length).each do |i|
+            (new_next_block = i; break) if lines[i] =~ /\A# ==========/
+        end
+        new_section_end = new_next_block ? new_next_block - 1 : lines.length - 1
+
+        has_entries = false
+        ((new_section_start + 1)..new_section_end).each do |i|
+            if lines[i] =~ /\A  - name:/
+                has_entries = true; break
+            end
+        end
+
+        if !has_entries
+            # Convert to inline empty array, drop trailing blanks within the section
+            lines[new_section_start] = "#{section_pl}: []\n"
+            walker = new_section_start + 1
+            while walker < lines.length && lines[walker].strip.empty?
+                lines.delete_at(walker)
+            end
+            # Re-add a single blank line before the next block if applicable
+            if new_next_block && lines[new_section_start + 1] && lines[new_section_start + 1] !~ /\A\s*$/
+                lines.insert(new_section_start + 1, "\n")
+            end
+        end
+
+        File.write(library, lines.join)
+    ' "$SECTION" "$NAME" "$LIBRARY"
+
+    # ---- 8. Validate with brunnr check -------------------------------------
+    echo "Validating with brunnr check..."
+    if ! just -f "$BRUNNR_HOME/justfile" check; then
+        echo ""
+        echo "Error: brunnr check failed — reverting all changes"
+        exit 1
+    fi
+    echo ""
+
+    # ---- 9. Commit ---------------------------------------------------------
+    git add -A
+    git commit -m "Retire $NAME $SECTION" >/dev/null
+
+    SUCCESS=1
+    trap - EXIT
+
+    # ---- 10. Push branch ---------------------------------------------------
+    if ! git push -u origin "$BRANCH" >/dev/null 2>&1; then
+        echo "Branch '$BRANCH' committed locally, but 'git push' failed."
+        echo "  Push manually: cd $BRUNNR_HOME && git push -u origin $BRANCH"
+        exit 1
+    fi
+
+    # ---- 11. Open PR via gh ------------------------------------------------
+    PR_TITLE="Retire $NAME $SECTION"
+    PR_BODY=$(printf 'Retires the **`%s`** %s from the brunnr catalog.\n\n- Removed: `%s`\n- library.yaml: entry under `%s:` deleted\n- Validated with `brunnr check` (no remaining items depend on this one)\n\nRetired via `brunnr retire %s %s`.' "$NAME" "$SECTION" "$REPO_PATH" "$YAML_KEY" "$SECTION" "$NAME")
+
+    if ! command -v gh >/dev/null 2>&1; then
+        echo "Branch pushed; 'gh' CLI not installed (brew install gh)."
+        echo "  Open the PR manually, or install gh and run:"
+        echo "  cd $BRUNNR_HOME && gh pr create"
+        exit 0
+    fi
+
+    if ! gh auth status >/dev/null 2>&1; then
+        echo "Branch pushed; 'gh' is not authenticated."
+        echo "  Run 'gh auth login', then: cd $BRUNNR_HOME && gh pr create"
+        exit 0
+    fi
+
+    PR_URL=$(gh pr create --title "$PR_TITLE" --body "$PR_BODY" 2>&1) || {
+        echo "Branch pushed but 'gh pr create' failed:"
+        echo "$PR_URL"
+        echo "Try manually: cd $BRUNNR_HOME && gh pr create --title \"$PR_TITLE\""
+        exit 1
+    }
+
+    echo "Retired: $NAME ($SECTION)"
     echo "  $PR_URL"
 
 # List available or installed items

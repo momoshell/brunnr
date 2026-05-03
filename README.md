@@ -12,6 +12,7 @@ brunnr is your team's central well of agentic knowledge for the Pi coding agent.
 - **Cross-device**: Sync your personal catalog across machines
 - **Team sharing**: Share vetted prompts and workflows with your entire team
 - **Versioned**: Track changes to your AI components like any other code
+- **Forge-style contribution**: `brunnr push` and `brunnr retire` open reviewed PRs — every catalog mutation is auditable, dependency-checked, and revertable
 - **Pi-native**: Default install paths land in the directories Pi reads natively — no auxiliary extension or settings shim required
 
 ## Prerequisites
@@ -21,7 +22,7 @@ brunnr is your team's central well of agentic knowledge for the Pi coding agent.
 | **git** | Version control, syncing brunnr across devices | [git-scm.com](https://git-scm.com) |
 | **just** | Runs brunnr commands (modern make alternative) | `brew install just` or [just.systems](https://just.systems) |
 | **Pi** | The coding agent that uses your skills, agents, prompts, extensions, themes | [pi-mono](https://github.com/badlogic/pi-mono) |
-| **gh** | GitHub CLI — required for `brunnr status` (open PR queue); optional otherwise | `brew install gh` or [cli.github.com](https://cli.github.com) |
+| **gh** | GitHub CLI — opens PRs for `brunnr push` / `brunnr retire` and powers `brunnr status` | `brew install gh` then `gh auth login`, or [cli.github.com](https://cli.github.com) |
 
 brunnr manages files that Pi reads from `.pi/` in your project (and `~/.pi/agent/` globally). The `just` commands handle copying files between brunnr and your projects. Pi reads the installed content at runtime — `.pi/skills/`, `.pi/agents/`, `.pi/prompts/`, `.pi/extensions/`, `.pi/themes/` are all native discovery paths.
 
@@ -52,10 +53,27 @@ After `install`, your project will have `.pi/skills/`, `.pi/agents/`, `.pi/promp
 
 **From here:**
 
-- **Day-to-day**: see [Workflows](#workflows) for the `add` / `remove` / `list` / `push` / `sync` patterns.
+- **Day-to-day**: see the [Command Reference](#command-reference) below or jump to [Workflows](#workflows) for end-to-end examples.
 - **Build *new* Pi components without reading docs**: add the [Eitri meta-agent](#building-pi-components-with-eitri) — `brunnr add extension eitri`, then `pi -e .pi/extensions/eitri.ts` and ask it to build something.
 - **Improve an *existing* skill or agent against evals**: see [Skill Optimization](#skill-optimization-autoresearch--gepa) (autoresearch + GEPA) and [Agent Optimization](#agent-optimization).
 - **Reference**: [Source Types](#source-types), [Catalog Sections](#catalog-sections), and the per-command guides in [`lore/`](lore/).
+
+## Command Reference
+
+| Command | What it does | Example |
+|---|---|---|
+| `brunnr install` | Create `.pi/{skills,agents,prompts,extensions,themes}` in the current project so Pi can discover them | `brunnr install` |
+| `brunnr list [section]` | List catalog items (and what's installed locally if you pass a section) | `brunnr list skill` |
+| `brunnr search <query>` | Search names, descriptions, and tags across the catalog | `brunnr search eval` |
+| `brunnr add <section> <name>` | Copy a catalog item into the project — installs to `.pi/<section>s/` | `brunnr add agent eval-designer` |
+| `brunnr remove <section> <name>` | Uninstall an item from the project (does **not** touch the brunnr catalog) | `brunnr remove agent eval-designer` |
+| `brunnr push <section> <name>` | Forge a new item into the catalog: file copy → library.yaml entry → `brunnr check` → branch → commit → push → PR. New items only; skill/agent/prompt only. | `brunnr push skill code-reviewer` |
+| `brunnr retire <section> <name>` | Open a PR removing an item from the catalog. Refuses if other entries depend on it. | `brunnr retire agent stale-optimizer` |
+| `brunnr status` | List open PRs in the brunnr remote — the queue of items "waiting to be forged" | `brunnr status` |
+| `brunnr sync` | Fast-forward your local brunnr clone from `origin` (no merge conflicts allowed) | `brunnr sync` |
+| `brunnr check` | Validate `library.yaml` integrity — frontmatter names, source paths, dependencies, orphan files | `brunnr check` |
+
+`<section>` is one of `skill`, `agent`, `prompt`, `extension`, `theme` (auto-push and retire are limited to skill/agent/prompt).
 
 ## Core Concepts
 
@@ -184,19 +202,27 @@ brunnr/
 ### Personal Workflow
 
 ```bash
-# 1. Install brunnr into a new project
+# 1. Install brunnr into a project (creates .pi/* directories Pi reads from)
 brunnr install
 
-# 2. Add the catalog items you need
-brunnr add agent autoresearch-skill   # autonomous skill optimizer
-brunnr add prompt skill-status        # /skill-status command
-brunnr add extension eitri            # meta-agent for building Pi components
+# 2. Browse the catalog
+brunnr list                          # everything available, grouped by section
+brunnr search eval                   # find eval-related items by name / tags / description
 
-# 3. Use them in Pi
-# (Items are now in .pi/agents/, .pi/prompts/, .pi/extensions/ — Pi reads them natively)
+# 3. Add what you need
+brunnr add agent eval-designer       # generates evals.json for skills
+brunnr add prompt skill-status       # /skill-status command
+brunnr add extension eitri           # meta-agent for building Pi components
 
-# 4. Push improvements back to brunnr (for repo-backed items you've edited)
-brunnr push agent autoresearch-skill
+# 4. Launch Pi — it discovers everything in .pi/ natively
+pi
+# For extensions you also need: pi -e .pi/extensions/eitri.ts
+
+# 5. Stay current with the catalog
+brunnr sync                          # fast-forward your brunnr clone from origin
+
+# 6. Stop using something (project-only — leaves the catalog untouched)
+brunnr remove prompt skill-status
 ```
 
 ### Team Workflow
@@ -233,9 +259,31 @@ brunnr add skill security-review
 6. Creates branch `add-<name>` from `origin/main`, commits, pushes
 7. Opens a PR via `gh pr create`
 
-If `gh` isn't installed or authenticated, the branch still gets pushed and you get the manual `gh pr create` command to run.
-
 **Extensions and themes** still need manual edits (no frontmatter metadata source). Edit files under `~/.config/brunnr/extensions/` or `~/.config/brunnr/themes/`, register in `library.yaml`, and commit with `git`.
+
+### Retiring an item from the catalog
+
+`brunnr retire <section> <name>` is the deletion counterpart to `push`. It opens a PR that removes a skill, agent, or prompt — file plus `library.yaml` entry — after verifying nothing else in the catalog depends on it.
+
+```bash
+brunnr retire agent stale-optimizer
+# Validating with brunnr check...
+# All checks passed.
+# Retired: stale-optimizer (agent)
+#   https://github.com/your-org/brunnr/pull/47
+```
+
+**What `brunnr retire` does**:
+
+1. Verifies the item is in `library.yaml` and repo-backed (not external)
+2. Scans every other entry's `dependencies` — refuses if any item lists this one, telling you which ones need to be retired or updated first
+3. Branches `retire-<name>` from `origin/main`
+4. Deletes the file (`skills/<name>/`, `agents/<name>.md`, or `prompts/<name>.md`)
+5. Removes the `library.yaml` entry, preserving section comments and converting the section back to `<key>: []` if it became empty
+6. Runs `brunnr check` — reverts if anything's broken
+7. Commits `Retire <name> <section>`, pushes, opens a PR
+
+The dependency-aware bail is the key safety: you can't accidentally retire a skill that an agent depends on without a clear error pointing at the dependent.
 
 ### Checking the catalog queue
 
@@ -253,9 +301,7 @@ brunnr status
 # Review: gh pr view <num> --web   (run from ~/.config/brunnr)
 ```
 
-The command queries the brunnr remote via `gh pr list` and reports number, title, branch, author, and age. It exits with `No open PRs — the forge is quiet.` when nothing's pending.
-
-**Requires:** `gh` CLI authenticated (`gh auth login`) and a configured `origin` remote on the brunnr repo. There's no background process or notification — call it manually when you want to see the queue (typically before `brunnr sync`).
+The command queries the brunnr remote via `gh pr list` and reports number, title, branch, author, and age. It exits with `No open PRs — the forge is quiet.` when nothing's pending. There's no background process or notification — call it manually when you want to see the queue (typically before `brunnr sync`).
 
 ## Building Pi components with Eitri
 
@@ -558,11 +604,13 @@ Same keep/discard loop, same git-based experiment tracking — just without the 
 
 ## Safety & Consistency
 
-brunnr prioritizes safe operations:
+brunnr's mutation commands (`push`, `retire`, `add`, `remove`) are designed so that nothing destructive happens silently:
 
-- **No blind overwrites**: Existing files are preserved; conflicts are reported
-- **Explicit dependencies**: Skills declare what they need in library.yaml (manual checking)
-- **Atomic operations**: Add/remove operations are all-or-nothing within a section
+- **No blind overwrites**: `add` refuses if the target already exists in the project; `push` refuses if the item is already in `library.yaml`. Conflicts are reported, not silently resolved.
+- **Validated catalog**: `brunnr check` verifies every entry's frontmatter `name` matches `library.yaml`, every source path resolves, every declared dependency exists, and there are no orphan files. `push` and `retire` run this automatically and roll back on failure.
+- **Dependency-aware retire**: `brunnr retire` scans every other entry's `dependencies` and refuses with a list of dependents if any item still relies on the one you're removing.
+- **PR-based contribution**: `push` and `retire` go through a feature branch and a GitHub PR — nothing lands on `main` without review (or self-merge for solo use). The PR carries the diff plus `brunnr check` confirmation.
+- **Atomic revert on failure**: If anything fails between branch creation and commit, the working tree, branch, and `library.yaml` are restored to a clean state. The local commit is kept once it lands, so push/PR failures don't lose your work.
 
 ## Configuration
 
@@ -607,10 +655,10 @@ The `library.yaml` file is the source of truth for your catalog. See `SKILL.md` 
 See the `lore/` directory for detailed guides:
 
 - [`lore/install.md`](lore/install.md) — Install brunnr into a project
-- [`lore/add.md`](lore/add.md) — Add skills/agents/prompts to your project
-- [`lore/use.md`](lore/use.md) — Use installed components
-- [`lore/push.md`](lore/push.md) — Push local improvements back to brunnr
-- [`lore/remove.md`](lore/remove.md) — Remove components safely
+- [`lore/add.md`](lore/add.md) — Add skills, agents, prompts, extensions, or themes to your project
+- [`lore/use.md`](lore/use.md) — Invoke installed items inside Pi (`@<name>`, `/<prompt>`, etc.)
+- [`lore/push.md`](lore/push.md) — Forge new items into the catalog (and the `retire` deletion counterpart)
+- [`lore/remove.md`](lore/remove.md) — Remove items safely from a project
 - [`lore/list.md`](lore/list.md) — List available and installed items
 - [`lore/sync.md`](lore/sync.md) — Sync brunnr across devices
 - [`lore/search.md`](lore/search.md) — Search the catalog
