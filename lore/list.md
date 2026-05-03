@@ -9,14 +9,22 @@ The `list` command shows you the contents of your brunnr catalog (from `library.
 ## Syntax
 
 ```bash
-# List all sections
-just -f ~/.config/brunnr/justfile list
-
-# List specific section
-just -f ~/.config/brunnr/justfile list <section>
+brunnr list [-g|--global] [<section>]
 ```
 
-Where `<section>` is one of: `skill`, `agent`, `prompt`, `extension`, `theme`
+| Arg | Meaning |
+|---|---|
+| `-g`, `--global` | Show what's installed in `~/.pi/agent/<section>s/` (every-project scope) instead of `.pi/<section>s/` (project scope). Only affects the "Installed" section of the output — the "Available" catalog list is the same in both scopes. |
+| `<section>` | Optional: `skill`, `agent`, `prompt`, `extension`, or `theme`. Without it, prints the catalog index for all sections. |
+
+## Examples
+
+```bash
+brunnr list                # full catalog index
+brunnr list agent          # agents — catalog + project-installed
+brunnr list -g agent       # agents — catalog + globally-installed
+brunnr list -g extension   # what extensions are installed for every project
+```
 
 ## Listing All Sections
 

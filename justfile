@@ -13,6 +13,14 @@ export PROMPTS_DIR := env_var_or_default("BRUNNR_PROMPTS_DIR", ".pi/prompts")
 export EXTENSIONS_DIR := env_var_or_default("BRUNNR_EXTENSIONS_DIR", ".pi/extensions")
 export THEMES_DIR := env_var_or_default("BRUNNR_THEMES_DIR", ".pi/themes")
 
+# Global (user-level) target directories — Pi reads these for all projects
+HOME_DIR := env_var('HOME')
+export GLOBAL_SKILLS_DIR := env_var_or_default("BRUNNR_GLOBAL_SKILLS_DIR", HOME_DIR / ".pi/agent/skills")
+export GLOBAL_AGENTS_DIR := env_var_or_default("BRUNNR_GLOBAL_AGENTS_DIR", HOME_DIR / ".pi/agent/agents")
+export GLOBAL_PROMPTS_DIR := env_var_or_default("BRUNNR_GLOBAL_PROMPTS_DIR", HOME_DIR / ".pi/agent/prompts")
+export GLOBAL_EXTENSIONS_DIR := env_var_or_default("BRUNNR_GLOBAL_EXTENSIONS_DIR", HOME_DIR / ".pi/agent/extensions")
+export GLOBAL_THEMES_DIR := env_var_or_default("BRUNNR_GLOBAL_THEMES_DIR", HOME_DIR / ".pi/agent/themes")
+
 # Source directories in brunnr
 SKILLS_SRC := BRUNNR_HOME / "skills"
 AGENTS_SRC := BRUNNR_HOME / "agents"
@@ -28,11 +36,11 @@ THEMES_SRC := BRUNNR_HOME / "themes"
     echo ""
     echo "Commands:"
     echo "  install              Initialize brunnr in current project"
-    echo "  add <section> <name> Add item to current project (section: skill, agent, prompt, extension, theme)"
-    echo "  remove <section> <name> Remove item from current project"
+    echo "  add [-g] <section> <name>    Install item to project (.pi/) or globally with -g (~/.pi/agent/)"
+    echo "  remove [-g] <section> <name> Uninstall item from project or globally with -g"
     echo "  push <section> <name> Push a new item to brunnr (opens a PR)"
     echo "  scrap <section> <name> Open a PR removing an item from brunnr"
-    echo "  list [section]       List available/installed items"
+    echo "  list [-g] [section]   List catalog items + what's installed (project, or globally with -g)"
     echo "  sync                 Sync brunnr repository with remote"
     echo "  status               Show open PRs in brunnr (skills awaiting review)"
     echo "  search <query>       Search the catalog"
@@ -63,37 +71,56 @@ THEMES_SRC := BRUNNR_HOME / "themes"
     echo ""
     echo "brunnr is ready. Use 'just -f {{BRUNNR_HOME}}/justfile add <section> <name>' to install items."
 
-# Add an item from brunnr to the current project
-add section name:
+# Add an item from brunnr to the current project (default) or globally with -g
+add *args:
     #!/usr/bin/env bash
     set -euo pipefail
-    SECTION="{{section}}"
-    NAME="{{name}}"
     BRUNNR_HOME="{{BRUNNR_HOME}}"
     LIBRARY="$BRUNNR_HOME/library.yaml"
-    
+
+    # Parse -g/--global flag and positional args
+    GLOBAL=0
+    POSITIONAL=()
+    for arg in {{args}}; do
+        case "$arg" in
+            -g|--global) GLOBAL=1 ;;
+            *) POSITIONAL+=("$arg") ;;
+        esac
+    done
+
+    if [ "${#POSITIONAL[@]}" -ne 2 ]; then
+        echo "Usage: brunnr add [-g|--global] <section> <name>"
+        echo "  <section>: skill, agent, prompt, extension, theme"
+        echo "  -g  install to ~/.pi/agent/ (Pi reads it for all projects)"
+        exit 1
+    fi
+    SECTION="${POSITIONAL[0]}"
+    NAME="${POSITIONAL[1]}"
+
+    # Resolve target directories based on scope
+    if [ "$GLOBAL" = "1" ]; then
+        SKILLS_TARGET="{{GLOBAL_SKILLS_DIR}}"
+        AGENTS_TARGET="{{GLOBAL_AGENTS_DIR}}"
+        PROMPTS_TARGET="{{GLOBAL_PROMPTS_DIR}}"
+        EXTENSIONS_TARGET="{{GLOBAL_EXTENSIONS_DIR}}"
+        THEMES_TARGET="{{GLOBAL_THEMES_DIR}}"
+        SCOPE_LABEL="global"
+    else
+        SKILLS_TARGET="{{SKILLS_DIR}}"
+        AGENTS_TARGET="{{AGENTS_DIR}}"
+        PROMPTS_TARGET="{{PROMPTS_DIR}}"
+        EXTENSIONS_TARGET="{{EXTENSIONS_DIR}}"
+        THEMES_TARGET="{{THEMES_DIR}}"
+        SCOPE_LABEL="project"
+    fi
+
     # Map section to target directory and YAML key
     case "$SECTION" in
-        skill)
-            DST="{{SKILLS_DIR}}"
-            YAML_KEY="skills"
-            ;;
-        agent)
-            DST="{{AGENTS_DIR}}"
-            YAML_KEY="agents"
-            ;;
-        prompt)
-            DST="{{PROMPTS_DIR}}"
-            YAML_KEY="prompts"
-            ;;
-        extension)
-            DST="{{EXTENSIONS_DIR}}"
-            YAML_KEY="extensions"
-            ;;
-        theme)
-            DST="{{THEMES_DIR}}"
-            YAML_KEY="themes"
-            ;;
+        skill)     DST="$SKILLS_TARGET";     YAML_KEY="skills" ;;
+        agent)     DST="$AGENTS_TARGET";     YAML_KEY="agents" ;;
+        prompt)    DST="$PROMPTS_TARGET";    YAML_KEY="prompts" ;;
+        extension) DST="$EXTENSIONS_TARGET"; YAML_KEY="extensions" ;;
+        theme)     DST="$THEMES_TARGET";     YAML_KEY="themes" ;;
         *)
             echo "Error: Unknown section '$SECTION'"
             echo "Valid sections: skill, agent, prompt, extension, theme"
@@ -175,39 +202,39 @@ add section name:
     # Check if target already exists
     if [ "$SECTION" = "extension" ] && [ -d "$RESOLVED_SRC" ]; then
         # Directory-style extensions install to multiple targets — check for the
-        # canonical .ts file at EXTENSIONS_DIR/<name>.ts as the conflict marker.
-        if [ -e "{{EXTENSIONS_DIR}}/$NAME.ts" ]; then
-            echo "Error: extension '$NAME' already installed (found {{EXTENSIONS_DIR}}/$NAME.ts)"
+        # canonical .ts file at the extensions target as the conflict marker.
+        if [ -e "$EXTENSIONS_TARGET/$NAME.ts" ]; then
+            echo "Error: extension '$NAME' already installed ($SCOPE_LABEL: $EXTENSIONS_TARGET/$NAME.ts)"
             echo "Use 'push' to update brunnr with local changes, or remove first."
             exit 1
         fi
     elif [ -e "$DST/$NAME" ] || [ -e "$DST/$NAME.md" ] || [ -e "$DST/$NAME.ts" ] || [ -e "$DST/$NAME.json" ]; then
-        echo "Error: $SECTION '$NAME' already installed"
+        echo "Error: $SECTION '$NAME' already installed ($SCOPE_LABEL: $DST/)"
         echo "Use 'push' to update brunnr with local changes, or remove first."
         exit 1
     fi
 
     # Copy files
-    echo "Adding $SECTION '$NAME'..."
+    echo "Adding $SECTION '$NAME' ($SCOPE_LABEL)..."
 
     if [ "$SECTION" = "extension" ] && [ -d "$RESOLVED_SRC" ]; then
         # Directory-style extension: route per the brunnr convention.
-        #   <src>/*.ts            → {{EXTENSIONS_DIR}}/   (just the .ts file at top level)
-        #   <src>/agents/<sub>/   → {{AGENTS_DIR}}/<sub>/  (preserves subdir structure)
-        #   <src>/themes/<sub>/   → {{THEMES_DIR}}/<sub>/
+        #   <src>/*.ts            → $EXTENSIONS_TARGET/   (just the .ts file at top level)
+        #   <src>/agents/<sub>/   → $AGENTS_TARGET/<sub>/ (preserves subdir structure)
+        #   <src>/themes/<sub>/   → $THEMES_TARGET/<sub>/
         # Other top-level files (README.md etc.) are ignored.
-        mkdir -p "{{EXTENSIONS_DIR}}" "{{AGENTS_DIR}}" "{{THEMES_DIR}}"
+        mkdir -p "$EXTENSIONS_TARGET" "$AGENTS_TARGET" "$THEMES_TARGET"
         shopt -s nullglob
         for ts in "$RESOLVED_SRC"/*.ts; do
-            [ -f "$ts" ] && cp "$ts" "{{EXTENSIONS_DIR}}/"
+            [ -f "$ts" ] && cp "$ts" "$EXTENSIONS_TARGET/"
         done
         if [ -d "$RESOLVED_SRC/agents" ]; then
-            cp -r "$RESOLVED_SRC/agents/." "{{AGENTS_DIR}}/"
+            cp -r "$RESOLVED_SRC/agents/." "$AGENTS_TARGET/"
         fi
         if [ -d "$RESOLVED_SRC/themes" ]; then
-            cp -r "$RESOLVED_SRC/themes/." "{{THEMES_DIR}}/"
+            cp -r "$RESOLVED_SRC/themes/." "$THEMES_TARGET/"
         fi
-        echo "Installed extension '$NAME' (routed to {{EXTENSIONS_DIR}}/, {{AGENTS_DIR}}/, {{THEMES_DIR}}/)"
+        echo "Installed extension '$NAME' (routed to $EXTENSIONS_TARGET/, $AGENTS_TARGET/, $THEMES_TARGET/)"
     else
         # Ensure destination directory exists
         mkdir -p "$DST"
@@ -223,19 +250,48 @@ add section name:
     echo "Dependencies (if any) are documented in library.yaml - install manually if needed."
 
 # Remove an item from the current project
-remove section name:
+remove *args:
     #!/usr/bin/env bash
     set -euo pipefail
-    SECTION="{{section}}"
-    NAME="{{name}}"
 
-    # Map section to target directory
+    GLOBAL=0
+    POSITIONAL=()
+    for arg in {{args}}; do
+        case "$arg" in
+            -g|--global) GLOBAL=1 ;;
+            *) POSITIONAL+=("$arg") ;;
+        esac
+    done
+
+    if [ "${#POSITIONAL[@]}" -ne 2 ]; then
+        echo "Usage: brunnr remove [-g|--global] <section> <name>"
+        exit 1
+    fi
+    SECTION="${POSITIONAL[0]}"
+    NAME="${POSITIONAL[1]}"
+
+    if [ "$GLOBAL" = "1" ]; then
+        SKILLS_TARGET="{{GLOBAL_SKILLS_DIR}}"
+        AGENTS_TARGET="{{GLOBAL_AGENTS_DIR}}"
+        PROMPTS_TARGET="{{GLOBAL_PROMPTS_DIR}}"
+        EXTENSIONS_TARGET="{{GLOBAL_EXTENSIONS_DIR}}"
+        THEMES_TARGET="{{GLOBAL_THEMES_DIR}}"
+        SCOPE_LABEL="global"
+    else
+        SKILLS_TARGET="{{SKILLS_DIR}}"
+        AGENTS_TARGET="{{AGENTS_DIR}}"
+        PROMPTS_TARGET="{{PROMPTS_DIR}}"
+        EXTENSIONS_TARGET="{{EXTENSIONS_DIR}}"
+        THEMES_TARGET="{{THEMES_DIR}}"
+        SCOPE_LABEL="project"
+    fi
+
     case "$SECTION" in
-        skill)    DST="{{SKILLS_DIR}}" ;;
-        agent)    DST="{{AGENTS_DIR}}" ;;
-        prompt)   DST="{{PROMPTS_DIR}}" ;;
-        extension) DST="{{EXTENSIONS_DIR}}" ;;
-        theme)    DST="{{THEMES_DIR}}" ;;
+        skill)     DST="$SKILLS_TARGET" ;;
+        agent)     DST="$AGENTS_TARGET" ;;
+        prompt)    DST="$PROMPTS_TARGET" ;;
+        extension) DST="$EXTENSIONS_TARGET" ;;
+        theme)     DST="$THEMES_TARGET" ;;
         *)
             echo "Error: Unknown section '$SECTION'"
             echo "Valid sections: skill, agent, prompt, extension, theme"
@@ -247,33 +303,33 @@ remove section name:
         # Directory-style extension: remove the .ts file plus the matching
         # agents/<name>/ and themes/<name>/ subdirs that were created on install.
         REMOVED_ANY=0
-        if [ -e "{{EXTENSIONS_DIR}}/$NAME.ts" ]; then
-            rm "{{EXTENSIONS_DIR}}/$NAME.ts"
-            echo "Removed {{EXTENSIONS_DIR}}/$NAME.ts"
+        if [ -e "$EXTENSIONS_TARGET/$NAME.ts" ]; then
+            rm "$EXTENSIONS_TARGET/$NAME.ts"
+            echo "Removed $EXTENSIONS_TARGET/$NAME.ts"
             REMOVED_ANY=1
         fi
-        if [ -d "{{AGENTS_DIR}}/$NAME" ]; then
-            rm -r "{{AGENTS_DIR}}/$NAME"
-            echo "Removed {{AGENTS_DIR}}/$NAME/"
+        if [ -d "$AGENTS_TARGET/$NAME" ]; then
+            rm -r "$AGENTS_TARGET/$NAME"
+            echo "Removed $AGENTS_TARGET/$NAME/"
             REMOVED_ANY=1
         fi
-        if [ -d "{{THEMES_DIR}}/$NAME" ]; then
-            rm -r "{{THEMES_DIR}}/$NAME"
-            echo "Removed {{THEMES_DIR}}/$NAME/"
+        if [ -d "$THEMES_TARGET/$NAME" ]; then
+            rm -r "$THEMES_TARGET/$NAME"
+            echo "Removed $THEMES_TARGET/$NAME/"
             REMOVED_ANY=1
         fi
         if [ "$REMOVED_ANY" = "0" ]; then
-            echo "Error: extension '$NAME' is not installed"
+            echo "Error: extension '$NAME' is not installed ($SCOPE_LABEL)"
             exit 1
         fi
-        echo "Removed extension '$NAME'"
+        echo "Removed extension '$NAME' ($SCOPE_LABEL)"
     else
         # File or directory removal (skill/agent/prompt/theme)
         if [ ! -e "$DST/$NAME" ] && [ ! -e "$DST/$NAME.md" ] && [ ! -e "$DST/$NAME.json" ]; then
-            echo "Error: $SECTION '$NAME' is not installed"
+            echo "Error: $SECTION '$NAME' is not installed ($SCOPE_LABEL: $DST/)"
             exit 1
         fi
-        echo "Removing $SECTION '$NAME'..."
+        echo "Removing $SECTION '$NAME' ($SCOPE_LABEL)..."
         if [ -d "$DST/$NAME" ]; then
             rm -r "$DST/$NAME"
         elif [ -e "$DST/$NAME.json" ]; then
@@ -839,14 +895,37 @@ scrap section name:
     echo "Scrapped: $NAME ($SECTION)"
     echo "  $PR_URL"
 
-# List available or installed items
-list section="":
+# List available or installed items — pass -g to show what's installed globally
+list *args:
     #!/usr/bin/env bash
-    SECTION="{{section}}"
     BRUNNR_HOME="{{BRUNNR_HOME}}"
     LIBRARY="$BRUNNR_HOME/library.yaml"
-    
-    # Function to list installed items in a directory
+
+    GLOBAL=0
+    SECTION=""
+    for arg in {{args}}; do
+        case "$arg" in
+            -g|--global) GLOBAL=1 ;;
+            *) SECTION="$arg" ;;
+        esac
+    done
+
+    if [ "$GLOBAL" = "1" ]; then
+        SKILLS_TARGET="{{GLOBAL_SKILLS_DIR}}"
+        AGENTS_TARGET="{{GLOBAL_AGENTS_DIR}}"
+        PROMPTS_TARGET="{{GLOBAL_PROMPTS_DIR}}"
+        EXTENSIONS_TARGET="{{GLOBAL_EXTENSIONS_DIR}}"
+        THEMES_TARGET="{{GLOBAL_THEMES_DIR}}"
+        SCOPE_LABEL="Globally installed"
+    else
+        SKILLS_TARGET="{{SKILLS_DIR}}"
+        AGENTS_TARGET="{{AGENTS_DIR}}"
+        PROMPTS_TARGET="{{PROMPTS_DIR}}"
+        EXTENSIONS_TARGET="{{EXTENSIONS_DIR}}"
+        THEMES_TARGET="{{THEMES_DIR}}"
+        SCOPE_LABEL="Installed"
+    fi
+
     list_installed() {
         local dir="$1"
         local suffix="$2"
@@ -858,17 +937,7 @@ list section="":
             done | sort
         fi
     }
-    
-    # Function to format catalog entries as "name - description"
-    format_catalog() {
-        local items="$1"
-        if [ -z "$items" ]; then
-            echo "  (none)"
-        else
-            echo "$items"
-        fi
-    }
-    
+
     if [ -z "$SECTION" ]; then
         echo "brunnr catalog sections:"
         echo ""
@@ -893,92 +962,37 @@ list section="":
         fi
     else
         case "$SECTION" in
-            skill)
-                echo "Available skills:"
-                if [ -f "$LIBRARY" ]; then
-                    ruby -ryaml -e "
-                        require 'yaml'
-                        catalog = YAML.safe_load(File.read('$LIBRARY'), permitted_classes: [], permitted_symbols: [], aliases: false)
-                        items = catalog['skills'] || []
-                        items.each { |i| puts \"  #{i['name']} - #{i['description']}\" }
-                    " 2>/dev/null || echo "  (none)"
-                else
-                    echo "  (none)"
-                fi
-                echo ""
-                echo "Installed skills:"
-                list_installed "{{SKILLS_DIR}}" "" | sed 's/^/  /' || echo "  (none)"
-                ;;
-            agent)
-                echo "Available agents:"
-                if [ -f "$LIBRARY" ]; then
-                    ruby -ryaml -e "
-                        require 'yaml'
-                        catalog = YAML.safe_load(File.read('$LIBRARY'), permitted_classes: [], permitted_symbols: [], aliases: false)
-                        items = catalog['agents'] || []
-                        items.each { |i| puts \"  #{i['name']} - #{i['description']}\" }
-                    " 2>/dev/null || echo "  (none)"
-                else
-                    echo "  (none)"
-                fi
-                echo ""
-                echo "Installed agents:"
-                list_installed "{{AGENTS_DIR}}" ".md" | sed 's/^/  /' || echo "  (none)"
-                ;;
-            prompt)
-                echo "Available prompts:"
-                if [ -f "$LIBRARY" ]; then
-                    ruby -ryaml -e "
-                        require 'yaml'
-                        catalog = YAML.safe_load(File.read('$LIBRARY'), permitted_classes: [], permitted_symbols: [], aliases: false)
-                        items = catalog['prompts'] || []
-                        items.each { |i| puts \"  #{i['name']} - #{i['description']}\" }
-                    " 2>/dev/null || echo "  (none)"
-                else
-                    echo "  (none)"
-                fi
-                echo ""
-                echo "Installed prompts:"
-                list_installed "{{PROMPTS_DIR}}" ".md" | sed 's/^/  /' || echo "  (none)"
-                ;;
-            extension)
-                echo "Available extensions:"
-                if [ -f "$LIBRARY" ]; then
-                    ruby -ryaml -e "
-                        require 'yaml'
-                        catalog = YAML.safe_load(File.read('$LIBRARY'), permitted_classes: [], permitted_symbols: [], aliases: false)
-                        items = catalog['extensions'] || []
-                        items.each { |i| puts \"  #{i['name']} - #{i['description']}\" }
-                    " 2>/dev/null || echo "  (none)"
-                else
-                    echo "  (none)"
-                fi
-                echo ""
-                echo "Installed extensions:"
-                list_installed "{{EXTENSIONS_DIR}}" ".ts" | sed 's/^/  /' || echo "  (none)"
-                ;;
-            theme)
-                echo "Available themes:"
-                if [ -f "$LIBRARY" ]; then
-                    ruby -ryaml -e "
-                        require 'yaml'
-                        catalog = YAML.safe_load(File.read('$LIBRARY'), permitted_classes: [], permitted_symbols: [], aliases: false)
-                        items = catalog['themes'] || []
-                        items.each { |i| puts \"  #{i['name']} - #{i['description']}\" }
-                    " 2>/dev/null || echo "  (none)"
-                else
-                    echo "  (none)"
-                fi
-                echo ""
-                echo "Installed themes:"
-                list_installed "{{THEMES_DIR}}" ".json" | sed 's/^/  /' || echo "  (none)"
-                ;;
+            skill)     LIB_KEY="skills";     INST_DIR="$SKILLS_TARGET";     INST_SUFFIX="" ;;
+            agent)     LIB_KEY="agents";     INST_DIR="$AGENTS_TARGET";     INST_SUFFIX=".md" ;;
+            prompt)    LIB_KEY="prompts";    INST_DIR="$PROMPTS_TARGET";    INST_SUFFIX=".md" ;;
+            extension) LIB_KEY="extensions"; INST_DIR="$EXTENSIONS_TARGET"; INST_SUFFIX=".ts" ;;
+            theme)     LIB_KEY="themes";     INST_DIR="$THEMES_TARGET";     INST_SUFFIX=".json" ;;
             *)
                 echo "Error: Unknown section '$SECTION'"
                 echo "Valid sections: skill, agent, prompt, extension, theme"
                 exit 1
                 ;;
         esac
+
+        echo "Available ${LIB_KEY}:"
+        if [ -f "$LIBRARY" ]; then
+            ruby -ryaml -e "
+                require 'yaml'
+                catalog = YAML.safe_load(File.read('$LIBRARY'), permitted_classes: [], permitted_symbols: [], aliases: false)
+                items = catalog['$LIB_KEY'] || []
+                items.each { |i| puts \"  #{i['name']} - #{i['description']}\" }
+            " 2>/dev/null || echo "  (none)"
+        else
+            echo "  (none)"
+        fi
+        echo ""
+        echo "$SCOPE_LABEL $LIB_KEY ($INST_DIR):"
+        installed=$(list_installed "$INST_DIR" "$INST_SUFFIX" | sed 's/^/  /')
+        if [ -z "$installed" ]; then
+            echo "  (none)"
+        else
+            echo "$installed"
+        fi
     fi
 
 # Sync brunnr repository with remote

@@ -63,10 +63,10 @@ After `install`, your project will have `.pi/skills/`, `.pi/agents/`, `.pi/promp
 | Command | What it does | Example |
 |---|---|---|
 | `brunnr install` | Create `.pi/{skills,agents,prompts,extensions,themes}` in the current project so Pi can discover them | `brunnr install` |
-| `brunnr list [section]` | List catalog items (and what's installed locally if you pass a section) | `brunnr list skill` |
+| `brunnr list [-g] [section]` | List catalog items + what's installed locally (or globally with `-g`) | `brunnr list -g agent` |
 | `brunnr search <query>` | Search names, descriptions, and tags across the catalog | `brunnr search eval` |
-| `brunnr add <section> <name>` | Copy a catalog item into the project — installs to `.pi/<section>s/` | `brunnr add agent eval-designer` |
-| `brunnr remove <section> <name>` | Uninstall an item from the project (does **not** touch the brunnr catalog) | `brunnr remove agent eval-designer` |
+| `brunnr add [-g] <section> <name>` | Install a catalog item to the project (`.pi/<section>s/`), or globally with `-g` (`~/.pi/agent/<section>s/`) | `brunnr add -g agent eval-designer` |
+| `brunnr remove [-g] <section> <name>` | Uninstall an item from the project (or globally with `-g`). Does **not** touch the brunnr catalog. | `brunnr remove -g agent eval-designer` |
 | `brunnr push <section> <name>` | Forge a new item into the catalog: file copy → library.yaml entry → `brunnr check` → branch → commit → push → PR. New items only; skill/agent/prompt only. | `brunnr push skill code-reviewer` |
 | `brunnr scrap <section> <name>` | Open a PR removing an item from the catalog. Refuses if other entries depend on it. | `brunnr scrap agent stale-optimizer` |
 | `brunnr status` | List open PRs in the brunnr remote — the queue of items "waiting to be forged" | `brunnr status` |
@@ -74,6 +74,8 @@ After `install`, your project will have `.pi/skills/`, `.pi/agents/`, `.pi/promp
 | `brunnr check` | Validate `library.yaml` integrity — frontmatter names, source paths, dependencies, orphan files | `brunnr check` |
 
 `<section>` is one of `skill`, `agent`, `prompt`, `extension`, `theme` (auto-push and scrap are limited to skill/agent/prompt).
+
+`-g` (or `--global`) routes `add` / `remove` / `list` to `~/.pi/agent/<section>s/` — Pi reads that path for **every** project, so it's the right place for catalog items you want everywhere (e.g. `eitri`, `eval-designer`). Without `-g`, items live in `.pi/<section>s/` and are scoped to the current project. Project-level entries shadow global ones on name collision.
 
 ## Core Concepts
 
@@ -212,10 +214,12 @@ brunnr install
 brunnr list                          # everything available, grouped by section
 brunnr search eval                   # find eval-related items by name / tags / description
 
-# 3. Add what you need
-brunnr add agent eval-designer       # generates evals.json for skills
-brunnr add prompt skill-status       # /skill-status command
-brunnr add extension eitri           # meta-agent for building Pi components
+# 3. Add what you need (project-scoped by default)
+brunnr add prompt skill-status       # /skill-status, useful here only
+
+# 3b. Or install globally with -g for items you want in every project
+brunnr add -g agent eval-designer    # ~/.pi/agent/agents/eval-designer.md
+brunnr add -g extension eitri        # eitri available everywhere
 
 # 4. Launch Pi — it discovers everything in .pi/ natively
 pi
@@ -225,7 +229,8 @@ pi
 brunnr sync                          # fast-forward your brunnr clone from origin
 
 # 6. Uninstall what you don't need
-brunnr remove prompt skill-status
+brunnr remove prompt skill-status        # project scope
+brunnr remove -g agent eval-designer     # global scope
 ```
 
 ### Team Workflow
