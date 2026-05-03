@@ -21,6 +21,7 @@ brunnr is your team's central well of agentic knowledge for the Pi coding agent.
 | **git** | Version control, syncing brunnr across devices | [git-scm.com](https://git-scm.com) |
 | **just** | Runs brunnr commands (modern make alternative) | `brew install just` or [just.systems](https://just.systems) |
 | **Pi** | The coding agent that uses your skills, agents, prompts, extensions, themes | [pi-mono](https://github.com/badlogic/pi-mono) |
+| **gh** | GitHub CLI — required for `brunnr status` (open PR queue); optional otherwise | `brew install gh` or [cli.github.com](https://cli.github.com) |
 
 brunnr manages files that Pi reads from `.pi/` in your project (and `~/.pi/agent/` globally). The `just` commands handle copying files between brunnr and your projects. Pi reads the installed content at runtime — `.pi/skills/`, `.pi/agents/`, `.pi/prompts/`, `.pi/extensions/`, `.pi/themes/` are all native discovery paths.
 
@@ -217,6 +218,26 @@ git push
 brunnr sync
 brunnr install
 ```
+
+### Checking the catalog queue
+
+When new skills/agents/prompts are proposed via pull request to your brunnr repo, `brunnr status` lists what's waiting to be reviewed and merged — your team's queue of items "waiting to be forged."
+
+```bash
+brunnr status
+# Open PRs in brunnr (waiting to be forged):
+#
+#   #42 Add security-review skill
+#       add-security-review | @alice | 2d ago
+#   #43 Update autoresearch-agent for new safety rules
+#       autoresearch-agent/may02 | @bob | today
+#
+# Review: gh pr view <num> --web   (run from ~/.config/brunnr)
+```
+
+The command queries the brunnr remote via `gh pr list` and reports number, title, branch, author, and age. It exits with `No open PRs — the forge is quiet.` when nothing's pending.
+
+**Requires:** `gh` CLI authenticated (`gh auth login`) and a configured `origin` remote on the brunnr repo. There's no background process or notification — call it manually when you want to see the queue (typically before `brunnr sync`).
 
 ## Building Pi components with Eitri
 

@@ -33,6 +33,7 @@ THEMES_SRC := BRUNNR_HOME / "themes"
     echo "  push <section> <name> Push local changes back to brunnr"
     echo "  list [section]       List available/installed items"
     echo "  sync                 Sync brunnr repository with remote"
+    echo "  status               Show open PRs in brunnr (skills awaiting review)"
     echo "  search <query>       Search the catalog"
     echo "  check                Validate library.yaml integrity (run before commit)"
     echo "  help                 Show this help message"
@@ -648,6 +649,54 @@ list section="":
     else
         echo "brunnr is already up to date"
     fi
+
+# Show open PRs in brunnr — items waiting to be reviewed/merged into the catalog
+@status:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    BRUNNR_HOME="{{BRUNNR_HOME}}"
+
+    if [ ! -d "$BRUNNR_HOME/.git" ]; then
+        echo "Error: $BRUNNR_HOME is not a git repository"
+        exit 1
+    fi
+
+    if ! command -v gh >/dev/null 2>&1; then
+        echo "Error: 'gh' CLI not found. Install: brew install gh"
+        exit 1
+    fi
+
+    cd "$BRUNNR_HOME"
+
+    if ! git remote get-url origin >/dev/null 2>&1; then
+        echo "Error: brunnr has no 'origin' remote configured"
+        echo "Add one with: cd $BRUNNR_HOME && git remote add origin <url>"
+        exit 1
+    fi
+
+    PRS=$(gh pr list --state open --json number,title,headRefName,createdAt,author --limit 50 2>/dev/null) || {
+        echo "Error: 'gh pr list' failed. Run 'gh auth status' to check authentication."
+        exit 1
+    }
+
+    if [ "$PRS" = "[]" ]; then
+        echo "No open PRs — the forge is quiet."
+        exit 0
+    fi
+
+    echo "Open PRs in brunnr (waiting to be forged):"
+    echo ""
+    echo "$PRS" | ruby -rjson -e '
+        prs = JSON.parse(STDIN.read)
+        prs.each do |pr|
+            age_days = ((Time.now - Time.parse(pr["createdAt"])) / 86400).to_i
+            age_str = age_days == 0 ? "today" : "#{age_days}d ago"
+            puts "  ##{pr["number"]} #{pr["title"]}"
+            puts "      #{pr["headRefName"]} | @#{pr["author"]["login"]} | #{age_str}"
+        end
+    '
+    echo ""
+    echo "Review: gh pr view <num> --web   (run from $BRUNNR_HOME)"
 
 # Search the catalog
 search query:
