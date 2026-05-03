@@ -77,3 +77,4 @@ Follow the `autoresearch-agent` agent's setup protocol exactly, then enter the l
 - **Re-trigger when inputs change.** New evals, hand-edits to the agent, model upgrades, or holdout drift are the right reasons to run another epoch. Same eval set + same agent = overfitting.
 - **Results.** Pareto front is in `results/pareto-front.json`. Trajectory traces are under `results/traces/`. Lessons are in `results/lessons.md`. The "winner" at wrap-up is one front member, picked via highest holdout. You can also cherry-pick a different front member if you want the trade-off it represents.
 - **To stop**: interrupt the session. Branch and front are preserved.
+- **To resume after interruption**: invoke this prompt again with the same `RUN_TAG` and include `Resume.` in your message — the Pareto front and per-candidate trace dirs are validated, then the agent continues from `results.tsv`'s last experiment.

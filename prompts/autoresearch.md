@@ -49,3 +49,4 @@ Once confirmed, follow the `autoresearch` agent's setup protocol exactly:
 - Results are logged in `results.tsv` at the repo root.
 - Every kept experiment is a commit on the `autoresearch/<RUN_TAG>` branch.
 - To stop: interrupt the session. The branch and `results.tsv` will preserve all progress.
+- To resume after interruption, invoke this prompt again with the same `RUN_TAG` and include `Resume.` in your message — the agent picks up from `results.tsv`'s last experiment instead of starting over.

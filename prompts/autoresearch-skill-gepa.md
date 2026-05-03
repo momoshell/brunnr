@@ -58,4 +58,5 @@ Follow the `autoresearch-skill-gepa` agent's setup protocol exactly, then enter 
 - Results are still logged to `results.tsv`, but the schema has two extra columns (`parent_exp`, `front_member`) for Pareto tracking.
 - The Pareto front lives in `results/pareto-front.json` during the run, and is snapshotted to `evals/runs/<RUN_TAG>/pareto-front.json` at wrap-up (committed as the audit trail). The "winner" at the end is one front member, picked by **highest holdout pass rate** (primary), then highest train, then smallest token cost. You can also cherry-pick a different member if you prefer the trade-off it represents.
 - To stop: interrupt the session. The branch and front are preserved.
+- To resume after interruption, invoke this prompt again with the same `RUN_TAG` and include `Resume.` in your message — the Pareto front is reloaded (or reconstructed from the ledger) and the agent continues from `results.tsv`'s last experiment.
 - Ask for a summary any time — the agent reports front composition, lesson highlights, and persistent failures.
