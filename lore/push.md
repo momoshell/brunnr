@@ -122,13 +122,13 @@ Reasoning: updates need human judgement on what changed and why. Auto-overwrite 
 
 Run `brunnr status` any time to see the queue of open PRs ("items waiting to be forged").
 
-## The Retire Counterpart
+## The Scrap Counterpart
 
-`brunnr retire <section> <name>` is the deletion pendant: opens a PR that removes a skill, agent, or prompt from the catalog — file plus `library.yaml` entry. It refuses if any other catalog item lists this one as a dependency, pointing at the dependents you'd need to retire or update first. Same git/gh flow as push (branch, commit, push, `gh pr create`).
+`brunnr scrap <section> <name>` is the deletion pendant: opens a PR that removes a skill, agent, or prompt from the catalog — file plus `library.yaml` entry. It refuses if any other catalog item lists this one as a dependency, pointing at the dependents you'd need to scrap or update first. Same git/gh flow as push (branch, commit, push, `gh pr create`).
 
 ```bash
-brunnr retire agent stale-optimizer
-# Retired: stale-optimizer (agent)
+brunnr scrap agent stale-optimizer
+# Scrapped: stale-optimizer (agent)
 #   https://github.com/your-org/brunnr/pull/47
 ```
 

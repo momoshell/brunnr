@@ -31,7 +31,7 @@ THEMES_SRC := BRUNNR_HOME / "themes"
     echo "  add <section> <name> Add item to current project (section: skill, agent, prompt, extension, theme)"
     echo "  remove <section> <name> Remove item from current project"
     echo "  push <section> <name> Push a new item to brunnr (opens a PR)"
-    echo "  retire <section> <name> Open a PR removing an item from brunnr"
+    echo "  scrap <section> <name> Open a PR removing an item from brunnr"
     echo "  list [section]       List available/installed items"
     echo "  sync                 Sync brunnr repository with remote"
     echo "  status               Show open PRs in brunnr (skills awaiting review)"
@@ -567,9 +567,9 @@ push section name:
     echo "Forged: $NAME ($SECTION)"
     echo "  $PR_URL"
 
-# Retire an item from brunnr — opens a PR that removes the file + library.yaml
+# Scrap an item from brunnr — opens a PR that removes the file + library.yaml
 # entry. Refuses if other catalog items depend on it.
-retire section name:
+scrap section name:
     #!/usr/bin/env bash
     set -euo pipefail
     SECTION="{{section}}"
@@ -583,7 +583,7 @@ retire section name:
         agent)  YAML_KEY="agents";  REPO_PATH="agents/$NAME.md";       IS_DIR=0 ;;
         prompt) YAML_KEY="prompts"; REPO_PATH="prompts/$NAME.md";      IS_DIR=0 ;;
         extension|theme)
-            echo "Error: auto-retire only supports skill, agent, prompt."
+            echo "Error: auto-scrap only supports skill, agent, prompt."
             echo "  For $SECTION, edit files under $BRUNNR_HOME/${SECTION}s/ directly,"
             echo "  remove the library.yaml entry, then commit + open a PR with git/gh."
             exit 1
@@ -613,7 +613,7 @@ retire section name:
     fi
 
     if [[ "$EXISTING" == file://* ]] || [[ "$EXISTING" == https://* ]]; then
-        echo "Error: '$NAME' has external source — cannot auto-retire"
+        echo "Error: '$NAME' has external source — cannot auto-scrap"
         echo "  source: $EXISTING"
         echo "  Remove the library.yaml entry manually."
         exit 1
@@ -639,7 +639,7 @@ retire section name:
         echo "Error: $SECTION '$NAME' is a dependency of:"
         echo "$DEPENDENTS" | sed 's/^/  - /'
         echo ""
-        echo "Retire those items first, or remove the dependency from their library.yaml entry."
+        echo "Scrap those items first, or remove the dependency from their library.yaml entry."
         exit 1
     fi
 
@@ -664,7 +664,7 @@ retire section name:
         exit 1
     fi
 
-    BRANCH="retire-$NAME"
+    BRANCH="scrap-$NAME"
     if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
         echo "Error: branch '$BRANCH' already exists in brunnr"
         echo "  Delete it: git -C $BRUNNR_HOME branch -D $BRANCH"
@@ -800,7 +800,7 @@ retire section name:
 
     # ---- 9. Commit ---------------------------------------------------------
     git add -A
-    git commit -m "Retire $NAME $SECTION" >/dev/null
+    git commit -m "Scrap $NAME $SECTION" >/dev/null
 
     SUCCESS=1
     trap - EXIT
@@ -813,8 +813,8 @@ retire section name:
     fi
 
     # ---- 11. Open PR via gh ------------------------------------------------
-    PR_TITLE="Retire $NAME $SECTION"
-    PR_BODY=$(printf 'Retires the **`%s`** %s from the brunnr catalog.\n\n- Removed: `%s`\n- library.yaml: entry under `%s:` deleted\n- Validated with `brunnr check` (no remaining items depend on this one)\n\nRetired via `brunnr retire %s %s`.' "$NAME" "$SECTION" "$REPO_PATH" "$YAML_KEY" "$SECTION" "$NAME")
+    PR_TITLE="Scrap $NAME $SECTION"
+    PR_BODY=$(printf 'Scraps the **`%s`** %s from the brunnr catalog.\n\n- Removed: `%s`\n- library.yaml: entry under `%s:` deleted\n- Validated with `brunnr check` (no remaining items depend on this one)\n\nScrapped via `brunnr scrap %s %s`.' "$NAME" "$SECTION" "$REPO_PATH" "$YAML_KEY" "$SECTION" "$NAME")
 
     if ! command -v gh >/dev/null 2>&1; then
         echo "Branch pushed; 'gh' CLI not installed (brew install gh)."
@@ -836,7 +836,7 @@ retire section name:
         exit 1
     }
 
-    echo "Retired: $NAME ($SECTION)"
+    echo "Scrapped: $NAME ($SECTION)"
     echo "  $PR_URL"
 
 # List available or installed items

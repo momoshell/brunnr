@@ -12,7 +12,7 @@ brunnr is your team's central well of agentic knowledge for the Pi coding agent.
 - **Cross-device**: Sync your personal catalog across machines
 - **Team sharing**: Share vetted prompts and workflows with your entire team
 - **Versioned**: Track changes to your AI components like any other code
-- **Forge-style contribution**: `brunnr push` and `brunnr retire` open reviewed PRs — every catalog mutation is auditable, dependency-checked, and revertable
+- **Forge-style contribution**: `brunnr push` and `brunnr scrap` open reviewed PRs — every catalog mutation is auditable, dependency-checked, and revertable
 - **Pi-native**: Default install paths land in the directories Pi reads natively — no auxiliary extension or settings shim required
 
 ## Prerequisites
@@ -22,7 +22,7 @@ brunnr is your team's central well of agentic knowledge for the Pi coding agent.
 | **git** | Version control, syncing brunnr across devices | [git-scm.com](https://git-scm.com) |
 | **just** | Runs brunnr commands (modern make alternative) | `brew install just` or [just.systems](https://just.systems) |
 | **Pi** | The coding agent that uses your skills, agents, prompts, extensions, themes | [pi-mono](https://github.com/badlogic/pi-mono) |
-| **gh** | GitHub CLI — opens PRs for `brunnr push` / `brunnr retire` and powers `brunnr status` | `brew install gh` then `gh auth login`, or [cli.github.com](https://cli.github.com) |
+| **gh** | GitHub CLI — opens PRs for `brunnr push` / `brunnr scrap` and powers `brunnr status` | `brew install gh` then `gh auth login`, or [cli.github.com](https://cli.github.com) |
 
 brunnr manages files that Pi reads from `.pi/` in your project (and `~/.pi/agent/` globally). The `just` commands handle copying files between brunnr and your projects. Pi reads the installed content at runtime — `.pi/skills/`, `.pi/agents/`, `.pi/prompts/`, `.pi/extensions/`, `.pi/themes/` are all native discovery paths.
 
@@ -68,12 +68,12 @@ After `install`, your project will have `.pi/skills/`, `.pi/agents/`, `.pi/promp
 | `brunnr add <section> <name>` | Copy a catalog item into the project — installs to `.pi/<section>s/` | `brunnr add agent eval-designer` |
 | `brunnr remove <section> <name>` | Uninstall an item from the project (does **not** touch the brunnr catalog) | `brunnr remove agent eval-designer` |
 | `brunnr push <section> <name>` | Forge a new item into the catalog: file copy → library.yaml entry → `brunnr check` → branch → commit → push → PR. New items only; skill/agent/prompt only. | `brunnr push skill code-reviewer` |
-| `brunnr retire <section> <name>` | Open a PR removing an item from the catalog. Refuses if other entries depend on it. | `brunnr retire agent stale-optimizer` |
+| `brunnr scrap <section> <name>` | Open a PR removing an item from the catalog. Refuses if other entries depend on it. | `brunnr scrap agent stale-optimizer` |
 | `brunnr status` | List open PRs in the brunnr remote — the queue of items "waiting to be forged" | `brunnr status` |
 | `brunnr sync` | Fast-forward your local brunnr clone from `origin` (no merge conflicts allowed) | `brunnr sync` |
 | `brunnr check` | Validate `library.yaml` integrity — frontmatter names, source paths, dependencies, orphan files | `brunnr check` |
 
-`<section>` is one of `skill`, `agent`, `prompt`, `extension`, `theme` (auto-push and retire are limited to skill/agent/prompt).
+`<section>` is one of `skill`, `agent`, `prompt`, `extension`, `theme` (auto-push and scrap are limited to skill/agent/prompt).
 
 ## Core Concepts
 
@@ -261,29 +261,29 @@ brunnr add skill security-review
 
 **Extensions and themes** still need manual edits (no frontmatter metadata source). Edit files under `~/.config/brunnr/extensions/` or `~/.config/brunnr/themes/`, register in `library.yaml`, and commit with `git`.
 
-### Retiring an item from the catalog
+### Scrapping an item from the catalog
 
-`brunnr retire <section> <name>` is the deletion counterpart to `push`. It opens a PR that removes a skill, agent, or prompt — file plus `library.yaml` entry — after verifying nothing else in the catalog depends on it.
+`brunnr scrap <section> <name>` is the deletion counterpart to `push`. It opens a PR that removes a skill, agent, or prompt — file plus `library.yaml` entry — after verifying nothing else in the catalog depends on it.
 
 ```bash
-brunnr retire agent stale-optimizer
+brunnr scrap agent stale-optimizer
 # Validating with brunnr check...
 # All checks passed.
-# Retired: stale-optimizer (agent)
+# Scrapped: stale-optimizer (agent)
 #   https://github.com/your-org/brunnr/pull/47
 ```
 
-**What `brunnr retire` does**:
+**What `brunnr scrap` does**:
 
 1. Verifies the item is in `library.yaml` and repo-backed (not external)
-2. Scans every other entry's `dependencies` — refuses if any item lists this one, telling you which ones need to be retired or updated first
-3. Branches `retire-<name>` from `origin/main`
+2. Scans every other entry's `dependencies` — refuses if any item lists this one, telling you which ones need to be scrapped or updated first
+3. Branches `scrap-<name>` from `origin/main`
 4. Deletes the file (`skills/<name>/`, `agents/<name>.md`, or `prompts/<name>.md`)
 5. Removes the `library.yaml` entry, preserving section comments and converting the section back to `<key>: []` if it became empty
 6. Runs `brunnr check` — reverts if anything's broken
-7. Commits `Retire <name> <section>`, pushes, opens a PR
+7. Commits `Scrap <name> <section>`, pushes, opens a PR
 
-The dependency-aware bail is the key safety: you can't accidentally retire a skill that an agent depends on without a clear error pointing at the dependent.
+The dependency-aware bail is the key safety: you can't accidentally scrap a skill that an agent depends on without a clear error pointing at the dependent.
 
 ### Checking the catalog queue
 
@@ -604,12 +604,12 @@ Same keep/discard loop, same git-based experiment tracking — just without the 
 
 ## Safety & Consistency
 
-brunnr's mutation commands (`push`, `retire`, `add`, `remove`) are designed so that nothing destructive happens silently:
+brunnr's mutation commands (`push`, `scrap`, `add`, `remove`) are designed so that nothing destructive happens silently:
 
 - **No blind overwrites**: `add` refuses if the target already exists in the project; `push` refuses if the item is already in `library.yaml`. Conflicts are reported, not silently resolved.
-- **Validated catalog**: `brunnr check` verifies every entry's frontmatter `name` matches `library.yaml`, every source path resolves, every declared dependency exists, and there are no orphan files. `push` and `retire` run this automatically and roll back on failure.
-- **Dependency-aware retire**: `brunnr retire` scans every other entry's `dependencies` and refuses with a list of dependents if any item still relies on the one you're removing.
-- **PR-based contribution**: `push` and `retire` go through a feature branch and a GitHub PR — nothing lands on `main` without review (or self-merge for solo use). The PR carries the diff plus `brunnr check` confirmation.
+- **Validated catalog**: `brunnr check` verifies every entry's frontmatter `name` matches `library.yaml`, every source path resolves, every declared dependency exists, and there are no orphan files. `push` and `scrap` run this automatically and roll back on failure.
+- **Dependency-aware scrap**: `brunnr scrap` scans every other entry's `dependencies` and refuses with a list of dependents if any item still relies on the one you're removing.
+- **PR-based contribution**: `push` and `scrap` go through a feature branch and a GitHub PR — nothing lands on `main` without review (or self-merge for solo use). The PR carries the diff plus `brunnr check` confirmation.
 - **Atomic revert on failure**: If anything fails between branch creation and commit, the working tree, branch, and `library.yaml` are restored to a clean state. The local commit is kept once it lands, so push/PR failures don't lose your work.
 
 ## Configuration
@@ -657,7 +657,7 @@ See the `lore/` directory for detailed guides:
 - [`lore/install.md`](lore/install.md) — Install brunnr into a project
 - [`lore/add.md`](lore/add.md) — Add skills, agents, prompts, extensions, or themes to your project
 - [`lore/use.md`](lore/use.md) — Invoke installed items inside Pi (`@<name>`, `/<prompt>`, etc.)
-- [`lore/push.md`](lore/push.md) — Forge new items into the catalog (and the `retire` deletion counterpart)
+- [`lore/push.md`](lore/push.md) — Forge new items into the catalog (and the `scrap` deletion counterpart)
 - [`lore/remove.md`](lore/remove.md) — Remove items safely from a project
 - [`lore/list.md`](lore/list.md) — List available and installed items
 - [`lore/sync.md`](lore/sync.md) — Sync brunnr across devices
