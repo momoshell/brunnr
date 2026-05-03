@@ -186,7 +186,7 @@ brunnr/
 │       ├── eitri.ts
 │       └── agents/eitri/            # → routed to .pi/agents/eitri/ on install
 │           ├── eitri-orchestrator.md
-│           └── *-expert.md          # 9 domain experts
+│           └── *-expert.md          # 10 domain experts
 ├── themes/             # Pi colour themes (.json files; empty for now)
 └── lore/              # Usage guides — one per command
     ├── install.md      # Initialize brunnr in a project
@@ -322,13 +322,13 @@ The `eitri` extension is a meta-agent that **builds new Pi components** — exte
 brunnr add extension eitri
 # This drops:
 #   .pi/extensions/eitri.ts
-#   .pi/agents/eitri/{eitri-orchestrator,ext,theme,skill,config,tui,prompt,agent,keybinding,cli}-expert.md
+#   .pi/agents/eitri/{eitri-orchestrator,ext,theme,skill,config,tui,prompt,agent,pattern,keybinding,cli}-expert.md
 
 # Launch Pi with eitri loaded
 pi -e .pi/extensions/eitri.ts
 ```
 
-You'll see a grid of expert cards above the editor and an `Eitri (9 experts)` status. Type a build request:
+You'll see a grid of expert cards above the editor and an `Eitri (10 experts)` status. Type a build request:
 
 ```
 Build a Pi extension that watches `.trigger` and replays its contents into the editor on save.
@@ -357,7 +357,8 @@ Use `chain` when one expert's output should narrow the next expert's query — e
 | `config-expert` | Settings, providers, models, packages, keybindings |
 | `tui-expert` | TUI components, keyboard input, overlays, widgets, footers, custom editors |
 | `prompt-expert` | Prompt templates — single-file `.md`, `$1` / `$@` / `${@:N}` argument syntax |
-| `agent-expert` | Agent personas, `teams.yaml`, dispatcher / pipeline / parallel orchestration patterns |
+| `agent-expert` | Agent personas — `.md` frontmatter, `teams.yaml` structure, session management |
+| `pattern-expert` | Agent design patterns — checkpoint-and-resume, HITL gates, coordinator+specialists, role splits, idempotency, tool-allowlist minimization |
 | `keybinding-expert` | `registerShortcut`, key IDs, reserved keys, macOS terminal compatibility |
 | `cli-expert` | All `pi` CLI flags, output modes, package subcommands, env vars |
 

@@ -264,7 +264,7 @@ prompts:
 # =============================================================================
 extensions:
   - name: eitri
-    description: "Meta-agent that builds Pi agents — orchestrator + parallel/chain research across domain experts (extensions, themes, skills, settings, TUI, prompts, agents, keybindings, CLI). Hardened with ctx.signal abort handling, user/project agent scope split, truncateHead helper, theme-token UI, chain mode with {previous} substitution, usage stats, and a 4-way concurrency cap. Named after Eitri, the master dwarf smith of Norse myth — counterpart to brunnr (the well of wisdom the experts draw from)."
+    description: "Meta-agent that builds Pi agents — orchestrator + parallel/chain research across domain experts (extensions, themes, skills, settings, TUI, prompts, agents, design patterns, keybindings, CLI). Hardened with ctx.signal abort handling, user/project agent scope split, truncateHead helper, theme-token UI, chain mode with {previous} substitution, usage stats, and a 4-way concurrency cap. Named after Eitri, the master dwarf smith of Norse myth — counterpart to brunnr (the well of wisdom the experts draw from)."
     source: extensions/eitri/
     tags: [meta-agent, parallel-research, smith, orchestrator]
     dependencies:

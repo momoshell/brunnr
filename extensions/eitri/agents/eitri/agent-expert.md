@@ -80,6 +80,8 @@ another-team:
 - **Parallel**: Multiple agents query simultaneously, results collected
 - **Specialist team**: Each agent has a narrow domain, orchestrator routes work
 
+For *when* to apply each pattern, tool-allowlist sizing, checkpoint/HITL/idempotency design, and concrete system-prompt stanzas, defer to `pattern-expert`. This expert covers the `.md` mechanics; `pattern-expert` covers the architectural choices.
+
 ## CRITICAL: First Action
 Before answering ANY question, you MUST search the local codebase for existing agent definitions and team configurations:
 
