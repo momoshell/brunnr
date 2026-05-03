@@ -120,20 +120,13 @@ Reasoning: updates need human judgement on what changed and why. Auto-overwrite 
 - **Solo brunnr** (you are the only contributor): self-merge the PR (`gh pr merge --auto --squash`) and you're done. The PR adds a review checkpoint for free without slowing you down.
 - **Team brunnr**: PRs are reviewed by maintainers; merged items become available to all team members after `brunnr sync`.
 
-Run `brunnr status` any time to see the queue of open PRs ("items waiting to be forged").
-
-## The Scrap Counterpart
-
-`brunnr scrap <section> <name>` is the deletion pendant: opens a PR that removes a skill, agent, or prompt from the catalog — file plus `library.yaml` entry. It refuses if any other catalog item lists this one as a dependency, pointing at the dependents you'd need to scrap or update first. Same git/gh flow as push (branch, commit, push, `gh pr create`).
-
-```bash
-brunnr scrap agent stale-optimizer
-# Scrapped: stale-optimizer (agent)
-#   https://github.com/your-org/brunnr/pull/47
-```
+Run [`brunnr status`](status.md) any time to see the queue of open PRs ("items waiting to be forged").
 
 ## See Also
 
+- [`scrap.md`](scrap.md) — The deletion counterpart for removing items from the catalog
+- [`status.md`](status.md) — See open PRs in the brunnr remote
+- [`check.md`](check.md) — The validation step `push` runs internally
 - [`add.md`](add.md) — Install items from brunnr into a project
 - [`sync.md`](sync.md) — Sync brunnr across devices
 - [`remove.md`](remove.md) — Remove items safely from a project

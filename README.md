@@ -186,15 +186,18 @@ brunnr/
 │           ├── eitri-orchestrator.md
 │           └── *-expert.md          # 9 domain experts
 ├── themes/             # Pi colour themes (.json files; empty for now)
-└── lore/              # Usage guides
-    ├── install.md      # Install brunnr into a project
-    ├── add.md          # Add items to your project
-    ├── use.md          # Use installed items
-    ├── push.md         # Push local changes to brunnr
-    ├── remove.md       # Remove items safely
-    ├── list.md         # List available items
-    ├── sync.md         # Sync across devices
-    └── search.md       # Search the catalog
+└── lore/              # Usage guides — one per command
+    ├── install.md      # Initialize brunnr in a project
+    ├── add.md          # Add items to a project
+    ├── remove.md       # Uninstall items from a project
+    ├── use.md          # Invoke installed items inside Pi
+    ├── list.md         # List available / installed items
+    ├── search.md       # Search the catalog
+    ├── push.md         # Forge a new item into the catalog (PR)
+    ├── scrap.md        # Open a PR removing an item (dep-aware)
+    ├── status.md       # Show open PRs (catalog queue)
+    ├── check.md        # Validate library.yaml integrity
+    └── sync.md         # Sync brunnr across devices
 ```
 
 ## Workflows
@@ -221,7 +224,7 @@ pi
 # 5. Stay current with the catalog
 brunnr sync                          # fast-forward your brunnr clone from origin
 
-# 6. Stop using something (project-only — leaves the catalog untouched)
+# 6. Uninstall what you don't need
 brunnr remove prompt skill-status
 ```
 
@@ -654,14 +657,17 @@ The `library.yaml` file is the source of truth for your catalog. See `SKILL.md` 
 
 See the `lore/` directory for detailed guides:
 
-- [`lore/install.md`](lore/install.md) — Install brunnr into a project
-- [`lore/add.md`](lore/add.md) — Add skills, agents, prompts, extensions, or themes to your project
+- [`lore/install.md`](lore/install.md) — Initialize brunnr in a project
+- [`lore/add.md`](lore/add.md) — Add skills, agents, prompts, extensions, or themes to a project
+- [`lore/remove.md`](lore/remove.md) — Uninstall items from a project
 - [`lore/use.md`](lore/use.md) — Invoke installed items inside Pi (`@<name>`, `/<prompt>`, etc.)
-- [`lore/push.md`](lore/push.md) — Forge new items into the catalog (and the `scrap` deletion counterpart)
-- [`lore/remove.md`](lore/remove.md) — Remove items safely from a project
 - [`lore/list.md`](lore/list.md) — List available and installed items
-- [`lore/sync.md`](lore/sync.md) — Sync brunnr across devices
 - [`lore/search.md`](lore/search.md) — Search the catalog
+- [`lore/push.md`](lore/push.md) — Forge a new item into the catalog (PR)
+- [`lore/scrap.md`](lore/scrap.md) — Open a PR removing an item (dependency-aware)
+- [`lore/status.md`](lore/status.md) — Show open PRs in the brunnr remote
+- [`lore/check.md`](lore/check.md) — Validate `library.yaml` integrity
+- [`lore/sync.md`](lore/sync.md) — Sync brunnr across devices
 
 ## Contributing
 
