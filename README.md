@@ -4,18 +4,24 @@
 
 `brunnr <command>` installs catalog items into the directories Pi reads natively. Then use them in Pi.
 
+## Prerequisites
+
+| Tool | What it's for | Install |
+|---|---|---|
+| **git** | Cloning brunnr; every catalog mutation goes through git | [git-scm.com](https://git-scm.com) |
+| **just** | Runs `brunnr` commands | `brew install just` or [just.systems](https://just.systems) |
+| **Pi** | The coding agent that loads your skills, agents, prompts, extensions, themes | [pi-mono](https://github.com/badlogic/pi-mono) |
+| **gh** | GitHub CLI — powers `brunnr push` / `brunnr scrap` / `brunnr status` | `brew install gh` then `gh auth login`, or [cli.github.com](https://cli.github.com) |
+
 ## Install
 
 ```bash
-brew install just gh                                # if you don't have them
 git clone <your-brunnr-repo> ~/.config/brunnr
 alias brunnr='just -f ~/.config/brunnr/justfile'    # optional shell alias
 
 cd your-project
 brunnr install                                      # creates .pi/{skills,agents,prompts,extensions,themes}
 ```
-
-Pi must be installed separately — see [pi-mono](https://github.com/badlogic/pi-mono).
 
 `-g` (global) routes installs to `~/.pi/agent/<section>s/`, available in every project. Use it for items you want everywhere (e.g. `eitri`, `eval-designer`).
 
