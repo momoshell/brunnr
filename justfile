@@ -4,7 +4,7 @@
 # Or: alias brunnr='just -f ~/.config/brunnr/justfile'
 
 # Default path to brunnr repository
-export BRUNNR_HOME := env_var_or_default("BRUNNR_HOME", "~/.config/brunnr")
+export BRUNNR_HOME := env_var_or_default("BRUNNR_HOME", env_var('HOME') / ".config/brunnr")
 
 # Target directories in the current project (Pi defaults — Pi reads these natively)
 export SKILLS_DIR := env_var_or_default("BRUNNR_SKILLS_DIR", ".pi/skills")
