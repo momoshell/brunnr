@@ -63,6 +63,7 @@ THEMES_SRC := BRUNNR_HOME / "themes"
 install:
     #!/usr/bin/env bash
     set -e
+    cd "{{invocation_directory()}}"
     echo "Installing brunnr into current project..."
     mkdir -p "{{SKILLS_DIR}}" "{{AGENTS_DIR}}" "{{PROMPTS_DIR}}" "{{EXTENSIONS_DIR}}" "{{THEMES_DIR}}"
     echo "Created target directories:"
@@ -89,6 +90,7 @@ install:
 eitri *args:
     #!/usr/bin/env bash
     set -euo pipefail
+    cd "{{invocation_directory()}}"
 
     PROJECT_EITRI="{{EXTENSIONS_DIR}}/eitri.ts"
     GLOBAL_EITRI="{{GLOBAL_EXTENSIONS_DIR}}/eitri.ts"
@@ -116,6 +118,7 @@ eitri *args:
 add *args:
     #!/usr/bin/env bash
     set -euo pipefail
+    cd "{{invocation_directory()}}"
     BRUNNR_HOME="{{BRUNNR_HOME}}"
     LIBRARY="$BRUNNR_HOME/library.yaml"
 
@@ -294,6 +297,7 @@ add *args:
 remove *args:
     #!/usr/bin/env bash
     set -euo pipefail
+    cd "{{invocation_directory()}}"
 
     GLOBAL=0
     POSITIONAL=()
@@ -939,6 +943,7 @@ scrap section name:
 # List available or installed items — pass -g to show what's installed globally
 list *args:
     #!/usr/bin/env bash
+    cd "{{invocation_directory()}}"
     BRUNNR_HOME="{{BRUNNR_HOME}}"
     LIBRARY="$BRUNNR_HOME/library.yaml"
 
