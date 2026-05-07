@@ -35,7 +35,8 @@ THEMES_SRC := BRUNNR_HOME / "themes"
     echo "Usage: just -f {{BRUNNR_HOME}}/justfile <command>"
     echo ""
     echo "Commands:"
-    echo "  install              Initialize brunnr in current project"
+    echo "  install              Initialize brunnr in current project (auto-installs eitri globally)"
+    echo "  eitri                Launch Pi with the eitri authoring extension"
     echo "  add [-g] <section> <name>    Install item to project (.pi/) or globally with -g (~/.pi/agent/)"
     echo "  remove [-g] <section> <name> Uninstall item from project or globally with -g"
     echo "  push <section> <name> Push a new item to brunnr (opens a PR)"
@@ -59,9 +60,11 @@ THEMES_SRC := BRUNNR_HOME / "themes"
 @help: default
 
 # Install brunnr into the current project
-@install:
+install:
+    #!/usr/bin/env bash
+    set -e
     echo "Installing brunnr into current project..."
-    mkdir -p {{SKILLS_DIR}} {{AGENTS_DIR}} {{PROMPTS_DIR}} {{EXTENSIONS_DIR}} {{THEMES_DIR}}
+    mkdir -p "{{SKILLS_DIR}}" "{{AGENTS_DIR}}" "{{PROMPTS_DIR}}" "{{EXTENSIONS_DIR}}" "{{THEMES_DIR}}"
     echo "Created target directories:"
     echo "  - {{SKILLS_DIR}}"
     echo "  - {{AGENTS_DIR}}"
@@ -69,7 +72,45 @@ THEMES_SRC := BRUNNR_HOME / "themes"
     echo "  - {{EXTENSIONS_DIR}}"
     echo "  - {{THEMES_DIR}}"
     echo ""
-    echo "brunnr is ready. Use 'just -f {{BRUNNR_HOME}}/justfile add <section> <name>' to install items."
+
+    # Eitri ships with brunnr — install it globally on first run so 'brunnr eitri'
+    # works in any project. Skip if already present (project or global).
+    if [ ! -f "{{GLOBAL_EXTENSIONS_DIR}}/eitri.ts" ] && [ ! -f "{{EXTENSIONS_DIR}}/eitri.ts" ]; then
+        echo "Installing eitri globally (the authoring tool that ships with brunnr)..."
+        if ! just -f "{{BRUNNR_HOME}}/justfile" add -g extension eitri; then
+            echo "Warning: eitri auto-install failed — install manually with 'brunnr add -g extension eitri'"
+        fi
+        echo ""
+    fi
+
+    echo "brunnr is ready. Run 'brunnr eitri' to forge new components, or 'brunnr add <section> <name>' for catalog items."
+
+# Launch Pi with the eitri extension — the authoring tool that ships with brunnr
+eitri *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    PROJECT_EITRI="{{EXTENSIONS_DIR}}/eitri.ts"
+    GLOBAL_EITRI="{{GLOBAL_EXTENSIONS_DIR}}/eitri.ts"
+
+    if [ -f "$PROJECT_EITRI" ]; then
+        EITRI_PATH="$PROJECT_EITRI"
+    elif [ -f "$GLOBAL_EITRI" ]; then
+        EITRI_PATH="$GLOBAL_EITRI"
+    else
+        echo "Error: eitri is not installed."
+        echo "  Install globally: brunnr add -g extension eitri"
+        echo "  Or per-project:   brunnr add extension eitri"
+        exit 1
+    fi
+
+    if ! command -v pi >/dev/null 2>&1; then
+        echo "Error: 'pi' not found on PATH."
+        echo "  Install Pi: https://github.com/badlogic/pi-mono"
+        exit 1
+    fi
+
+    exec pi -e "$EITRI_PATH" {{args}}
 
 # Add an item from brunnr to the current project (default) or globally with -g
 add *args:

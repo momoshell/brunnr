@@ -20,18 +20,19 @@ git clone <your-brunnr-repo> ~/.config/brunnr
 alias brunnr='just -f ~/.config/brunnr/justfile'    # optional shell alias
 
 cd your-project
-brunnr install                                      # creates .pi/{skills,agents,prompts,extensions,themes}
+brunnr install                                      # scaffolds .pi/ + auto-installs eitri globally
 ```
 
-`-g` (global) routes installs to `~/.pi/agent/<section>s/`, available in every project. Use it for items you want everywhere (e.g. `eitri`, `eval-designer`).
+`brunnr install` also installs **eitri** — the authoring tool that ships with brunnr — into `~/.pi/agent/extensions/` so `brunnr eitri` works from any project. Run `brunnr remove -g extension eitri` if you don't want it.
+
+`-g` (global) routes installs to `~/.pi/agent/<section>s/`, available in every project. Use it for items you want everywhere (e.g. `eval-designer`).
 
 ## I want to…
 
 ### …build a new Pi component
 
 ```bash
-brunnr add extension eitri
-pi -e .pi/extensions/eitri.ts
+brunnr eitri          # launches Pi with eitri loaded (auto-installed by `brunnr install`)
 ```
 
 In Pi, describe what to build:
