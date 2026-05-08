@@ -13,9 +13,10 @@
  * Each expert fetches fresh Pi documentation via firecrawl on first query.
  * Experts are read-only researchers. The primary agent is the only writer.
  *
- * Experts are loaded from:
- *   ~/.pi/agent/agents/eitri/    (user-level, trusted)
- *   .pi/agents/eitri/            (project-level, requires confirmation)
+ * Experts are loaded from the directory bundled alongside this script
+ * (`<script-dir>/agents/eitri/`). Eitri is not installed into Pi's
+ * extension/agent search paths — it is invoked on-demand via `brunnr eitri`,
+ * which runs `pi -e <BRUNNR_HOME>/extensions/eitri/eitri.ts`.
  *
  * Subprocesses honour ctx.signal — Esc cancels running experts cleanly
  * (SIGTERM → SIGKILL after 5s).
@@ -31,12 +32,11 @@
  * and Gullinbursti — paired with brunnr (the well of wisdom that the
  * experts draw from).
  *
- * Features: ctx.signal abort handling (SIGTERM→SIGKILL), user/project
- * agent scope split with confirmation, truncateHead helper for tool
- * output, theme-token border colours, promptSnippet/promptGuidelines,
- * cached orchestrator system prompt, chain mode with {previous}
- * substitution, usage stats accumulation, 4-way concurrency cap,
- * malformed-expert warnings.
+ * Features: ctx.signal abort handling (SIGTERM→SIGKILL), script-bundled
+ * expert discovery, truncateHead helper for tool output, theme-token
+ * border colours, promptSnippet/promptGuidelines, cached orchestrator
+ * system prompt, chain mode with {previous} substitution, usage stats
+ * accumulation, 4-way concurrency cap, malformed-expert warnings.
  * ─────────────────────────────────────────────────────────────────────────
  */
 
@@ -45,9 +45,10 @@ import { truncateHead, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, parseFrontmatter } 
 import { Type } from "@sinclair/typebox";
 import { Text, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { spawn } from "child_process";
-import { readdirSync, readFileSync, existsSync, mkdtempSync, writeFileSync, unlinkSync, rmdirSync, statSync } from "fs";
+import { readdirSync, readFileSync, existsSync, mkdtempSync, writeFileSync, unlinkSync, rmdirSync } from "fs";
 import { join, resolve, dirname, basename } from "path";
-import { homedir, tmpdir } from "os";
+import { tmpdir } from "os";
+import { fileURLToPath } from "url";
 
 // ── Types ────────────────────────────────────────
 
@@ -73,7 +74,6 @@ function normalizeThinkingLevel(raw: string | undefined): ThinkingLevel | undefi
 
 interface ExpertState {
 	def: ExpertDef;
-	source: "user" | "project";
 	status: "idle" | "researching" | "done" | "error";
 	question: string;
 	elapsed: number;
@@ -168,10 +168,6 @@ function writePromptToTempFile(name: string, prompt: string): { dir: string; fil
 	const file = join(dir, `prompt-${safe}.md`);
 	writeFileSync(file, prompt, { encoding: "utf-8", mode: 0o600 });
 	return { dir, file };
-}
-
-function isDirectory(p: string): boolean {
-	try { return statSync(p).isDirectory(); } catch { return false; }
 }
 
 // Build a deterministic compaction summary from a session's branch entries.
@@ -408,38 +404,19 @@ export default function (pi: ExtensionAPI) {
 	// session_shutdown. Per-session so concurrent sessions don't trample.
 	let helpPromptDir: string | undefined;
 
-	function userDir(): string {
-		return join(homedir(), ".pi", "agent", "agents", "eitri");
+	// Experts live next to this script: <script-dir>/agents/eitri/. Eitri
+	// is invoked on-demand via `brunnr eitri` (which runs `pi -e <abs-path>`),
+	// so import.meta.url resolves to the real on-disk location.
+	function bundledExpertsDir(): string {
+		return join(dirname(fileURLToPath(import.meta.url)), "agents", "eitri");
 	}
 
-	// Walk up from cwd looking for `.pi/agents/eitri/`. Lets eitri find
-	// project-level experts when the user has cd'd into a subdirectory
-	// of the project rather than its root.
-	function findNearestProjectEitriDir(cwd: string): string | undefined {
-		let current = cwd;
-		while (true) {
-			const candidate = join(current, ".pi", "agents", "eitri");
-			if (isDirectory(candidate)) return candidate;
-			const parent = dirname(current);
-			if (parent === current) return undefined;
-			current = parent;
-		}
+	function findOrchestratorPath(): string | undefined {
+		const p = join(bundledExpertsDir(), "eitri-orchestrator.md");
+		return existsSync(p) ? p : undefined;
 	}
 
-	// Find the orchestrator template, preferring project-level when present.
-	function findOrchestratorPath(cwd: string): string | undefined {
-		const projDir = findNearestProjectEitriDir(cwd);
-		const candidates = [
-			projDir ? join(projDir, "eitri-orchestrator.md") : undefined,
-			join(userDir(), "eitri-orchestrator.md"),
-		].filter((p): p is string => Boolean(p));
-		for (const p of candidates) {
-			if (existsSync(p)) return p;
-		}
-		return undefined;
-	}
-
-	function loadExpertsFromDir(dir: string, source: "user" | "project", ctx: ExtensionContext): void {
+	function loadExpertsFromDir(dir: string, ctx: ExtensionContext): void {
 		if (!existsSync(dir)) return;
 		let entries: string[];
 		try {
@@ -458,11 +435,8 @@ export default function (pi: ExtensionAPI) {
 				continue;
 			}
 			const key = def.name.toLowerCase();
-			// Project-level definitions shadow user-level on name collision.
-			// We always load user first, so a later project entry overwrites.
 			experts.set(key, {
 				def,
-				source,
 				status: "idle",
 				question: "",
 				elapsed: 0,
@@ -476,35 +450,8 @@ export default function (pi: ExtensionAPI) {
 	async function loadExperts(ctx: ExtensionContext): Promise<void> {
 		experts.clear();
 		cachedSystemPrompt = undefined;
-
-		// 1) User-level experts: trusted, always loaded
-		loadExpertsFromDir(userDir(), "user", ctx);
-
-		// 2) Project-level experts: require confirmation before loading because
-		//    a malicious checkout could ship arbitrary subagent system prompts.
-		const projDir = findNearestProjectEitriDir(ctx.cwd);
-		if (projDir) {
-			let candidateFiles: string[] = [];
-			try {
-				candidateFiles = readdirSync(projDir).filter(f => f.endsWith(".md") && f !== "eitri-orchestrator.md");
-			} catch {}
-
-			if (candidateFiles.length > 0) {
-				let allow = false;
-				if (ctx.hasUI) {
-					const names = candidateFiles.map(f => f.replace(/\.md$/, "")).join(", ");
-					allow = await ctx.ui.confirm(
-						"Load project-level Eitri experts?",
-						`Found ${candidateFiles.length} expert .md file(s) in ${projDir}: ${names}\n\nProject-level experts can execute arbitrary subagent system prompts. Only load if you trust this repository.`,
-						{},
-					);
-				}
-				// In headless mode (no UI) we never auto-load project experts.
-				if (allow) loadExpertsFromDir(projDir, "project", ctx);
-			}
-		}
-
-		cachedOrchestratorPath = findOrchestratorPath(ctx.cwd);
+		loadExpertsFromDir(bundledExpertsDir(), ctx);
+		cachedOrchestratorPath = findOrchestratorPath();
 	}
 
 	// ── Grid Rendering ───────────────────────────
@@ -591,7 +538,7 @@ export default function (pi: ExtensionAPI) {
 			return {
 				render(width: number): string[] {
 					if (experts.size === 0) {
-						return ["", theme.fg("dim", "  No experts found. Add agent .md files to .pi/agents/eitri/")];
+						return ["", theme.fg("dim", "  No experts found. Add agent .md files next to eitri.ts in agents/eitri/")];
 					}
 
 					const cols = Math.min(gridCols, experts.size);
@@ -1347,7 +1294,7 @@ Use this for any build path — extensions, themes, skills, prompts, agents — 
 	function buildSystemPrompt(): string {
 		const orchestratorPath = cachedOrchestratorPath;
 		if (!orchestratorPath) {
-			return "Error: Could not locate eitri-orchestrator.md in either ~/.pi/agent/agents/eitri/ or .pi/agents/eitri/.";
+			return `Error: Could not locate eitri-orchestrator.md in ${bundledExpertsDir()}.`;
 		}
 		try {
 			const raw = readFileSync(orchestratorPath, "utf-8");
