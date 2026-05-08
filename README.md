@@ -16,11 +16,32 @@
 ## Install
 
 ```bash
+# 1. Clone brunnr to a stable location
 git clone <your-brunnr-repo> ~/.config/brunnr
-alias brunnr='just -f ~/.config/brunnr/justfile'    # optional shell alias
 
-cd your-project
-brunnr install                                      # scaffolds .pi/ subdirs in the current project
+# 2. Add a shell alias so `brunnr` is available everywhere.
+#    Append this line to ~/.zshrc (or ~/.bashrc if you use bash):
+alias brunnr='just -f ~/.config/brunnr/justfile'
+#    Then reload your shell: `source ~/.zshrc`  (or open a new terminal)
+
+# 3. Verify it works
+brunnr help              # prints the command list
+brunnr list              # shows every catalog item, grouped by section
+```
+
+Initialize brunnr in any project where you plan to run Pi:
+
+```bash
+cd path/to/your/project  # any directory; if you don't have one, run `mkdir my-pi-project && cd $_`
+brunnr install           # creates .pi/skills, .pi/agents, .pi/prompts, .pi/extensions, .pi/themes
+```
+
+Then pull items from the catalog into that project:
+
+```bash
+brunnr search <query>           # find items by name, description, or tag
+brunnr add <section> <name>     # install into this project's .pi/
+brunnr add -g <section> <name>  # install globally — every project sees it
 ```
 
 **Eitri** — the authoring tool that ships with brunnr — is **not** installed anywhere. `brunnr eitri` loads it on demand directly from `$BRUNNR_HOME/extensions/eitri/`, so plain `pi` sessions stay free of it.
