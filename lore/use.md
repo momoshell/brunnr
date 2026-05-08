@@ -6,7 +6,7 @@
 
 Once items are installed in your project (via `just add`), they become available to your AI assistant. This guide explains how to invoke and use each type of item.
 
-> Examples below use names from the current brunnr catalog (`autoresearch-skill`, `eitri`, `skill-status`, etc.). Generic placeholders like `<skill-name>` mark spots where you would substitute your own item name.
+> Examples below use names from the current brunnr catalog (`autoresearch-skill`, `skill-status`, etc.). Generic placeholders like `<skill-name>` mark spots where you would substitute your own item name.
 
 ## Using Skills
 
@@ -59,10 +59,7 @@ Installed agents are in `.pi/agents/`:
 .pi/agents/
 ├── autoresearch-skill.md
 ├── autoresearch-skill-gepa.md
-├── eval-designer.md
-└── eitri/                     # directory-routed from extensions
-    ├── eitri-orchestrator.md
-    └── *-expert.md
+└── eval-designer.md
 ```
 
 ## Using Prompts

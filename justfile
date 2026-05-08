@@ -1292,7 +1292,11 @@ search query:
         end
       end
 
-      # Orphan check — files on disk not referenced by library.yaml
+      # Orphan check — files on disk not referenced by library.yaml.
+      # Built-in capabilities (eitri) live under extensions/ but are intentionally
+      # not catalog items, so they're whitelisted here.
+      bundled_paths = ["extensions/eitri/"]
+
       on_disk = {
         "skills"     => Dir.glob("skills/*/SKILL.md"),
         "agents"     => Dir.glob("agents/*.md"),
@@ -1304,6 +1308,7 @@ search query:
       on_disk.each do |section, paths|
         paths.each do |p|
           p_norm = File.directory?(p) ? p.chomp("/") + "/" : p
+          next if bundled_paths.include?(p_norm)
           unless known_paths.include?(p_norm)
             warnings << "orphan: `#{p_norm}` exists on disk but is not registered in library.yaml under `#{section}`"
           end

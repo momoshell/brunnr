@@ -328,8 +328,7 @@ Add an item from brunnr to the current project.
 ```bash
 just -f $BRUNNR_HOME/justfile add agent autoresearch-skill
 just -f $BRUNNR_HOME/justfile add prompt skill-status
-just -f $BRUNNR_HOME/justfile add extension eitri
-# (`add skill <name>` and `add theme <name>` follow the same shape — see library.yaml for catalog contents)
+# (`add skill <name>`, `add extension <name>`, and `add theme <name>` follow the same shape — see library.yaml for catalog contents)
 ```
 
 ### remove <section> <name>
@@ -352,7 +351,7 @@ Remove an item from the current project.
 **Usage**:
 ```bash
 just -f $BRUNNR_HOME/justfile remove agent autoresearch-skill
-just -f $BRUNNR_HOME/justfile remove extension eitri
+just -f $BRUNNR_HOME/justfile remove prompt skill-status
 ```
 
 ### push <section> <name>

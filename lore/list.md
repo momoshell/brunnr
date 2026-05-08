@@ -62,7 +62,7 @@ prompts:
   agent-status - /agent-status
 
 extensions:
-  eitri - Meta-agent that builds Pi components
+  (none)
 
 themes:
   (none)
@@ -170,8 +170,8 @@ diff ~/.config/brunnr/agents/autoresearch-skill.md .pi/agents/autoresearch-skill
 # Compare a prompt
 diff ~/.config/brunnr/prompts/skill-status.md .pi/prompts/skill-status.md
 
-# Compare a directory-style item (skill or extension)
-diff -r ~/.config/brunnr/extensions/eitri .pi/extensions/eitri
+# Compare a skill (directory-style)
+diff -r ~/.config/brunnr/skills/code-reviewer .pi/skills/code-reviewer
 ```
 
 ## Finding Dependencies

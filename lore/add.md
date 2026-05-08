@@ -25,7 +25,7 @@ brunnr add [-g|--global] <section> <name>
 | Project (default) | `.pi/<section>s/` | One-off use; per-project customization; experiments |
 | Global (`-g`) | `~/.pi/agent/<section>s/` | Items you want in every project — meta-agents, eval generators, common prompts |
 
-**Project entries shadow global ones on name collision** — Pi prefers the project-level item if both exist. So you can globally install `eitri` and still override it per project with `brunnr add extension eitri`.
+**Project entries shadow global ones on name collision** — Pi prefers the project-level item if both exist. So you can globally install an item and still override it per project with `brunnr add <section> <name>`.
 
 ## How It Works
 
@@ -51,15 +51,13 @@ The `add` command follows a catalog-aware resolution process:
 
 ### Directory-Style Extensions
 
-Extensions can be a single `.ts` file or a directory tree (like `eitri`). For directory-style extensions, files route across multiple install targets:
+Extensions can be a single `.ts` file or a directory tree. For directory-style extensions, files route across multiple install targets:
 
 | Source path inside `<extension-dir>/` | Project install target | Global install target |
 |---|---|---|
 | `*.ts` (top level) | `.pi/extensions/` | `~/.pi/agent/extensions/` |
 | `agents/<sub>/...` | `.pi/agents/<sub>/...` | `~/.pi/agent/agents/<sub>/...` |
 | `themes/<sub>/...` | `.pi/themes/<sub>/...` | `~/.pi/agent/themes/<sub>/...` |
-
-`brunnr add -g extension eitri` installs `eitri.ts` globally *and* routes the `agents/eitri/` expert tree into the global agents directory.
 
 ## Examples
 
@@ -70,9 +68,6 @@ brunnr add skill code-reviewer
 # Agent + prompt — useful everywhere, install globally
 brunnr add -g agent eval-designer
 brunnr add -g prompt gen-evals
-
-# Eitri meta-agent — definitely global
-brunnr add -g extension eitri
 
 # Theme — usually a personal preference, global
 brunnr add -g theme my-dark-theme

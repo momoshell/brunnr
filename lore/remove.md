@@ -28,7 +28,7 @@ brunnr remove [-g|--global] <section> <name>
 | `extension` | `.pi/extensions/<name>.ts` + matching `.pi/agents/<name>/` + `.pi/themes/<name>/` (for directory-style extensions) | Same routing under `~/.pi/agent/` |
 | `theme` | `.pi/themes/<name>.json` | `~/.pi/agent/themes/<name>.json` |
 
-For directory-style extensions like `eitri`, `remove` undoes all the routed installs in one go.
+For directory-style extensions, `remove` undoes all the routed installs (`.ts` plus the matching `agents/<name>/` and `themes/<name>/` subdirs) in one go.
 
 ## Examples
 
@@ -39,7 +39,7 @@ brunnr remove prompt skill-status
 
 # Remove from global
 brunnr remove -g agent eval-designer
-brunnr remove -g extension eitri
+brunnr remove -g prompt gen-evals
 ```
 
 ## Safety Behavior

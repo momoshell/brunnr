@@ -229,12 +229,6 @@ brunnr scrap <section> <name>            # PR removing it from the catalog
 
 All optimizer prompts and the pipeline support the `Resume.` kickoff.
 
-### Extensions
-
-| Name | Purpose |
-|---|---|
-| `eitri` | Builds new Pi components from natural-language requests |
-
 ## Repository structure
 
 ```
