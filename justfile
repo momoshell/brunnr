@@ -97,7 +97,7 @@ eitri *args:
         exit 1
     fi
 
-    exec pi -e "$EITRI_PATH" {{args}}
+    exec pi --no-extensions -e "$EITRI_PATH" {{args}}
 
 # Add an item from brunnr to the current project (default) or globally with -g
 add *args:
