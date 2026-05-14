@@ -49,6 +49,8 @@ THEMES_SRC := BRUNNR_HOME / "themes"
     echo "  list [-g] [section]   List catalog items + what's installed (project, or globally with -g)"
     echo "  sync                 Pull latest catalog content (does NOT change tool behavior)"
     echo "  upgrade              Update brunnr tool itself (justfile, install.sh, docs)"
+    echo "  setup-optimizer      Install the full skill/agent optimization stack globally"
+    echo "  remove-optimizer     Uninstall everything setup-optimizer installed"
     echo "  uninstall            Remove brunnr from this machine (alias + \$BRUNNR_HOME)"
     echo "  status               Show open PRs in brunnr (skills awaiting review)"
     echo "  search <query>       Search the catalog"
@@ -1212,6 +1214,97 @@ list *args:
     echo ""
     echo "The 'brunnr' alias is still loaded in this shell session."
     echo "Open a new terminal (or run 'unalias brunnr') to clear it."
+
+# Install the full optimization stack globally — agents + slash commands. Re-runnable.
+setup-optimizer:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    BRUNNR_HOME="{{BRUNNR_HOME}}"
+    JUST=(just -f "$BRUNNR_HOME/justfile")
+
+    # Keep these two lists in sync with remove-optimizer.
+    AGENTS=(
+        autoresearch
+        autoresearch-skill
+        autoresearch-skill-gepa
+        autoresearch-agent
+        eval-designer
+        eval-designer-agent
+    )
+    PROMPTS=(
+        autoresearch
+        autoresearch-skill
+        autoresearch-skill-gepa
+        autoresearch-pipeline
+        autoresearch-agent
+        gen-evals
+        gen-evals-agent
+        skill-status
+        agent-status
+        fork-skill
+        fork-agent
+    )
+
+    echo "Installing optimizer agents globally (${#AGENTS[@]})..."
+    for name in "${AGENTS[@]}"; do
+        if ! "${JUST[@]}" add -g agent "$name"; then
+            echo "  (skipped $name — see message above)"
+        fi
+    done
+    echo
+    echo "Installing optimizer prompts globally (${#PROMPTS[@]})..."
+    for name in "${PROMPTS[@]}"; do
+        if ! "${JUST[@]}" add -g prompt "$name"; then
+            echo "  (skipped $name — see message above)"
+        fi
+    done
+    echo
+    echo "Optimizer stack installed at:"
+    echo "  ~/.pi/agent/agents/   (agents)"
+    echo "  ~/.pi/agent/prompts/  (slash commands)"
+    echo "Try: pi -p 'list installed slash commands' or just run /gen-evals on any skill."
+
+# Remove the full optimization stack from the global install. Items not present are skipped.
+remove-optimizer:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    BRUNNR_HOME="{{BRUNNR_HOME}}"
+    JUST=(just -f "$BRUNNR_HOME/justfile")
+
+    # Keep in sync with setup-optimizer.
+    AGENTS=(
+        autoresearch
+        autoresearch-skill
+        autoresearch-skill-gepa
+        autoresearch-agent
+        eval-designer
+        eval-designer-agent
+    )
+    PROMPTS=(
+        autoresearch
+        autoresearch-skill
+        autoresearch-skill-gepa
+        autoresearch-pipeline
+        autoresearch-agent
+        gen-evals
+        gen-evals-agent
+        skill-status
+        agent-status
+        fork-skill
+        fork-agent
+    )
+
+    echo "Removing optimizer agents (${#AGENTS[@]})..."
+    for name in "${AGENTS[@]}"; do
+        "${JUST[@]}" remove -g agent "$name" 2>/dev/null || true
+    done
+    echo
+    echo "Removing optimizer prompts (${#PROMPTS[@]})..."
+    for name in "${PROMPTS[@]}"; do
+        "${JUST[@]}" remove -g prompt "$name" 2>/dev/null || true
+    done
+    echo
+    echo "Optimizer stack removed."
 
 # Show open PRs in brunnr — items waiting to be reviewed/merged into the catalog
 @status:

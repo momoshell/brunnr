@@ -120,9 +120,10 @@ The six patterns: **checkpoint-and-resume**, **HITL gates**, **coordinator+speci
 
 ### …optimize a skill
 
+One-time setup — installs the full optimizer stack (agents + slash commands) globally so every Pi session sees them:
+
 ```bash
-brunnr add -g agent eval-designer autoresearch-skill autoresearch-skill-gepa
-brunnr add prompt gen-evals autoresearch-pipeline skill-status
+brunnr setup-optimizer       # uninstall later with `brunnr remove-optimizer`
 ```
 
 In Pi:
@@ -168,10 +169,7 @@ The pipeline detects which stage was interrupted from existing branches + `evals
 
 ### …optimize an agent
 
-```bash
-brunnr add -g agent eval-designer-agent autoresearch-agent
-brunnr add prompt gen-evals-agent autoresearch-agent agent-status
-```
+Same setup — `brunnr setup-optimizer` installs the agent-side tooling (`eval-designer-agent`, `autoresearch-agent`, `/gen-evals-agent`, `/agent-status`) alongside the skill-side tooling. Run once.
 
 In Pi:
 
@@ -206,10 +204,7 @@ Default `RUNS=2` for agents (eval runs are expensive — multi-turn, fixture res
 
 ### …optimize code, configs, queries — anything with a metric
 
-```bash
-brunnr add -g agent autoresearch
-brunnr add prompt autoresearch
-```
+`brunnr setup-optimizer` also installs the generic `autoresearch` agent and `/autoresearch` slash command (alongside the skill/agent specialists). If you've already run `setup-optimizer`, you're set; otherwise run it now.
 
 ```
 /autoresearch
