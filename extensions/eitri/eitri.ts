@@ -45,7 +45,7 @@ import { truncateHead, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, parseFrontmatter } 
 import { Type } from "@sinclair/typebox";
 import { Text, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { spawn } from "child_process";
-import { readdirSync, readFileSync, existsSync, mkdtempSync, writeFileSync, unlinkSync, rmdirSync } from "fs";
+import { readdirSync, readFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, unlinkSync, rmdirSync } from "fs";
 import { join, resolve, dirname, basename } from "path";
 import { tmpdir } from "os";
 import { fileURLToPath } from "url";
@@ -70,6 +70,19 @@ function normalizeThinkingLevel(raw: string | undefined): ThinkingLevel | undefi
 	if (!raw) return undefined;
 	const v = raw.trim().toLowerCase() as ThinkingLevel;
 	return (VALID_THINKING_LEVELS as readonly string[]).includes(v) ? v : undefined;
+}
+
+// Project-level overrides for expert model / provider / thinking. Loaded from
+// <cwd>/.pi/eitri-overrides.json on session_start, written through after every
+// /expert-* slash command. Does NOT modify expert frontmatter in the catalog.
+interface ExpertOverride {
+	model?: string;
+	provider?: string;
+	thinking?: ThinkingLevel;
+}
+interface OverridesFile {
+	experts?: Record<string, ExpertOverride>;  // per-expert (key = expert name, lowercase)
+	expertsDefault?: ExpertOverride;            // applied to all experts unless per-expert overrides
 }
 
 interface ExpertState {
@@ -409,6 +422,76 @@ export default function (pi: ExtensionAPI) {
 	// didn't happen (snow unavailable, no UI ctx, or setTheme returned !success).
 	let previousThemeName: string | undefined;
 
+	// Per-project expert overrides loaded from <cwd>/.pi/eitri-overrides.json.
+	// Mutated by /expert-* and /experts-* slash commands; saved through after
+	// each mutation.
+	let overrides: OverridesFile = {};
+	let overridesPath: string | undefined;
+
+	function overridesFilePath(): string {
+		if (!overridesPath) overridesPath = join(process.cwd(), ".pi", "eitri-overrides.json");
+		return overridesPath;
+	}
+
+	function loadOverrides(ctx?: ExtensionContext): void {
+		const path = overridesFilePath();
+		if (!existsSync(path)) { overrides = {}; return; }
+		try {
+			const raw = readFileSync(path, "utf-8");
+			const parsed = JSON.parse(raw);
+			overrides = (parsed && typeof parsed === "object") ? parsed : {};
+		} catch (err) {
+			if (ctx?.hasUI) ctx.ui.notify(`Eitri: failed to parse ${path}: ${(err as Error).message}`, "warning");
+			overrides = {};
+		}
+	}
+
+	function saveOverrides(ctx?: ExtensionContext): void {
+		const path = overridesFilePath();
+		try {
+			mkdirSync(dirname(path), { recursive: true });
+			writeFileSync(path, JSON.stringify(overrides, null, 2) + "\n");
+		} catch (err) {
+			if (ctx?.hasUI) ctx.ui.notify(`Eitri: failed to write ${path}: ${(err as Error).message}`, "warning");
+		}
+	}
+
+	// Accept either canonical key ("pattern-expert") or the short form ("pattern").
+	function resolveExpertKey(input: string): string | undefined {
+		const lower = input.trim().toLowerCase();
+		if (experts.has(lower)) return lower;
+		if (experts.has(`${lower}-expert`)) return `${lower}-expert`;
+		return undefined;
+	}
+
+	// Resolve effective settings for an expert dispatch.
+	// Order: per-expert override > all-experts override > frontmatter > orchestrator ctx.model > defaults.
+	function effectiveExpertSettings(
+		key: string,
+		ctxModel?: { provider: string; id: string },
+	): { model: string; provider?: string; thinking: ThinkingLevel } {
+		const state = experts.get(key);
+		const fm: Partial<ExpertDef> = state?.def ?? {};
+		const per = overrides.experts?.[key] ?? {};
+		const all = overrides.expertsDefault ?? {};
+
+		const model = per.model
+			?? all.model
+			?? fm.model
+			?? (ctxModel ? `${ctxModel.provider}/${ctxModel.id}` : "");
+
+		const provider = per.provider
+			?? all.provider
+			?? fm.provider;
+
+		const thinking = per.thinking
+			?? all.thinking
+			?? fm.thinkingLevel
+			?? "off";
+
+		return { model, provider, thinking };
+	}
+
 	// Experts live next to this script: <script-dir>/agents/eitri/. Eitri
 	// is invoked on-demand via `brunnr eitri` (which runs `pi -e <abs-path>`),
 	// so import.meta.url resolves to the real on-disk location.
@@ -664,20 +747,20 @@ export default function (pi: ExtensionAPI) {
 			updateWidget();
 		}, 1000);
 
-		// Per-expert config layers:
-		//   provider: explicit frontmatter > derived from "provider/id" model > ctx.model > unset
-		//   model:    explicit frontmatter > ctx.model "provider/id" > fallback
-		//   thinking: explicit frontmatter > "off" (cheap default for research)
+		// Per-expert config layers (highest precedence first):
+		//   per-expert override (.pi/eitri-overrides.json experts[name])  >
+		//   all-experts override (.pi/eitri-overrides.json expertsDefault) >
+		//   explicit frontmatter (model/provider/thinking in the expert .md) >
+		//   ctx.model "provider/id" (orchestrator's current model)         >
+		//   fallback model + thinking="off"
 		// Letting an expert pin its own preset means heavyweight reasoners
 		// (e.g. pattern-expert) can run on Opus + xhigh while scout-style
-		// experts run on Haiku + off in the same eitri session.
-		const explicitProvider = state.def.provider;
-		const modelArg = state.def.model
-			? state.def.model
-			: ctx.model
-				? `${ctx.model.provider}/${ctx.model.id}`
-				: "openrouter/google/gemini-3-flash-preview";
-		const thinkingArg = state.def.thinkingLevel ?? "off";
+		// experts run on Haiku + off in the same eitri session; the overrides
+		// file lets users tune this from inside the session via slash commands.
+		const _eff = effectiveExpertSettings(state.def.name.toLowerCase(), ctx.model);
+		const explicitProvider = _eff.provider;
+		const modelArg = _eff.model || "openrouter/google/gemini-3-flash-preview";
+		const thinkingArg = _eff.thinking;
 
 		const args: string[] = [
 			"--mode", "json",
@@ -1294,6 +1377,120 @@ Use this for any build path — extensions, themes, skills, prompts, agents — 
 		},
 	});
 
+	// ── Expert overrides (model / thinking) ──────
+
+	pi.registerCommand("experts-config", {
+		description: "Show current effective model and thinking for each expert",
+		handler: async (_args, _ctx) => {
+			const lines: string[] = [];
+			const def = overrides.expertsDefault;
+			if (def && (def.model || def.provider || def.thinking)) {
+				const bits: string[] = [];
+				if (def.model)    bits.push(`model=${def.model}`);
+				if (def.provider) bits.push(`provider=${def.provider}`);
+				if (def.thinking) bits.push(`thinking=${def.thinking}`);
+				lines.push(`Defaults for all experts: ${bits.join(", ")}`);
+				lines.push("");
+			}
+			lines.push("Effective per-expert settings:");
+			for (const [key, state] of experts.entries()) {
+				const eff = effectiveExpertSettings(key, _ctx.model);
+				const hasOverride = !!overrides.experts?.[key];
+				const marker = hasOverride ? " *" : "";
+				const provider = eff.provider ? ` provider=${eff.provider}` : "";
+				lines.push(`  ${displayName(state.def.name)}: ${eff.model}${provider} thinking=${eff.thinking}${marker}`);
+			}
+			lines.push("");
+			lines.push("(* = explicit per-expert override)");
+			lines.push(`File: ${overridesFilePath()}`);
+			_ctx.ui.notify(lines.join("\n"), "info");
+		},
+	});
+
+	pi.registerCommand("expert-thinking", {
+		description: "Set thinking level for one expert: /expert-thinking <name> <off|minimal|low|medium|high|xhigh>",
+		handler: async (args, _ctx) => {
+			const parts = (args || "").trim().split(/\s+/);
+			if (parts.length !== 2 || !parts[0] || !parts[1]) {
+				_ctx.ui.notify("Usage: /expert-thinking <name> <off|minimal|low|medium|high|xhigh>", "error");
+				return;
+			}
+			const key = resolveExpertKey(parts[0]);
+			if (!key) { _ctx.ui.notify(`Unknown expert: ${parts[0]}`, "error"); return; }
+			const level = normalizeThinkingLevel(parts[1]);
+			if (!level) {
+				_ctx.ui.notify(`Invalid thinking level: ${parts[1]}. Use one of off|minimal|low|medium|high|xhigh`, "error");
+				return;
+			}
+			overrides.experts ??= {};
+			overrides.experts[key] ??= {};
+			overrides.experts[key].thinking = level;
+			saveOverrides(_ctx);
+			_ctx.ui.notify(`${displayName(key)}: thinking → ${level}`, "info");
+		},
+	});
+
+	pi.registerCommand("expert-model", {
+		description: "Set model for one expert: /expert-model <name> <provider/id>",
+		handler: async (args, _ctx) => {
+			const parts = (args || "").trim().split(/\s+/);
+			if (parts.length !== 2 || !parts[0] || !parts[1]) {
+				_ctx.ui.notify("Usage: /expert-model <name> <provider/id>", "error");
+				return;
+			}
+			const key = resolveExpertKey(parts[0]);
+			if (!key) { _ctx.ui.notify(`Unknown expert: ${parts[0]}`, "error"); return; }
+			if (!parts[1].includes("/")) {
+				_ctx.ui.notify("Model should look like provider/id (e.g., openai/gpt-5.2-codex)", "error");
+				return;
+			}
+			overrides.experts ??= {};
+			overrides.experts[key] ??= {};
+			overrides.experts[key].model = parts[1];
+			saveOverrides(_ctx);
+			_ctx.ui.notify(`${displayName(key)}: model → ${parts[1]}`, "info");
+		},
+	});
+
+	pi.registerCommand("experts-thinking", {
+		description: "Set thinking level for ALL experts: /experts-thinking <off|minimal|low|medium|high|xhigh>",
+		handler: async (args, _ctx) => {
+			const level = normalizeThinkingLevel((args || "").trim());
+			if (!level) {
+				_ctx.ui.notify("Usage: /experts-thinking <off|minimal|low|medium|high|xhigh>", "error");
+				return;
+			}
+			overrides.expertsDefault ??= {};
+			overrides.expertsDefault.thinking = level;
+			saveOverrides(_ctx);
+			_ctx.ui.notify(`All experts: thinking → ${level} (per-expert overrides still apply)`, "info");
+		},
+	});
+
+	pi.registerCommand("experts-model", {
+		description: "Set model for ALL experts: /experts-model <provider/id>",
+		handler: async (args, _ctx) => {
+			const model = (args || "").trim();
+			if (!model.includes("/")) {
+				_ctx.ui.notify("Usage: /experts-model <provider/id> (e.g., openai/gpt-5.2-codex)", "error");
+				return;
+			}
+			overrides.expertsDefault ??= {};
+			overrides.expertsDefault.model = model;
+			saveOverrides(_ctx);
+			_ctx.ui.notify(`All experts: model → ${model} (per-expert overrides still apply)`, "info");
+		},
+	});
+
+	pi.registerCommand("experts-reset", {
+		description: "Clear all expert model/thinking overrides for this project",
+		handler: async (_args, _ctx) => {
+			overrides = {};
+			saveOverrides(_ctx);
+			_ctx.ui.notify("All eitri expert overrides cleared", "info");
+		},
+	});
+
 	// ── System Prompt ────────────────────────────
 
 	function buildSystemPrompt(): string {
@@ -1491,6 +1688,7 @@ Use this for any build path — extensions, themes, skills, prompts, agents — 
 		} catch { /* don't block session_start on theme failure */ }
 
 		await loadExperts(_ctx);
+		loadOverrides(_ctx);
 		updateWidget();
 
 		// Reset per-session flags. The extension closure persists across
@@ -1500,10 +1698,22 @@ Use this for any build path — extensions, themes, skills, prompts, agents — 
 
 		const expertNames = Array.from(experts.values()).map(s => displayName(s.def.name)).join(", ");
 		_ctx.ui.setStatus("eitri", `Eitri (${experts.size} experts)`);
+		const overrideCount =
+			(overrides.experts ? Object.keys(overrides.experts).length : 0) +
+			(overrides.expertsDefault ? 1 : 0);
+		const overrideLine = overrideCount > 0
+			? `\nLoaded ${overrideCount} expert override(s) from .pi/eitri-overrides.json — /experts-config to view.`
+			: "";
 		_ctx.ui.notify(
-			`Eitri loaded — ${experts.size} experts: ${expertNames}\n\n` +
-			`/experts          List experts and status\n` +
-			`/experts-grid N   Set grid columns (1-5)\n\n` +
+			`Eitri loaded — ${experts.size} experts: ${expertNames}${overrideLine}\n\n` +
+			`/experts            List experts and status\n` +
+			`/experts-config     Show effective model + thinking per expert\n` +
+			`/experts-grid N     Set grid columns (1-5)\n` +
+			`/expert-model NAME PROVIDER/ID    Override model for one expert\n` +
+			`/expert-thinking NAME LEVEL       Override thinking for one expert\n` +
+			`/experts-model PROVIDER/ID        Override model for ALL experts\n` +
+			`/experts-thinking LEVEL           Override thinking for ALL experts\n` +
+			`/experts-reset      Clear all overrides\n\n` +
 			`Ask me to build any Pi agent component!`,
 			"info",
 		);
