@@ -41,9 +41,9 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { truncateHead, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, parseFrontmatter, ThinkingSelectorComponent, getSelectListTheme } from "@mariozechner/pi-coding-agent";
+import { truncateHead, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, parseFrontmatter, ThinkingSelectorComponent, getSelectListTheme, DynamicBorder } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
-import { Text, truncateToWidth, visibleWidth, SelectList } from "@mariozechner/pi-tui";
+import { Text, truncateToWidth, visibleWidth, SelectList, Container } from "@mariozechner/pi-tui";
 import { spawn } from "child_process";
 import { readdirSync, readFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, unlinkSync, rmdirSync } from "fs";
 import { join, resolve, dirname, basename } from "path";
@@ -1491,7 +1491,8 @@ Use this for any build path — extensions, themes, skills, prompts, agents — 
 		},
 	});
 
-	// Wraps Pi's SelectList in an overlay. Returns picked value or undefined on Esc.
+	// Wraps Pi's SelectList in an overlay with DynamicBorder top + bottom so the modal
+	// actually reads as a modal. Returns picked value or undefined on Esc.
 	async function pickFromList(
 		ctx: ExtensionContext,
 		items: { value: string; label: string; description?: string }[],
@@ -1505,122 +1506,141 @@ Use this for any build path — extensions, themes, skills, prompts, agents — 
 				});
 				list.onSelect = (item) => done(item.value);
 				list.onCancel = () => done(undefined);
-				return list;
+
+				const container = new Container();
+				container.addChild(new DynamicBorder());
+				container.addChild(list);
+				container.addChild(new DynamicBorder());
+				return container;
 			},
 			{ overlay: true },
 		);
 	}
 
+	async function pickThinkingLevel(
+		ctx: ExtensionContext,
+		currentLevel: ThinkingLevel,
+	): Promise<ThinkingLevel | undefined> {
+		return await ctx.ui.custom<ThinkingLevel | undefined>(
+			(_tui, _theme, _kb, done) =>
+				new ThinkingSelectorComponent(
+					currentLevel as any,
+					[...VALID_THINKING_LEVELS] as any,
+					(l: any) => done(l as ThinkingLevel),
+					() => done(undefined),
+				),
+			{ overlay: true },
+		);
+	}
+
+	function buildExpertItems(ctxModel?: { provider: string; id: string }) {
+		const items: { value: string; label: string; description?: string }[] = [
+			{
+				value: "__all__",
+				label: "All experts (defaults)",
+				description: overrides.expertsDefault
+					? `defaults: ${[
+						overrides.expertsDefault.model && `model=${overrides.expertsDefault.model}`,
+						overrides.expertsDefault.thinking && `thinking=${overrides.expertsDefault.thinking}`,
+					].filter(Boolean).join(", ") || "(none set)"}`
+					: "no defaults set",
+			},
+		];
+		for (const [key, state] of experts.entries()) {
+			const eff = effectiveExpertSettings(key, ctxModel);
+			const hasOverride = !!overrides.experts?.[key];
+			items.push({
+				value: key,
+				label: displayName(state.def.name) + (hasOverride ? " *" : ""),
+				description: `${eff.model}  thinking=${eff.thinking}`,
+			});
+		}
+		return items;
+	}
+
 	pi.registerCommand("experts-tune", {
-		description: "Interactive picker for expert model + thinking (no typing)",
+		description: "Interactive picker for expert model + thinking (no typing). Esc closes.",
 		handler: async (_args, ctx) => {
 			if (!ctx.hasUI) {
 				ctx.ui.notify("This command needs an interactive UI", "warning");
 				return;
 			}
 
-			// Step 1: pick expert (or "all experts")
-			const expertItems: { value: string; label: string; description?: string }[] = [
-				{
-					value: "__all__",
-					label: "All experts (defaults)",
-					description: overrides.expertsDefault
-						? `defaults: ${[
-							overrides.expertsDefault.model && `model=${overrides.expertsDefault.model}`,
-							overrides.expertsDefault.thinking && `thinking=${overrides.expertsDefault.thinking}`,
-						].filter(Boolean).join(", ") || "(none set)"}`
-						: "no defaults set",
-				},
-			];
-			for (const [key, state] of experts.entries()) {
-				const eff = effectiveExpertSettings(key, ctx.model);
-				const hasOverride = !!overrides.experts?.[key];
-				expertItems.push({
-					value: key,
-					label: displayName(state.def.name) + (hasOverride ? " *" : ""),
-					description: `${eff.model}  thinking=${eff.thinking}`,
-				});
-			}
+			// Outer loop: pick expert (or exit). Esc on this list closes the whole flow.
+			// Esc on any nested step returns here, so the user can tune multiple experts
+			// in one /experts-tune invocation.
+			while (true) {
+				const expertKey = await pickFromList(ctx, buildExpertItems(ctx.model));
+				if (!expertKey) return;  // Esc on expert list = exit entirely
 
-			const expertKey = await pickFromList(ctx, expertItems);
-			if (!expertKey) return;
+				const expertLabel = expertKey === "__all__" ? "All experts" : displayName(expertKey);
 
-			const expertLabel = expertKey === "__all__" ? "All experts" : displayName(expertKey);
+				const action = await pickFromList(ctx, [
+					{ value: "model", label: "Set model", description: "Pick from connected providers" },
+					{ value: "thinking", label: "Set thinking level", description: "off → xhigh" },
+					{ value: "reset", label: "Clear overrides", description: `Reset ${expertLabel} to frontmatter defaults` },
+				]);
+				if (!action) continue;  // Esc on action = back to expert list
 
-			// Step 2: pick action
-			const action = await pickFromList(ctx, [
-				{ value: "model", label: "Set model", description: "Pick from connected providers" },
-				{ value: "thinking", label: "Set thinking level", description: "off → xhigh" },
-				{ value: "reset", label: "Clear overrides", description: `Reset ${expertLabel} to frontmatter defaults` },
-			]);
-			if (!action) return;
-
-			if (action === "reset") {
-				if (expertKey === "__all__") {
-					delete overrides.expertsDefault;
-				} else if (overrides.experts) {
-					delete overrides.experts[expertKey];
+				if (action === "reset") {
+					if (expertKey === "__all__") {
+						delete overrides.expertsDefault;
+					} else if (overrides.experts) {
+						delete overrides.experts[expertKey];
+					}
+					saveOverrides(ctx);
+					ctx.ui.notify(`${expertLabel}: overrides cleared`, "info");
+					continue;
 				}
-				saveOverrides(ctx);
-				ctx.ui.notify(`${expertLabel}: overrides cleared`, "info");
-				return;
-			}
 
-			if (action === "model") {
-				const available = ctx.modelRegistry.getAvailable();
-				if (available.length === 0) {
-					ctx.ui.notify("No models with configured auth. Set an API key or run `gh auth login` for providers.", "warning");
-					return;
+				if (action === "model") {
+					const available = ctx.modelRegistry.getAvailable();
+					if (available.length === 0) {
+						ctx.ui.notify("No models with configured auth. Set an API key or run `gh auth login` for providers.", "warning");
+						continue;
+					}
+					const modelItems = available.map((m: any) => ({
+						value: `${m.provider?.id ?? m.provider}/${m.id}`,
+						label: m.name || m.id,
+						description: `${m.provider?.id ?? m.provider}/${m.id}${m.reasoning ? "  · reasoning" : ""}`,
+					}));
+					const modelStr = await pickFromList(ctx, modelItems);
+					if (!modelStr) continue;  // Esc on model list = back to expert list
+
+					if (expertKey === "__all__") {
+						overrides.expertsDefault ??= {};
+						overrides.expertsDefault.model = modelStr;
+					} else {
+						overrides.experts ??= {};
+						overrides.experts[expertKey] ??= {};
+						overrides.experts[expertKey].model = modelStr;
+					}
+					saveOverrides(ctx);
+					ctx.ui.notify(`${expertLabel}: model → ${modelStr}`, "info");
+					continue;
 				}
-				const modelItems = available.map((m: any) => ({
-					value: `${m.provider?.id ?? m.provider}/${m.id}`,
-					label: m.name || m.id,
-					description: `${m.provider?.id ?? m.provider}/${m.id}${m.reasoning ? "  · reasoning" : ""}`,
-				}));
-				const modelStr = await pickFromList(ctx, modelItems);
-				if (!modelStr) return;
 
-				if (expertKey === "__all__") {
-					overrides.expertsDefault ??= {};
-					overrides.expertsDefault.model = modelStr;
-				} else {
-					overrides.experts ??= {};
-					overrides.experts[expertKey] ??= {};
-					overrides.experts[expertKey].model = modelStr;
+				if (action === "thinking") {
+					const currentLevel: ThinkingLevel = (expertKey === "__all__"
+						? overrides.expertsDefault?.thinking
+						: overrides.experts?.[expertKey]?.thinking
+					) ?? "off";
+
+					const level = await pickThinkingLevel(ctx, currentLevel);
+					if (!level) continue;  // Esc on thinking list = back to expert list
+
+					if (expertKey === "__all__") {
+						overrides.expertsDefault ??= {};
+						overrides.expertsDefault.thinking = level;
+					} else {
+						overrides.experts ??= {};
+						overrides.experts[expertKey] ??= {};
+						overrides.experts[expertKey].thinking = level;
+					}
+					saveOverrides(ctx);
+					ctx.ui.notify(`${expertLabel}: thinking → ${level}`, "info");
+					continue;
 				}
-				saveOverrides(ctx);
-				ctx.ui.notify(`${expertLabel}: model → ${modelStr}`, "info");
-				return;
-			}
-
-			if (action === "thinking") {
-				const currentLevel: ThinkingLevel = (expertKey === "__all__"
-					? overrides.expertsDefault?.thinking
-					: overrides.experts?.[expertKey]?.thinking
-				) ?? "off";
-
-				const level = await ctx.ui.custom<ThinkingLevel | undefined>(
-					(_tui, _theme, _kb, done) =>
-						new ThinkingSelectorComponent(
-							currentLevel as any,
-							[...VALID_THINKING_LEVELS] as any,
-							(l: any) => done(l as ThinkingLevel),
-							() => done(undefined),
-						),
-					{ overlay: true },
-				);
-				if (!level) return;
-
-				if (expertKey === "__all__") {
-					overrides.expertsDefault ??= {};
-					overrides.expertsDefault.thinking = level;
-				} else {
-					overrides.experts ??= {};
-					overrides.experts[expertKey] ??= {};
-					overrides.experts[expertKey].thinking = level;
-				}
-				saveOverrides(ctx);
-				ctx.ui.notify(`${expertLabel}: thinking → ${level}`, "info");
 			}
 		},
 	});
