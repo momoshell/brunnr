@@ -2,17 +2,17 @@
 #
 # brunnr installer — sets up brunnr for use on this machine.
 #
-# Bootstrap (current — private repo):
-#   gh repo clone momoshell/brunnr ~/.config/brunnr && bash ~/.config/brunnr/install.sh
-#
-# Bootstrap (future — once the repo is public):
+# Bootstrap:
 #   curl -fsSL https://raw.githubusercontent.com/momoshell/brunnr/main/install.sh | bash
+#
+# Or, if you've already cloned the repo locally:
+#   bash ~/.config/brunnr/install.sh
 #
 # Idempotent — safe to re-run.
 
 set -euo pipefail
 
-BRUNNR_REPO="${BRUNNR_REPO:-momoshell/brunnr}"
+BRUNNR_REPO_URL="${BRUNNR_REPO_URL:-https://github.com/momoshell/brunnr.git}"
 BRUNNR_HOME="${BRUNNR_HOME:-$HOME/.config/brunnr}"
 
 say()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
@@ -65,23 +65,16 @@ require_tool() {
 say "Checking prerequisites"
 require_tool git
 require_tool just
-require_tool gh
-
-say "Checking GitHub auth"
-if ! gh auth status >/dev/null 2>&1; then
-  warn "Not logged in to GitHub (required while $BRUNNR_REPO is private)."
-  echo "   Run:  gh auth login"
-  die "Run 'gh auth login' first, then re-run this installer."
-fi
+require_tool gh   # not needed to clone, but used by `brunnr push` / `scrap` / `status`
 
 if [ -d "$BRUNNR_HOME/.git" ]; then
   say "brunnr already cloned at $BRUNNR_HOME — skipping clone"
 elif [ -e "$BRUNNR_HOME" ]; then
   die "$BRUNNR_HOME exists but is not a git repo. Move or remove it, then re-run."
 else
-  say "Cloning $BRUNNR_REPO into $BRUNNR_HOME"
+  say "Cloning $BRUNNR_REPO_URL into $BRUNNR_HOME"
   mkdir -p "$(dirname "$BRUNNR_HOME")"
-  gh repo clone "$BRUNNR_REPO" "$BRUNNR_HOME"
+  git clone "$BRUNNR_REPO_URL" "$BRUNNR_HOME"
 fi
 
 ALIAS_LINE="alias brunnr='just -f $BRUNNR_HOME/justfile'"

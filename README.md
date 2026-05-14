@@ -12,30 +12,32 @@ The installer (`install.sh`) checks for these and offers to `brew install` any t
 |---|---|
 | **git** | Every catalog mutation goes through git |
 | **just** | Runs `brunnr` commands |
-| **gh** | GitHub CLI — clones the (currently private) repo and powers `brunnr push` / `scrap` / `status` |
+| **gh** | GitHub CLI — powers `brunnr push` / `scrap` / `status` (requires `gh auth login` before first push) |
 | **Pi** | The coding agent that reads your skills, agents, prompts, extensions, themes — [pi-mono](https://github.com/badlogic/pi-mono) |
 
 ## Install
 
+One line:
+
 ```bash
-# 1. One-time GitHub auth (brunnr is private for now).
-gh auth login
+curl -fsSL https://raw.githubusercontent.com/momoshell/brunnr/main/install.sh | bash
+```
 
-# 2. Clone brunnr and run the installer. The installer verifies prerequisites
-#    (git / just / gh / pi), offers to brew-install any missing ones, detects
-#    your shell, and appends a `brunnr` alias to ~/.zshrc, ~/.bashrc, or the
-#    fish config — whichever applies. Re-running is safe (idempotent).
-gh repo clone momoshell/brunnr ~/.config/brunnr && bash ~/.config/brunnr/install.sh
+The installer clones the repo to `~/.config/brunnr`, verifies prerequisites (git / just / gh / pi), offers to `brew install` any missing ones on macOS, detects your shell, and appends the `brunnr` alias to `~/.zshrc`, `~/.bashrc`, or the fish config — whichever applies. Re-running is safe (idempotent).
 
-# 3. Reload your shell (or open a new terminal), then verify.
+Then reload your shell and verify:
+
+```bash
 source ~/.zshrc          # or ~/.bashrc
 brunnr help              # prints the command list
 brunnr list              # shows every catalog item, grouped by section
 ```
 
-> When the repo eventually goes public, the bootstrap shortens to
-> `curl -fsSL https://raw.githubusercontent.com/momoshell/brunnr/main/install.sh | bash` —
-> the same `install.sh`, just fetched directly instead of via `gh repo clone`.
+To install into a non-default location, pass `BRUNNR_HOME` to bash (the env var must reach the script, not curl):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/momoshell/brunnr/main/install.sh | BRUNNR_HOME=/opt/brunnr bash
+```
 
 ## Update / Uninstall
 
