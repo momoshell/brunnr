@@ -1051,105 +1051,110 @@ list *args:
     fi
 
 # Pull the latest catalog content from origin — does NOT change tool behavior (run `upgrade` for that).
-@sync:
+sync:
     #!/usr/bin/env bash
     set -euo pipefail
     BRUNNR_HOME="{{BRUNNR_HOME}}"
     TOOL_VERSION="{{TOOL_VERSION}}"
 
+    [ -t 1 ] && C=$'\033[1;36m' G=$'\033[1;32m' R=$'\033[1;31m' X=$'\033[0m' || C= G= R= X=
+    say()  { printf "%s==>%s %s\n" "$C" "$X" "$*"; }
+    ok()   { printf "%s  ✓%s %s\n" "$G" "$X" "$*"; }
+    die()  { printf "%s  ✗%s %s\n" "$R" "$X" "$*" >&2; exit 1; }
+    spin() {
+        local pid=$1 msg="${2:-}"
+        local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏') i=0
+        if [ ! -t 1 ]; then wait "$pid" 2>/dev/null; return $?; fi
+        while kill -0 "$pid" 2>/dev/null; do
+            printf "\r%s%s%s %s" "$C" "${frames[$((i%10))]}" "$X" "$msg"
+            i=$((i+1)); sleep 0.08
+        done
+        wait "$pid" 2>/dev/null; local rc=$?
+        printf "\r\033[K"; return "$rc"
+    }
+
     # Catalog paths — sync ONLY these. Tool files (justfile, install.sh, lore/,
     # README.md, SKILL.md, CLAUDE.md) are updated via `brunnr upgrade`.
     CATALOG_PATHS=(library.yaml skills agents prompts extensions themes)
 
-    if [ ! -d "$BRUNNR_HOME/.git" ]; then
-        echo "Error: $BRUNNR_HOME is not a git repository" >&2
-        exit 1
-    fi
+    [ -d "$BRUNNR_HOME/.git" ] || die "$BRUNNR_HOME is not a git repository"
     cd "$BRUNNR_HOME"
+    git remote get-url origin >/dev/null 2>&1 || die "no remote configured for brunnr"
 
-    if ! git remote get-url origin >/dev/null 2>&1; then
-        echo "Error: no remote configured for brunnr" >&2
-        exit 1
-    fi
-
-    # Refuse if the user has uncommitted edits to catalog paths.
-    # Tool-path changes are fine — sync doesn't touch them.
     DIRTY_CATALOG=$(git status --porcelain -- "${CATALOG_PATHS[@]}" 2>/dev/null || true)
     if [ -n "$DIRTY_CATALOG" ]; then
-        echo "Error: uncommitted changes in catalog paths — commit or stash first:" >&2
-        echo "$DIRTY_CATALOG" >&2
+        printf "%s  ✗%s uncommitted changes in catalog paths — commit or stash first:\n" "$R" "$X" >&2
+        printf '%s\n' "$DIRTY_CATALOG" >&2
         exit 1
     fi
 
-    echo "Fetching origin..."
-    git fetch origin
+    git fetch origin >/dev/null 2>&1 &
+    spin $! "Fetching origin"
 
-    # Determine remote default branch (main or master).
     REMOTE_BRANCH=main
     git show-ref --verify --quiet refs/remotes/origin/main || REMOTE_BRANCH=master
 
-    # Read min_tool_version from the *remote* library.yaml — that's the version
-    # we're about to install. Older local tool versions should `brunnr upgrade` first.
     MIN_TOOL_VERSION=$(git show "origin/$REMOTE_BRANCH:library.yaml" 2>/dev/null \
         | awk -F'"' '/^min_tool_version:/ {print $2; exit}')
     if [ -n "$MIN_TOOL_VERSION" ]; then
         LOWER=$(printf '%s\n%s\n' "$TOOL_VERSION" "$MIN_TOOL_VERSION" | sort -V | head -1)
         if [ "$LOWER" != "$MIN_TOOL_VERSION" ]; then
-            echo "Error: catalog requires brunnr tool >= $MIN_TOOL_VERSION (you have $TOOL_VERSION)" >&2
-            echo "Run 'brunnr upgrade' first, then re-run 'brunnr sync'." >&2
-            exit 1
+            die "catalog requires brunnr tool >= $MIN_TOOL_VERSION (you have $TOOL_VERSION). Run 'brunnr upgrade' first."
         fi
     fi
 
     REMOTE_SHA=$(git rev-parse --short "origin/$REMOTE_BRANCH")
 
-    # Sparse catalog checkout: pull only the catalog paths from origin.
-    # Tool paths stay at whatever the user installed.
     git checkout "origin/$REMOTE_BRANCH" -- "${CATALOG_PATHS[@]}"
 
     if git diff --cached --quiet -- "${CATALOG_PATHS[@]}" 2>/dev/null; then
-        echo "brunnr catalog is already up to date (origin @ $REMOTE_SHA)"
+        ok "catalog already up to date (origin @ $REMOTE_SHA)"
     else
-        # Commit the synced catalog locally so `git status` stays clean and
-        # subsequent `brunnr push` runs see a sane working tree. The commit
-        # lives only on the local branch — `brunnr push` branches from
-        # origin/$REMOTE_BRANCH, so these sync commits never end up in a PR.
         git -c user.name='brunnr-sync' -c user.email='brunnr-sync@local' \
             commit -m "brunnr: sync catalog @ $REMOTE_SHA" \
             -- "${CATALOG_PATHS[@]}" >/dev/null
-        echo "brunnr catalog synced (origin @ $REMOTE_SHA)"
+        ok "catalog synced to origin @ $REMOTE_SHA"
     fi
 
 # Update brunnr itself (justfile, install.sh, lore, docs) — does NOT touch the catalog.
-@upgrade:
+upgrade:
     #!/usr/bin/env bash
     set -euo pipefail
     BRUNNR_HOME="{{BRUNNR_HOME}}"
+
+    [ -t 1 ] && C=$'\033[1;36m' G=$'\033[1;32m' Y=$'\033[1;33m' R=$'\033[1;31m' X=$'\033[0m' || C= G= Y= R= X=
+    say()  { printf "%s==>%s %s\n" "$C" "$X" "$*"; }
+    ok()   { printf "%s  ✓%s %s\n" "$G" "$X" "$*"; }
+    die()  { printf "%s  ✗%s %s\n" "$R" "$X" "$*" >&2; exit 1; }
+    spin() {
+        local pid=$1 msg="${2:-}"
+        local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏') i=0
+        if [ ! -t 1 ]; then wait "$pid" 2>/dev/null; return $?; fi
+        while kill -0 "$pid" 2>/dev/null; do
+            printf "\r%s%s%s %s" "$C" "${frames[$((i%10))]}" "$X" "$msg"
+            i=$((i+1)); sleep 0.08
+        done
+        wait "$pid" 2>/dev/null; local rc=$?
+        printf "\r\033[K"; return "$rc"
+    }
 
     # Tool paths — upgrade ONLY these. Catalog (library.yaml, skills/, agents/,
     # prompts/, extensions/, themes/) is updated via `brunnr sync`.
     TOOL_PATHS=(justfile install.sh README.md SKILL.md CLAUDE.md lore)
 
-    if [ ! -d "$BRUNNR_HOME/.git" ]; then
-        echo "Error: $BRUNNR_HOME is not a git repository" >&2
-        exit 1
-    fi
+    [ -d "$BRUNNR_HOME/.git" ] || die "$BRUNNR_HOME is not a git repository"
     cd "$BRUNNR_HOME"
-
-    if ! git remote get-url origin >/dev/null 2>&1; then
-        echo "Error: no remote configured for brunnr" >&2
-        exit 1
-    fi
+    git remote get-url origin >/dev/null 2>&1 || die "no remote configured for brunnr"
 
     DIRTY_TOOL=$(git status --porcelain -- "${TOOL_PATHS[@]}" 2>/dev/null || true)
     if [ -n "$DIRTY_TOOL" ]; then
-        echo "Error: uncommitted changes in tool paths — commit or stash first:" >&2
-        echo "$DIRTY_TOOL" >&2
+        printf "%s  ✗%s uncommitted changes in tool paths — commit or stash first:\n" "$R" "$X" >&2
+        printf '%s\n' "$DIRTY_TOOL" >&2
         exit 1
     fi
 
-    echo "Fetching origin..."
-    git fetch origin
+    git fetch origin >/dev/null 2>&1 &
+    spin $! "Fetching origin"
 
     REMOTE_BRANCH=main
     git show-ref --verify --quiet refs/remotes/origin/main || REMOTE_BRANCH=master
@@ -1158,17 +1163,19 @@ list *args:
     git checkout "origin/$REMOTE_BRANCH" -- "${TOOL_PATHS[@]}"
 
     if git diff --cached --quiet -- "${TOOL_PATHS[@]}" 2>/dev/null; then
-        echo "brunnr tool is already up to date (origin @ $REMOTE_SHA)"
+        ok "tool already up to date (origin @ $REMOTE_SHA)"
     else
         git -c user.name='brunnr-upgrade' -c user.email='brunnr-upgrade@local' \
             commit -m "brunnr: upgrade tool @ $REMOTE_SHA" \
             -- "${TOOL_PATHS[@]}" >/dev/null
-        echo "brunnr tool upgraded (origin @ $REMOTE_SHA)"
-        echo "Note: if install.sh changed, re-run it to pick up shell-alias changes."
+        ok "tool upgraded to origin @ $REMOTE_SHA"
+        if git diff HEAD~1 HEAD --name-only -- install.sh 2>/dev/null | grep -q install.sh; then
+            say "install.sh changed — re-run it to pick up shell-alias changes"
+        fi
     fi
 
 # Remove brunnr from this machine (alias + $BRUNNR_HOME) — leaves installed catalog items alone.
-@uninstall:
+uninstall:
     #!/usr/bin/env bash
     set -euo pipefail
     BRUNNR_HOME="{{BRUNNR_HOME}}"
@@ -1222,47 +1229,53 @@ setup-optimizer:
     BRUNNR_HOME="{{BRUNNR_HOME}}"
     JUST=(just -f "$BRUNNR_HOME/justfile")
 
+    [ -t 1 ] && C=$'\033[1;36m' G=$'\033[1;32m' Y=$'\033[1;33m' R=$'\033[1;31m' X=$'\033[0m' || C= G= Y= R= X=
+    say()  { printf "%s==>%s %s\n" "$C" "$X" "$*"; }
+    ok()   { printf "%s  ✓%s %s\n" "$G" "$X" "$*"; }
+    warn() { printf "%s  !%s %s\n" "$Y" "$X" "$*" >&2; }
+    spin() {
+        local pid=$1 msg="${2:-}"
+        local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏') i=0
+        if [ ! -t 1 ]; then wait "$pid" 2>/dev/null; return $?; fi
+        while kill -0 "$pid" 2>/dev/null; do
+            printf "\r%s%s%s %s" "$C" "${frames[$((i%10))]}" "$X" "$msg"
+            i=$((i+1)); sleep 0.08
+        done
+        wait "$pid" 2>/dev/null; local rc=$?
+        printf "\r\033[K"; return "$rc"
+    }
+
+    install_item() {
+        local kind=$1 name=$2 log
+        log=$(mktemp)
+        "${JUST[@]}" add -g "$kind" "$name" >"$log" 2>&1 &
+        if spin $! "$kind: $name"; then
+            ok "$kind: $name"
+        elif grep -q "already installed" "$log"; then
+            ok "$kind: $name (already installed)"
+        else
+            warn "$kind: $name failed:"
+            sed 's/^/    /' "$log" >&2
+        fi
+        rm -f "$log"
+    }
+
     # Keep these two lists in sync with remove-optimizer.
     AGENTS=(
-        autoresearch
-        autoresearch-skill
-        autoresearch-skill-gepa
-        autoresearch-agent
-        eval-designer
-        eval-designer-agent
+        autoresearch autoresearch-skill autoresearch-skill-gepa
+        autoresearch-agent eval-designer eval-designer-agent
     )
     PROMPTS=(
-        autoresearch
-        autoresearch-skill
-        autoresearch-skill-gepa
-        autoresearch-pipeline
-        autoresearch-agent
-        gen-evals
-        gen-evals-agent
-        skill-status
-        agent-status
-        fork-skill
-        fork-agent
+        autoresearch autoresearch-skill autoresearch-skill-gepa
+        autoresearch-pipeline autoresearch-agent gen-evals gen-evals-agent
+        skill-status agent-status fork-skill fork-agent
     )
 
-    echo "Installing optimizer agents globally (${#AGENTS[@]})..."
-    for name in "${AGENTS[@]}"; do
-        if ! "${JUST[@]}" add -g agent "$name"; then
-            echo "  (skipped $name — see message above)"
-        fi
-    done
-    echo
-    echo "Installing optimizer prompts globally (${#PROMPTS[@]})..."
-    for name in "${PROMPTS[@]}"; do
-        if ! "${JUST[@]}" add -g prompt "$name"; then
-            echo "  (skipped $name — see message above)"
-        fi
-    done
-    echo
-    echo "Optimizer stack installed at:"
-    echo "  ~/.pi/agent/agents/   (agents)"
-    echo "  ~/.pi/agent/prompts/  (slash commands)"
-    echo "Try: pi -p 'list installed slash commands' or just run /gen-evals on any skill."
+    say "Installing optimizer stack globally (${#AGENTS[@]} agents, ${#PROMPTS[@]} prompts)"
+    for name in "${AGENTS[@]}";  do install_item agent  "$name"; done
+    for name in "${PROMPTS[@]}"; do install_item prompt "$name"; done
+    say "Done — agents at ~/.pi/agent/agents/, prompts at ~/.pi/agent/prompts/"
+    say "Run /gen-evals (or /gen-evals-agent) in any pi session to get started"
 
 # Remove the full optimization stack from the global install. Items not present are skipped.
 remove-optimizer:
@@ -1271,43 +1284,50 @@ remove-optimizer:
     BRUNNR_HOME="{{BRUNNR_HOME}}"
     JUST=(just -f "$BRUNNR_HOME/justfile")
 
+    [ -t 1 ] && C=$'\033[1;36m' G=$'\033[1;32m' Y=$'\033[1;33m' X=$'\033[0m' || C= G= Y= X=
+    say() { printf "%s==>%s %s\n" "$C" "$X" "$*"; }
+    ok()  { printf "%s  ✓%s %s\n" "$G" "$X" "$*"; }
+    dim() { printf "%s  -%s %s\n" "$Y" "$X" "$*"; }
+    spin() {
+        local pid=$1 msg="${2:-}"
+        local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏') i=0
+        if [ ! -t 1 ]; then wait "$pid" 2>/dev/null; return $?; fi
+        while kill -0 "$pid" 2>/dev/null; do
+            printf "\r%s%s%s %s" "$C" "${frames[$((i%10))]}" "$X" "$msg"
+            i=$((i+1)); sleep 0.08
+        done
+        wait "$pid" 2>/dev/null; local rc=$?
+        printf "\r\033[K"; return "$rc"
+    }
+
+    remove_item() {
+        local kind=$1 name=$2
+        "${JUST[@]}" remove -g "$kind" "$name" >/dev/null 2>&1 &
+        if spin $! "$kind: $name"; then
+            ok "$kind: $name"
+        else
+            dim "$kind: $name (not installed)"
+        fi
+    }
+
     # Keep in sync with setup-optimizer.
     AGENTS=(
-        autoresearch
-        autoresearch-skill
-        autoresearch-skill-gepa
-        autoresearch-agent
-        eval-designer
-        eval-designer-agent
+        autoresearch autoresearch-skill autoresearch-skill-gepa
+        autoresearch-agent eval-designer eval-designer-agent
     )
     PROMPTS=(
-        autoresearch
-        autoresearch-skill
-        autoresearch-skill-gepa
-        autoresearch-pipeline
-        autoresearch-agent
-        gen-evals
-        gen-evals-agent
-        skill-status
-        agent-status
-        fork-skill
-        fork-agent
+        autoresearch autoresearch-skill autoresearch-skill-gepa
+        autoresearch-pipeline autoresearch-agent gen-evals gen-evals-agent
+        skill-status agent-status fork-skill fork-agent
     )
 
-    echo "Removing optimizer agents (${#AGENTS[@]})..."
-    for name in "${AGENTS[@]}"; do
-        "${JUST[@]}" remove -g agent "$name" 2>/dev/null || true
-    done
-    echo
-    echo "Removing optimizer prompts (${#PROMPTS[@]})..."
-    for name in "${PROMPTS[@]}"; do
-        "${JUST[@]}" remove -g prompt "$name" 2>/dev/null || true
-    done
-    echo
-    echo "Optimizer stack removed."
+    say "Removing optimizer stack (${#AGENTS[@]} agents, ${#PROMPTS[@]} prompts)"
+    for name in "${AGENTS[@]}";  do remove_item agent  "$name"; done
+    for name in "${PROMPTS[@]}"; do remove_item prompt "$name"; done
+    say "Done"
 
 # Show open PRs in brunnr — items waiting to be reviewed/merged into the catalog
-@status:
+status:
     #!/usr/bin/env bash
     set -euo pipefail
     BRUNNR_HOME="{{BRUNNR_HOME}}"
@@ -1471,7 +1491,7 @@ require-tool version:
 
 # Validate library.yaml integrity (every source resolves, deps reference real entries,
 # frontmatter names match, no orphan files in the catalog directories)
-@check:
+check:
     #!/usr/bin/env bash
     set -euo pipefail
     BRUNNR_HOME="{{BRUNNR_HOME}}"
