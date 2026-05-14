@@ -41,9 +41,9 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { truncateHead, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, parseFrontmatter } from "@mariozechner/pi-coding-agent";
+import { truncateHead, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, parseFrontmatter, ThinkingSelectorComponent, getSelectListTheme } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
-import { Text, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import { Text, truncateToWidth, visibleWidth, SelectList } from "@mariozechner/pi-tui";
 import { spawn } from "child_process";
 import { readdirSync, readFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, unlinkSync, rmdirSync } from "fs";
 import { join, resolve, dirname, basename } from "path";
@@ -1491,6 +1491,140 @@ Use this for any build path — extensions, themes, skills, prompts, agents — 
 		},
 	});
 
+	// Wraps Pi's SelectList in an overlay. Returns picked value or undefined on Esc.
+	async function pickFromList(
+		ctx: ExtensionContext,
+		items: { value: string; label: string; description?: string }[],
+	): Promise<string | undefined> {
+		if (items.length === 0) return undefined;
+		return await ctx.ui.custom<string | undefined>(
+			(_tui, _theme, _kb, done) => {
+				const list = new SelectList(items, Math.min(items.length, 12), getSelectListTheme(), {
+					minPrimaryColumnWidth: 18,
+					maxPrimaryColumnWidth: 48,
+				});
+				list.onSelect = (item) => done(item.value);
+				list.onCancel = () => done(undefined);
+				return list;
+			},
+			{ overlay: true },
+		);
+	}
+
+	pi.registerCommand("experts-tune", {
+		description: "Interactive picker for expert model + thinking (no typing)",
+		handler: async (_args, ctx) => {
+			if (!ctx.hasUI) {
+				ctx.ui.notify("This command needs an interactive UI", "warning");
+				return;
+			}
+
+			// Step 1: pick expert (or "all experts")
+			const expertItems: { value: string; label: string; description?: string }[] = [
+				{
+					value: "__all__",
+					label: "All experts (defaults)",
+					description: overrides.expertsDefault
+						? `defaults: ${[
+							overrides.expertsDefault.model && `model=${overrides.expertsDefault.model}`,
+							overrides.expertsDefault.thinking && `thinking=${overrides.expertsDefault.thinking}`,
+						].filter(Boolean).join(", ") || "(none set)"}`
+						: "no defaults set",
+				},
+			];
+			for (const [key, state] of experts.entries()) {
+				const eff = effectiveExpertSettings(key, ctx.model);
+				const hasOverride = !!overrides.experts?.[key];
+				expertItems.push({
+					value: key,
+					label: displayName(state.def.name) + (hasOverride ? " *" : ""),
+					description: `${eff.model}  thinking=${eff.thinking}`,
+				});
+			}
+
+			const expertKey = await pickFromList(ctx, expertItems);
+			if (!expertKey) return;
+
+			const expertLabel = expertKey === "__all__" ? "All experts" : displayName(expertKey);
+
+			// Step 2: pick action
+			const action = await pickFromList(ctx, [
+				{ value: "model", label: "Set model", description: "Pick from connected providers" },
+				{ value: "thinking", label: "Set thinking level", description: "off → xhigh" },
+				{ value: "reset", label: "Clear overrides", description: `Reset ${expertLabel} to frontmatter defaults` },
+			]);
+			if (!action) return;
+
+			if (action === "reset") {
+				if (expertKey === "__all__") {
+					delete overrides.expertsDefault;
+				} else if (overrides.experts) {
+					delete overrides.experts[expertKey];
+				}
+				saveOverrides(ctx);
+				ctx.ui.notify(`${expertLabel}: overrides cleared`, "info");
+				return;
+			}
+
+			if (action === "model") {
+				const available = ctx.modelRegistry.getAvailable();
+				if (available.length === 0) {
+					ctx.ui.notify("No models with configured auth. Set an API key or run `gh auth login` for providers.", "warning");
+					return;
+				}
+				const modelItems = available.map((m: any) => ({
+					value: `${m.provider?.id ?? m.provider}/${m.id}`,
+					label: m.name || m.id,
+					description: `${m.provider?.id ?? m.provider}/${m.id}${m.reasoning ? "  · reasoning" : ""}`,
+				}));
+				const modelStr = await pickFromList(ctx, modelItems);
+				if (!modelStr) return;
+
+				if (expertKey === "__all__") {
+					overrides.expertsDefault ??= {};
+					overrides.expertsDefault.model = modelStr;
+				} else {
+					overrides.experts ??= {};
+					overrides.experts[expertKey] ??= {};
+					overrides.experts[expertKey].model = modelStr;
+				}
+				saveOverrides(ctx);
+				ctx.ui.notify(`${expertLabel}: model → ${modelStr}`, "info");
+				return;
+			}
+
+			if (action === "thinking") {
+				const currentLevel: ThinkingLevel = (expertKey === "__all__"
+					? overrides.expertsDefault?.thinking
+					: overrides.experts?.[expertKey]?.thinking
+				) ?? "off";
+
+				const level = await ctx.ui.custom<ThinkingLevel | undefined>(
+					(_tui, _theme, _kb, done) =>
+						new ThinkingSelectorComponent(
+							currentLevel as any,
+							[...VALID_THINKING_LEVELS] as any,
+							(l: any) => done(l as ThinkingLevel),
+							() => done(undefined),
+						),
+					{ overlay: true },
+				);
+				if (!level) return;
+
+				if (expertKey === "__all__") {
+					overrides.expertsDefault ??= {};
+					overrides.expertsDefault.thinking = level;
+				} else {
+					overrides.experts ??= {};
+					overrides.experts[expertKey] ??= {};
+					overrides.experts[expertKey].thinking = level;
+				}
+				saveOverrides(ctx);
+				ctx.ui.notify(`${expertLabel}: thinking → ${level}`, "info");
+			}
+		},
+	});
+
 	// ── System Prompt ────────────────────────────
 
 	function buildSystemPrompt(): string {
@@ -1708,11 +1842,12 @@ Use this for any build path — extensions, themes, skills, prompts, agents — 
 			`Eitri loaded — ${experts.size} experts: ${expertNames}${overrideLine}\n\n` +
 			`/experts            List experts and status\n` +
 			`/experts-config     Show effective model + thinking per expert\n` +
+			`/experts-tune       Interactive picker for model/thinking (no typing)\n` +
 			`/experts-grid N     Set grid columns (1-5)\n` +
-			`/expert-model NAME PROVIDER/ID    Override model for one expert\n` +
-			`/expert-thinking NAME LEVEL       Override thinking for one expert\n` +
-			`/experts-model PROVIDER/ID        Override model for ALL experts\n` +
-			`/experts-thinking LEVEL           Override thinking for ALL experts\n` +
+			`/expert-model NAME PROVIDER/ID    Override model for one expert (text mode)\n` +
+			`/expert-thinking NAME LEVEL       Override thinking for one expert (text mode)\n` +
+			`/experts-model PROVIDER/ID        Override model for ALL experts (text mode)\n` +
+			`/experts-thinking LEVEL           Override thinking for ALL experts (text mode)\n` +
 			`/experts-reset      Clear all overrides\n\n` +
 			`Ask me to build any Pi agent component!`,
 			"info",
