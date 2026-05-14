@@ -1105,15 +1105,30 @@ sync:
 
     REMOTE_SHA=$(git rev-parse --short "origin/$REMOTE_BRANCH")
 
-    git checkout "origin/$REMOTE_BRANCH" -- "${CATALOG_PATHS[@]}"
+    # Filter to paths that actually exist on origin — catalog dirs that haven't
+    # been created yet (e.g. `skills/` before the first skill is added) would
+    # otherwise make `git checkout` fail with "pathspec did not match".
+    EXISTING=()
+    for p in "${CATALOG_PATHS[@]}"; do
+        if git ls-tree --name-only "origin/$REMOTE_BRANCH" -- "$p" >/dev/null 2>&1 \
+            && [ -n "$(git ls-tree --name-only "origin/$REMOTE_BRANCH" -- "$p" 2>/dev/null)" ]; then
+            EXISTING+=("$p")
+        fi
+    done
 
-    if git diff --cached --quiet -- "${CATALOG_PATHS[@]}" 2>/dev/null; then
-        ok "catalog already up to date (origin @ $REMOTE_SHA)"
+    if [ "${#EXISTING[@]}" -eq 0 ]; then
+        ok "catalog is empty on origin @ $REMOTE_SHA"
     else
-        git -c user.name='brunnr-sync' -c user.email='brunnr-sync@local' \
-            commit -m "brunnr: sync catalog @ $REMOTE_SHA" \
-            -- "${CATALOG_PATHS[@]}" >/dev/null
-        ok "catalog synced to origin @ $REMOTE_SHA"
+        git checkout "origin/$REMOTE_BRANCH" -- "${EXISTING[@]}"
+
+        if git diff --cached --quiet -- "${EXISTING[@]}" 2>/dev/null; then
+            ok "catalog already up to date (origin @ $REMOTE_SHA)"
+        else
+            git -c user.name='brunnr-sync' -c user.email='brunnr-sync@local' \
+                commit -m "brunnr: sync catalog @ $REMOTE_SHA" \
+                -- "${EXISTING[@]}" >/dev/null
+            ok "catalog synced to origin @ $REMOTE_SHA"
+        fi
     fi
 
 # Update brunnr itself (justfile, install.sh, lore, docs) — does NOT touch the catalog.
@@ -1160,17 +1175,30 @@ upgrade:
     git show-ref --verify --quiet refs/remotes/origin/main || REMOTE_BRANCH=master
     REMOTE_SHA=$(git rev-parse --short "origin/$REMOTE_BRANCH")
 
-    git checkout "origin/$REMOTE_BRANCH" -- "${TOOL_PATHS[@]}"
+    # Filter to paths that actually exist on origin — guards against tool paths
+    # that aren't on this branch yet (e.g. a newly-added lore subdir).
+    EXISTING=()
+    for p in "${TOOL_PATHS[@]}"; do
+        if [ -n "$(git ls-tree --name-only "origin/$REMOTE_BRANCH" -- "$p" 2>/dev/null)" ]; then
+            EXISTING+=("$p")
+        fi
+    done
 
-    if git diff --cached --quiet -- "${TOOL_PATHS[@]}" 2>/dev/null; then
-        ok "tool already up to date (origin @ $REMOTE_SHA)"
+    if [ "${#EXISTING[@]}" -eq 0 ]; then
+        ok "no tool paths to update on origin @ $REMOTE_SHA"
     else
-        git -c user.name='brunnr-upgrade' -c user.email='brunnr-upgrade@local' \
-            commit -m "brunnr: upgrade tool @ $REMOTE_SHA" \
-            -- "${TOOL_PATHS[@]}" >/dev/null
-        ok "tool upgraded to origin @ $REMOTE_SHA"
-        if git diff HEAD~1 HEAD --name-only -- install.sh 2>/dev/null | grep -q install.sh; then
-            say "install.sh changed — re-run it to pick up shell-alias changes"
+        git checkout "origin/$REMOTE_BRANCH" -- "${EXISTING[@]}"
+
+        if git diff --cached --quiet -- "${EXISTING[@]}" 2>/dev/null; then
+            ok "tool already up to date (origin @ $REMOTE_SHA)"
+        else
+            git -c user.name='brunnr-upgrade' -c user.email='brunnr-upgrade@local' \
+                commit -m "brunnr: upgrade tool @ $REMOTE_SHA" \
+                -- "${EXISTING[@]}" >/dev/null
+            ok "tool upgraded to origin @ $REMOTE_SHA"
+            if git diff HEAD~1 HEAD --name-only -- install.sh 2>/dev/null | grep -q install.sh; then
+                say "install.sh changed — re-run it to pick up shell-alias changes"
+            fi
         fi
     fi
 
