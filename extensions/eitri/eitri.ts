@@ -404,6 +404,11 @@ export default function (pi: ExtensionAPI) {
 	// session_shutdown. Per-session so concurrent sessions don't trample.
 	let helpPromptDir: string | undefined;
 
+	// Theme the user had selected before eitri auto-switched to "snow" on
+	// session_start. Restored in session_shutdown. Undefined if the switch
+	// didn't happen (snow unavailable, no UI ctx, or setTheme returned !success).
+	let previousThemeName: string | undefined;
+
 	// Experts live next to this script: <script-dir>/agents/eitri/. Eitri
 	// is invoked on-demand via `brunnr eitri` (which runs `pi -e <abs-path>`),
 	// so import.meta.url resolves to the real on-disk location.
@@ -1349,6 +1354,11 @@ Use this for any build path — extensions, themes, skills, prompts, agents — 
 	});
 
 	pi.on("session_shutdown", async () => {
+		// Restore the user's previous theme if we swapped it on session_start.
+		if (previousThemeName) {
+			try { (widgetCtx?.ui as any)?.setTheme?.(previousThemeName); } catch {}
+			previousThemeName = undefined;
+		}
 		if (!helpPromptDir) return;
 		try { unlinkSync(join(helpPromptDir, "eitri-help.md")); } catch {}
 		try { rmdirSync(helpPromptDir); } catch {}
@@ -1461,6 +1471,24 @@ Use this for any build path — extensions, themes, skills, prompts, agents — 
 			widgetCtx.ui.setWidget("eitri-grid", undefined);
 		}
 		widgetCtx = _ctx;
+
+		// Auto-switch to the snow theme for eitri sessions. The brunnr eitri
+		// recipe makes snow.json discoverable via --theme; here we activate it
+		// and remember the previous theme so session_shutdown can restore.
+		// Silent no-op if snow isn't available or the API isn't present.
+		try {
+			const ui = _ctx?.ui as any;
+			if (ui?.setTheme && ui?.getAllThemes) {
+				const available = (ui.getAllThemes() || []).map((t: any) => t?.name);
+				if (available.includes("snow")) {
+					const current = ui.theme?.name;
+					const result = ui.setTheme("snow");
+					if (result?.success && current && current !== "snow") {
+						previousThemeName = current;
+					}
+				}
+			}
+		} catch { /* don't block session_start on theme failure */ }
 
 		await loadExperts(_ctx);
 		updateWidget();
