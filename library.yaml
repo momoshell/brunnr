@@ -6,6 +6,12 @@ name: brunnr
 description: Reference-first catalog for Pi — skills, agents, prompts, extensions, themes
 version: "3.0.0"
 
+# Minimum brunnr tool version (justfile/install.sh) required by this catalog.
+# `brunnr sync` reads this from origin and refuses if your local tool is older —
+# run `brunnr upgrade` first. Bump this when a catalog entry starts depending on
+# a justfile/install.sh feature that older tool versions don't have.
+min_tool_version: "3.0.0"
+
 # =============================================================================
 # SOURCE SEMANTICS
 # =============================================================================

@@ -6,28 +6,48 @@
 
 ## Prerequisites
 
-| Tool | What it's for | Install |
-|---|---|---|
-| **git** | Cloning brunnr; every catalog mutation goes through git | [git-scm.com](https://git-scm.com) |
-| **just** | Runs `brunnr` commands | `brew install just` or [just.systems](https://just.systems) |
-| **Pi** | The coding agent that loads your skills, agents, prompts, extensions, themes | [pi-mono](https://github.com/badlogic/pi-mono) |
-| **gh** | GitHub CLI — powers `brunnr push` / `brunnr scrap` / `brunnr status` | `brew install gh` then `gh auth login`, or [cli.github.com](https://cli.github.com) |
+The installer (`install.sh`) checks for these and offers to `brew install` any that are missing on macOS. On Linux it prints the right `apt` / `dnf` / `pacman` command and exits so you can install manually. You only need to install **Pi** yourself — that's outside brunnr's scope.
+
+| Tool | What it's for |
+|---|---|
+| **git** | Every catalog mutation goes through git |
+| **just** | Runs `brunnr` commands |
+| **gh** | GitHub CLI — clones the (currently private) repo and powers `brunnr push` / `scrap` / `status` |
+| **Pi** | The coding agent that reads your skills, agents, prompts, extensions, themes — [pi-mono](https://github.com/badlogic/pi-mono) |
 
 ## Install
 
 ```bash
-# 1. Clone brunnr to a stable location
-git clone <your-brunnr-repo> ~/.config/brunnr
+# 1. One-time GitHub auth (brunnr is private for now).
+gh auth login
 
-# 2. Add a shell alias so `brunnr` is available everywhere.
-#    Append this line to ~/.zshrc (or ~/.bashrc if you use bash):
-alias brunnr='just -f ~/.config/brunnr/justfile'
-#    Then reload your shell: `source ~/.zshrc`  (or open a new terminal)
+# 2. Clone brunnr and run the installer. The installer verifies prerequisites
+#    (git / just / gh / pi), offers to brew-install any missing ones, detects
+#    your shell, and appends a `brunnr` alias to ~/.zshrc, ~/.bashrc, or the
+#    fish config — whichever applies. Re-running is safe (idempotent).
+gh repo clone momoshell/brunnr ~/.config/brunnr && bash ~/.config/brunnr/install.sh
 
-# 3. Verify it works
+# 3. Reload your shell (or open a new terminal), then verify.
+source ~/.zshrc          # or ~/.bashrc
 brunnr help              # prints the command list
 brunnr list              # shows every catalog item, grouped by section
 ```
+
+> When the repo eventually goes public, the bootstrap shortens to
+> `curl -fsSL https://raw.githubusercontent.com/momoshell/brunnr/main/install.sh | bash` —
+> the same `install.sh`, just fetched directly instead of via `gh repo clone`.
+
+## Update / Uninstall
+
+brunnr keeps **catalog content** and **tool behavior** on separate update tracks:
+
+```bash
+brunnr sync         # pull latest catalog (library.yaml + skills/agents/prompts/extensions/themes)
+brunnr upgrade      # update brunnr itself (justfile, install.sh, lore, docs)
+brunnr uninstall    # remove alias + $BRUNNR_HOME (leaves installed catalog items alone)
+```
+
+`sync` won't change how your existing commands behave; `upgrade` is the only thing that can. If a catalog entry starts depending on a newer tool feature, `sync` reads `min_tool_version` from `library.yaml` on origin and tells you to run `brunnr upgrade` first.
 
 Initialize brunnr in any project where you plan to run Pi:
 
@@ -207,7 +227,7 @@ Same keep/discard loop, git-based experiment tracking, same `Resume.` (`/autores
 ```bash
 brunnr push <section> <name>      # PR adding the item to the catalog
 brunnr status                     # open PRs in the queue
-brunnr sync                       # pull merged items
+brunnr sync                       # pull merged items (see Update / Uninstall above)
 ```
 
 Skill / agent / prompt only. Details: `lore/push.md`.
@@ -254,9 +274,10 @@ All optimizer prompts and the pipeline support the `Resume.` kickoff.
 
 ```
 brunnr/
-├── library.yaml          # Catalog index — the authority
+├── library.yaml          # Catalog index — the authority (+ min_tool_version)
 ├── SKILL.md              # Catalog format spec
 ├── CLAUDE.md             # Conventions for AI sessions working on brunnr
+├── install.sh            # Installer — prereq checks + shell alias setup
 ├── justfile              # `brunnr` commands
 ├── agents/
 │   ├── autoresearch.md

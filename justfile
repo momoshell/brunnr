@@ -3,6 +3,11 @@
 # Usage: just -f ~/.config/brunnr/justfile <command>
 # Or: alias brunnr='just -f ~/.config/brunnr/justfile'
 
+# Tool version — bump when changing justfile / install.sh in a way that catalog
+# entries may depend on. `brunnr sync` compares this against library.yaml's
+# `min_tool_version` and refuses if the local tool is older.
+export TOOL_VERSION := "3.0.0"
+
 # Default path to brunnr repository
 export BRUNNR_HOME := env_var_or_default("BRUNNR_HOME", env_var('HOME') / ".config/brunnr")
 
@@ -42,7 +47,9 @@ THEMES_SRC := BRUNNR_HOME / "themes"
     echo "  push <section> <name> Push a new item to brunnr (opens a PR)"
     echo "  scrap <section> <name> Open a PR removing an item from brunnr"
     echo "  list [-g] [section]   List catalog items + what's installed (project, or globally with -g)"
-    echo "  sync                 Sync brunnr repository with remote"
+    echo "  sync                 Pull latest catalog content (does NOT change tool behavior)"
+    echo "  upgrade              Update brunnr tool itself (justfile, install.sh, docs)"
+    echo "  uninstall            Remove brunnr from this machine (alias + \$BRUNNR_HOME)"
     echo "  status               Show open PRs in brunnr (skills awaiting review)"
     echo "  search <query>       Search the catalog"
     echo "  check                Validate library.yaml integrity (run before commit)"
@@ -1026,79 +1033,170 @@ list *args:
         fi
     fi
 
-# Sync brunnr repository with remote
+# Pull the latest catalog content from origin — does NOT change tool behavior (run `upgrade` for that).
 @sync:
     #!/usr/bin/env bash
     set -euo pipefail
     BRUNNR_HOME="{{BRUNNR_HOME}}"
-    
-    # Check BRUNNR_HOME is a git repo
+    TOOL_VERSION="{{TOOL_VERSION}}"
+
+    # Catalog paths — sync ONLY these. Tool files (justfile, install.sh, lore/,
+    # README.md, SKILL.md, CLAUDE.md) are updated via `brunnr upgrade`.
+    CATALOG_PATHS=(library.yaml skills agents prompts extensions themes)
+
     if [ ! -d "$BRUNNR_HOME/.git" ]; then
-        echo "Error: $BRUNNR_HOME is not a git repository"
-        echo "Initialize with: cd $BRUNNR_HOME && git init && git remote add origin <url>"
+        echo "Error: $BRUNNR_HOME is not a git repository" >&2
         exit 1
     fi
-    
     cd "$BRUNNR_HOME"
-    
-    # Check for dirty working tree
-    if [ -n "$(git status --porcelain)" ]; then
-        echo "Error: brunnr has uncommitted changes"
-        echo "Please commit or stash your changes before syncing."
-        echo ""
-        echo "Modified files:"
-        git status --porcelain
-        exit 1
-    fi
-    
-    # Check remote exists
+
     if ! git remote get-url origin >/dev/null 2>&1; then
-        echo "Error: No remote configured for brunnr"
-        echo "Add a remote with: cd $BRUNNR_HOME && git remote add origin <url>"
+        echo "Error: no remote configured for brunnr" >&2
         exit 1
     fi
-    
-    # Fetch remote state
-    echo "Fetching latest changes..."
+
+    # Refuse if the user has uncommitted edits to catalog paths.
+    # Tool-path changes are fine — sync doesn't touch them.
+    DIRTY_CATALOG=$(git status --porcelain -- "${CATALOG_PATHS[@]}" 2>/dev/null || true)
+    if [ -n "$DIRTY_CATALOG" ]; then
+        echo "Error: uncommitted changes in catalog paths — commit or stash first:" >&2
+        echo "$DIRTY_CATALOG" >&2
+        exit 1
+    fi
+
+    echo "Fetching origin..."
     git fetch origin
-    
-    # Get current branch
-    CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-    
-    # Check if branch has upstream tracking
-    UPSTREAM=$(git rev-parse --abbrev-ref --symbolic-full-name @{upstream} 2>/dev/null) || {
-        echo "Error: Current branch '$CURRENT_BRANCH' has no upstream tracking"
-        echo "Set upstream with: git push -u origin $CURRENT_BRANCH"
-        exit 1
-    }
-    
-    # Get commit counts
-    LOCAL_AHEAD=$(git rev-list --count @{upstream}..HEAD 2>/dev/null || echo "0")
-    LOCAL_BEHIND=$(git rev-list --count HEAD..@{upstream} 2>/dev/null || echo "0")
-    
-    # Check divergence and handle accordingly
-    if [ "$LOCAL_BEHIND" -gt 0 ] && [ "$LOCAL_AHEAD" -gt 0 ]; then
-        echo "Error: Branch has diverged from remote"
-        echo "Local: $LOCAL_AHEAD commit(s) ahead"
-        echo "Remote: $LOCAL_BEHIND commit(s) behind"
-        echo ""
-        echo "Manual merge required. Options:"
-        echo "  1. Review and merge: cd $BRUNNR_HOME && git merge origin/$CURRENT_BRANCH"
-        echo "  2. Rebase if safe: cd $BRUNNR_HOME && git rebase origin/$CURRENT_BRANCH"
-        echo "  3. Reset to remote: cd $BRUNNR_HOME && git reset --hard origin/$CURRENT_BRANCH"
-        exit 1
-    elif [ "$LOCAL_BEHIND" -gt 0 ]; then
-        # Fast-forward possible
-        echo "Fast-forwarding $CURRENT_BRANCH to latest..."
-        git merge --ff-only origin/$CURRENT_BRANCH
-        echo "brunnr repository synced successfully"
-    elif [ "$LOCAL_AHEAD" -gt 0 ]; then
-        # Local is ahead of remote (pushed but remote not updated)
-        echo "brunnr is up to date (local is $LOCAL_AHEAD commit(s) ahead of remote)"
-        echo "Push your changes with: cd $BRUNNR_HOME && git push"
-    else
-        echo "brunnr is already up to date"
+
+    # Determine remote default branch (main or master).
+    REMOTE_BRANCH=main
+    git show-ref --verify --quiet refs/remotes/origin/main || REMOTE_BRANCH=master
+
+    # Read min_tool_version from the *remote* library.yaml — that's the version
+    # we're about to install. Older local tool versions should `brunnr upgrade` first.
+    MIN_TOOL_VERSION=$(git show "origin/$REMOTE_BRANCH:library.yaml" 2>/dev/null \
+        | awk -F'"' '/^min_tool_version:/ {print $2; exit}')
+    if [ -n "$MIN_TOOL_VERSION" ]; then
+        LOWER=$(printf '%s\n%s\n' "$TOOL_VERSION" "$MIN_TOOL_VERSION" | sort -V | head -1)
+        if [ "$LOWER" != "$MIN_TOOL_VERSION" ]; then
+            echo "Error: catalog requires brunnr tool >= $MIN_TOOL_VERSION (you have $TOOL_VERSION)" >&2
+            echo "Run 'brunnr upgrade' first, then re-run 'brunnr sync'." >&2
+            exit 1
+        fi
     fi
+
+    REMOTE_SHA=$(git rev-parse --short "origin/$REMOTE_BRANCH")
+
+    # Sparse catalog checkout: pull only the catalog paths from origin.
+    # Tool paths stay at whatever the user installed.
+    git checkout "origin/$REMOTE_BRANCH" -- "${CATALOG_PATHS[@]}"
+
+    if git diff --cached --quiet -- "${CATALOG_PATHS[@]}" 2>/dev/null; then
+        echo "brunnr catalog is already up to date (origin @ $REMOTE_SHA)"
+    else
+        # Commit the synced catalog locally so `git status` stays clean and
+        # subsequent `brunnr push` runs see a sane working tree. The commit
+        # lives only on the local branch — `brunnr push` branches from
+        # origin/$REMOTE_BRANCH, so these sync commits never end up in a PR.
+        git -c user.name='brunnr-sync' -c user.email='brunnr-sync@local' \
+            commit -m "brunnr: sync catalog @ $REMOTE_SHA" \
+            -- "${CATALOG_PATHS[@]}" >/dev/null
+        echo "brunnr catalog synced (origin @ $REMOTE_SHA)"
+    fi
+
+# Update brunnr itself (justfile, install.sh, lore, docs) — does NOT touch the catalog.
+@upgrade:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    BRUNNR_HOME="{{BRUNNR_HOME}}"
+
+    # Tool paths — upgrade ONLY these. Catalog (library.yaml, skills/, agents/,
+    # prompts/, extensions/, themes/) is updated via `brunnr sync`.
+    TOOL_PATHS=(justfile install.sh README.md SKILL.md CLAUDE.md lore)
+
+    if [ ! -d "$BRUNNR_HOME/.git" ]; then
+        echo "Error: $BRUNNR_HOME is not a git repository" >&2
+        exit 1
+    fi
+    cd "$BRUNNR_HOME"
+
+    if ! git remote get-url origin >/dev/null 2>&1; then
+        echo "Error: no remote configured for brunnr" >&2
+        exit 1
+    fi
+
+    DIRTY_TOOL=$(git status --porcelain -- "${TOOL_PATHS[@]}" 2>/dev/null || true)
+    if [ -n "$DIRTY_TOOL" ]; then
+        echo "Error: uncommitted changes in tool paths — commit or stash first:" >&2
+        echo "$DIRTY_TOOL" >&2
+        exit 1
+    fi
+
+    echo "Fetching origin..."
+    git fetch origin
+
+    REMOTE_BRANCH=main
+    git show-ref --verify --quiet refs/remotes/origin/main || REMOTE_BRANCH=master
+    REMOTE_SHA=$(git rev-parse --short "origin/$REMOTE_BRANCH")
+
+    git checkout "origin/$REMOTE_BRANCH" -- "${TOOL_PATHS[@]}"
+
+    if git diff --cached --quiet -- "${TOOL_PATHS[@]}" 2>/dev/null; then
+        echo "brunnr tool is already up to date (origin @ $REMOTE_SHA)"
+    else
+        git -c user.name='brunnr-upgrade' -c user.email='brunnr-upgrade@local' \
+            commit -m "brunnr: upgrade tool @ $REMOTE_SHA" \
+            -- "${TOOL_PATHS[@]}" >/dev/null
+        echo "brunnr tool upgraded (origin @ $REMOTE_SHA)"
+        echo "Note: if install.sh changed, re-run it to pick up shell-alias changes."
+    fi
+
+# Remove brunnr from this machine (alias + $BRUNNR_HOME) — leaves installed catalog items alone.
+@uninstall:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    BRUNNR_HOME="{{BRUNNR_HOME}}"
+
+    echo "This will:"
+    echo "  - delete $BRUNNR_HOME"
+    echo "  - remove the 'brunnr' alias from your shell rc"
+    echo ""
+    echo "Catalog items already installed into projects (.pi/) and globally (~/.pi/agent/)"
+    echo "will NOT be removed — use 'brunnr remove' for those before uninstalling."
+    echo ""
+    if [ -t 0 ]; then
+        read -r -p "Continue? [y/N] " ans
+        [[ "$ans" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 1; }
+    else
+        echo "Non-interactive — set BRUNNR_UNINSTALL_CONFIRM=1 to skip prompt."
+        [ "${BRUNNR_UNINSTALL_CONFIRM:-}" = "1" ] || { echo "Aborted."; exit 1; }
+    fi
+
+    case "$(basename "${SHELL:-bash}")" in
+        zsh)  RC="$HOME/.zshrc" ;;
+        bash) RC="$HOME/.bashrc" ;;
+        fish) RC="$HOME/.config/fish/config.fish" ;;
+        *)    RC="" ;;
+    esac
+
+    if [ -n "$RC" ] && [ -f "$RC" ] && grep -q "alias brunnr" "$RC" 2>/dev/null; then
+        tmp=$(mktemp)
+        # Drop the '# brunnr' marker and the alias line that follows it,
+        # plus any standalone alias brunnr lines.
+        awk '
+            /^# brunnr$/ { skip = 1; next }
+            skip && /^alias brunnr/ { skip = 0; next }
+            /^alias brunnr[ =]/ { next }
+            { skip = 0; print }
+        ' "$RC" > "$tmp"
+        mv "$tmp" "$RC"
+        echo "Removed alias from $RC"
+    fi
+
+    rm -rf "$BRUNNR_HOME"
+    echo "Removed $BRUNNR_HOME"
+    echo ""
+    echo "The 'brunnr' alias is still loaded in this shell session."
+    echo "Open a new terminal (or run 'unalias brunnr') to clear it."
 
 # Show open PRs in brunnr — items waiting to be reviewed/merged into the catalog
 @status:
