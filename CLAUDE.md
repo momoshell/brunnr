@@ -64,6 +64,24 @@ These are gitignored runtime data, not catalog content. Don't expect them to exi
 - `results/failures/cand-<id>/` and `results/traces/cand-<id>/` — keyed by candidate, not experiment, so `git reset --hard` discards don't leave stale traces
 - `evals/runs/<RUN_TAG>/pareto-front.json` — committed snapshot at wrap-up (the audit trail)
 
+## Versioning — tool vs. catalog
+
+Three version fields exist; they're kept in lockstep by two justfile recipes. Don't hand-edit; use the recipes so they stay synchronized.
+
+| Field | Location | Meaning | Bump with |
+|---|---|---|---|
+| `TOOL_VERSION` | `justfile` (top) | Version of the tool (justfile + install.sh + lore) | `brunnr bump <ver>` |
+| `version` | `library.yaml` | Catalog format version (released with the tool) | `brunnr bump <ver>` (same bump) |
+| `min_tool_version` | `library.yaml` | Oldest tool version that can use this catalog | `brunnr require-tool <ver>` |
+
+**`brunnr bump <ver>`** — for every tool release. Bumps `TOOL_VERSION` + `version` together. Use any time you change the justfile, install.sh, or anything else under `tool paths` (the set `brunnr upgrade` updates).
+
+**`brunnr require-tool <ver>`** — rare. Use only when adding a catalog entry that depends on a tool feature older versions can't handle (new source: scheme, new frontmatter field consumed by `add`/`check`, new section in `library.yaml`). Adding a plain skill/agent/prompt that follows existing conventions does **not** require this.
+
+**`brunnr check`** enforces the invariant `TOOL_VERSION >= min_tool_version` — so you can't accidentally ship a catalog that requires a future tool you haven't released. This is your safety net; commit through `check` and trust the failure if it fires.
+
+**On the user side**, `brunnr sync` reads `min_tool_version` from origin's `library.yaml` and refuses if the user's local `TOOL_VERSION` is older, telling them to run `brunnr upgrade` first.
+
 ## Things to avoid
 
 - Don't write content into `library.yaml` — it's an index, sources point to content.

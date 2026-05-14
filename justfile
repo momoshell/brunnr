@@ -1289,6 +1289,78 @@ search query:
         exit(found ? 0 : 1)
     " "$QUERY" || echo "No matches found in catalog"
 
+# Bump the brunnr tool version. Edits TOOL_VERSION (justfile) AND `version` (library.yaml)
+# in lockstep. Does NOT change min_tool_version — use `require-tool` for that.
+bump version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    BRUNNR_HOME="{{BRUNNR_HOME}}"
+    NEW="{{version}}"
+    CUR="{{TOOL_VERSION}}"
+
+    if ! [[ "$NEW" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "Error: version must be MAJOR.MINOR.PATCH (got: $NEW)" >&2
+        exit 1
+    fi
+
+    LOWER=$(printf '%s\n%s\n' "$CUR" "$NEW" | sort -V | head -1)
+    if [ "$LOWER" != "$CUR" ] || [ "$CUR" = "$NEW" ]; then
+        echo "Error: new ($NEW) must be strictly greater than current ($CUR)" >&2
+        exit 1
+    fi
+
+    sed -i.bak -E "s/(^export TOOL_VERSION := \")[^\"]+(\")/\1$NEW\2/" "$BRUNNR_HOME/justfile"
+    rm "$BRUNNR_HOME/justfile.bak"
+
+    sed -i.bak -E "s/(^version: \")[^\"]+(\")/\1$NEW\2/" "$BRUNNR_HOME/library.yaml"
+    rm "$BRUNNR_HOME/library.yaml.bak"
+
+    echo "Bumped tool version: $CUR -> $NEW"
+    echo "  justfile:     TOOL_VERSION = \"$NEW\""
+    echo "  library.yaml: version      = \"$NEW\""
+    echo ""
+    echo "If this release adds tool features the catalog now depends on, also run:"
+    echo "  brunnr require-tool $NEW"
+
+# Tighten the catalog's tool-version requirement. Edits min_tool_version in library.yaml.
+# Rare — only when a new catalog entry depends on a feature older tool versions lack.
+require-tool version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    BRUNNR_HOME="{{BRUNNR_HOME}}"
+    NEW="{{version}}"
+    TOOL_V="{{TOOL_VERSION}}"
+    LIBRARY="$BRUNNR_HOME/library.yaml"
+
+    if ! [[ "$NEW" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "Error: version must be MAJOR.MINOR.PATCH (got: $NEW)" >&2
+        exit 1
+    fi
+
+    LOWER=$(printf '%s\n%s\n' "$NEW" "$TOOL_V" | sort -V | head -1)
+    if [ "$LOWER" != "$NEW" ] && [ "$NEW" != "$TOOL_V" ]; then
+        echo "Error: requested min_tool_version ($NEW) > local TOOL_VERSION ($TOOL_V)" >&2
+        echo "Run 'brunnr bump $NEW' first to ship the tool, then require it." >&2
+        exit 1
+    fi
+
+    CUR=$(awk -F'"' '/^min_tool_version:/ {print $2; exit}' "$LIBRARY")
+    if [ -z "$CUR" ]; then
+        echo "Error: min_tool_version line not found in library.yaml" >&2
+        exit 1
+    fi
+
+    LOWER2=$(printf '%s\n%s\n' "$CUR" "$NEW" | sort -V | head -1)
+    if [ "$LOWER2" != "$CUR" ] || [ "$CUR" = "$NEW" ]; then
+        echo "Error: new ($NEW) must be strictly greater than current ($CUR)" >&2
+        exit 1
+    fi
+
+    sed -i.bak -E "s/(^min_tool_version: \")[^\"]+(\")/\1$NEW\2/" "$LIBRARY"
+    rm "$LIBRARY.bak"
+
+    echo "Catalog now requires brunnr tool >= $NEW (was: $CUR)"
+
 # Validate library.yaml integrity (every source resolves, deps reference real entries,
 # frontmatter names match, no orphan files in the catalog directories)
 @check:
@@ -1302,6 +1374,22 @@ search query:
     fi
 
     cd "$BRUNNR_HOME"
+
+    # Drift check: library.yaml must not require a tool version newer than the
+    # justfile we're running. Catches "bumped min_tool_version but forgot to bump TOOL_VERSION".
+    TOOL_V="{{TOOL_VERSION}}"
+    MIN_V=$(awk -F'"' '/^min_tool_version:/ {print $2; exit}' library.yaml)
+    if [ -n "$MIN_V" ]; then
+        LOWER=$(printf '%s\n%s\n' "$TOOL_V" "$MIN_V" | sort -V | head -1)
+        if [ "$LOWER" != "$MIN_V" ] && [ "$LOWER" != "$TOOL_V" ]; then
+            : # impossible — sort -V always returns one of the two
+        fi
+        if [ "$LOWER" = "$TOOL_V" ] && [ "$TOOL_V" != "$MIN_V" ]; then
+            echo "Drift: TOOL_VERSION=$TOOL_V < min_tool_version=$MIN_V" >&2
+            echo "Run 'brunnr bump $MIN_V' to ship the tool version the catalog requires." >&2
+            exit 1
+        fi
+    fi
 
     ruby -ryaml <<'RUBY'
       errors   = []
