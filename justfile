@@ -104,7 +104,18 @@ eitri *args:
         exit 1
     fi
 
-    exec pi --no-extensions -e "$EITRI_PATH" {{args}}
+    # Isolate the eitri session from PROJECT-level (.pi/*) skills, prompts, and themes,
+    # but keep globally-installed ones at $PI_CODING_AGENT_DIR (default ~/.pi/agent).
+    # Pi's --no-* flags disable BOTH project and global discovery, so we then re-pass the
+    # global dirs explicitly. Extensions stay fully isolated — only the bundled eitri
+    # extension loads. Pi 0.74 has no flag for agents, so global (and any project)
+    # agents continue to be discovered automatically.
+    PI_GLOBAL="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
+    PI_ARGS=(--no-extensions --no-skills --no-prompt-templates --no-themes)
+    [ -d "$PI_GLOBAL/skills" ]  && PI_ARGS+=(--skill           "$PI_GLOBAL/skills")
+    [ -d "$PI_GLOBAL/prompts" ] && PI_ARGS+=(--prompt-template "$PI_GLOBAL/prompts")
+    [ -d "$PI_GLOBAL/themes" ]  && PI_ARGS+=(--theme           "$PI_GLOBAL/themes")
+    exec pi "${PI_ARGS[@]}" -e "$EITRI_PATH" {{args}}
 
 # Add an item from brunnr to the current project (default) or globally with -g
 add *args:
