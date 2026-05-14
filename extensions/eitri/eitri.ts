@@ -41,9 +41,10 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { truncateHead, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, parseFrontmatter, ThinkingSelectorComponent, getSelectListTheme, DynamicBorder } from "@mariozechner/pi-coding-agent";
+import { truncateHead, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, parseFrontmatter, getSelectListTheme } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
-import { Text, truncateToWidth, visibleWidth, SelectList, Container } from "@mariozechner/pi-tui";
+import type { Component } from "@mariozechner/pi-tui";
+import { Text, truncateToWidth, visibleWidth, SelectList } from "@mariozechner/pi-tui";
 import { spawn } from "child_process";
 import { readdirSync, readFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, unlinkSync, rmdirSync } from "fs";
 import { join, resolve, dirname, basename } from "path";
@@ -1491,46 +1492,85 @@ Use this for any build path — extensions, themes, skills, prompts, agents — 
 		},
 	});
 
-	// Wraps Pi's SelectList in an overlay with DynamicBorder top + bottom so the modal
-	// actually reads as a modal. Returns picked value or undefined on Esc.
+	// Bordered, Focusable wrapper around any Component that has handleInput.
+	// Pi's TUI dispatches input to focusedComponent.handleInput; a plain Container
+	// has neither focused nor handleInput, so wrapping a SelectList in Container
+	// kills keyboard input. This class implements both and renders a heavy box
+	// drawing around the inner component in a bright accent color.
+	class Bordered implements Component {
+		focused = false;
+		constructor(
+			private inner: Component & { handleInput?(data: string): void },
+			private colorize: (s: string) => string,
+		) {}
+		invalidate(): void { this.inner.invalidate(); }
+		handleInput(data: string): void { this.inner.handleInput?.(data); }
+		render(width: number): string[] {
+			const innerWidth = Math.max(width - 4, 20);
+			const innerLines = this.inner.render(innerWidth);
+			const horiz = "━".repeat(Math.max(width - 2, 0));
+			const top    = this.colorize(`┏${horiz}┓`);
+			const bottom = this.colorize(`┗${horiz}┛`);
+			const v      = this.colorize("┃");
+			const out: string[] = [top];
+			for (const line of innerLines) {
+				const vis = visibleWidth(line);
+				const pad = " ".repeat(Math.max(0, innerWidth - vis));
+				out.push(`${v} ${line}${pad} ${v}`);
+			}
+			out.push(bottom);
+			return out;
+		}
+	}
+
+	// Open a SelectList wrapped in Bordered. Returns picked value or undefined on Esc.
 	async function pickFromList(
 		ctx: ExtensionContext,
 		items: { value: string; label: string; description?: string }[],
+		preselectValue?: string,
 	): Promise<string | undefined> {
 		if (items.length === 0) return undefined;
 		return await ctx.ui.custom<string | undefined>(
-			(_tui, _theme, _kb, done) => {
+			(_tui, theme, _kb, done) => {
 				const list = new SelectList(items, Math.min(items.length, 12), getSelectListTheme(), {
 					minPrimaryColumnWidth: 18,
 					maxPrimaryColumnWidth: 48,
 				});
+				if (preselectValue !== undefined) {
+					const idx = items.findIndex(i => i.value === preselectValue);
+					if (idx >= 0) list.setSelectedIndex(idx);
+				}
 				list.onSelect = (item) => done(item.value);
 				list.onCancel = () => done(undefined);
 
-				const container = new Container();
-				container.addChild(new DynamicBorder());
-				container.addChild(list);
-				container.addChild(new DynamicBorder());
-				return container;
+				// Bright + bold border so the modal pops.
+				const colorize = (s: string) => theme.bold(theme.fg("borderAccent", s));
+				return new Bordered(list, colorize);
 			},
 			{ overlay: true },
 		);
 	}
 
+	const THINKING_DESCRIPTIONS: Record<ThinkingLevel, string> = {
+		off:     "No reasoning",
+		minimal: "Very brief reasoning (~1k tokens)",
+		low:     "Light reasoning (~2k tokens)",
+		medium:  "Moderate reasoning (~8k tokens)",
+		high:    "Deep reasoning (~16k tokens)",
+		xhigh:   "Maximum reasoning (~32k tokens)",
+	};
+
 	async function pickThinkingLevel(
 		ctx: ExtensionContext,
 		currentLevel: ThinkingLevel,
 	): Promise<ThinkingLevel | undefined> {
-		return await ctx.ui.custom<ThinkingLevel | undefined>(
-			(_tui, _theme, _kb, done) =>
-				new ThinkingSelectorComponent(
-					currentLevel as any,
-					[...VALID_THINKING_LEVELS] as any,
-					(l: any) => done(l as ThinkingLevel),
-					() => done(undefined),
-				),
-			{ overlay: true },
-		);
+		const items = VALID_THINKING_LEVELS.map(level => ({
+			value: level,
+			label: level,
+			description: THINKING_DESCRIPTIONS[level],
+		}));
+		const picked = await pickFromList(ctx, items, currentLevel);
+		return picked as ThinkingLevel | undefined;
 	}
 
 	function buildExpertItems(ctxModel?: { provider: string; id: string }) {
