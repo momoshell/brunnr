@@ -104,3 +104,4 @@ fi
 
 say "Done."
 echo "   Open a new shell (or run 'source $RC'), then try:  brunnr help"
+echo "   Tip: update brunnr with 'brunnr upgrade' / 'brunnr sync' — don't 'git pull' in $BRUNNR_HOME."

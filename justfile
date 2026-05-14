@@ -1128,6 +1128,7 @@ sync:
                 commit -m "brunnr: sync catalog @ $REMOTE_SHA" \
                 -- "${EXISTING[@]}" >/dev/null
             ok "catalog synced to origin @ $REMOTE_SHA"
+            printf "%s%s%s update brunnr only with 'brunnr sync' / 'brunnr upgrade' — 'git pull' in this dir will show divergent history.\n" "$C" "  i" "$X"
         fi
     fi
 
@@ -1196,6 +1197,7 @@ upgrade:
                 commit -m "brunnr: upgrade tool @ $REMOTE_SHA" \
                 -- "${EXISTING[@]}" >/dev/null
             ok "tool upgraded to origin @ $REMOTE_SHA"
+            printf "%s%s%s update brunnr only with 'brunnr sync' / 'brunnr upgrade' — 'git pull' in this dir will show divergent history.\n" "$C" "  i" "$X"
             if git diff HEAD~1 HEAD --name-only -- install.sh 2>/dev/null | grep -q install.sh; then
                 say "install.sh changed — re-run it to pick up shell-alias changes"
             fi

@@ -51,6 +51,8 @@ brunnr uninstall    # remove alias + $BRUNNR_HOME (leaves installed catalog item
 
 `sync` won't change how your existing commands behave; `upgrade` is the only thing that can. If a catalog entry starts depending on a newer tool feature, `sync` reads `min_tool_version` from `library.yaml` on origin and tells you to run `brunnr upgrade` first.
 
+> **Don't `git pull` in `$BRUNNR_HOME`.** `sync` and `upgrade` do sparse checkouts of just the catalog or tool paths and record the result as local-only commits authored as `brunnr-sync@local` / `brunnr-upgrade@local`. From git's perspective your local `main` is "ahead" of origin even though the *content* matches — so `git pull` reports divergent histories. If you ever hit that state, `git reset --hard origin/main` from inside `$BRUNNR_HOME` is safe (those local commits don't contain anything that isn't on origin).
+
 Initialize brunnr in any project where you plan to run Pi:
 
 ```bash
