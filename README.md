@@ -305,7 +305,8 @@ brunnr/
 │   └── agents/eitri/
 │       ├── eitri-orchestrator.md
 │       └── {ext,theme,skill,config,tui,prompt,agent,pattern,keybinding,cli}-expert.md
-├── themes/               # Pi colour themes (empty)
+├── themes/
+│   └── snow.json         # Light-blue / white Pi theme for dark terminals
 └── lore/                 # Per-command guides
     └── {install,add,remove,use,list,search,push,scrap,status,check,sync}.md
 ```

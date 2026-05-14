@@ -1,0 +1,80 @@
+{
+  "$schema": "https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/src/modes/interactive/theme/theme-schema.json",
+  "name": "snow",
+  "vars": {
+    "ice":     "#e6f4ff",
+    "frost":   "#b8dff5",
+    "glacier": "#7fc4ea",
+    "sky":     "#4f9dd1",
+    "deep":    "#2c6896",
+    "snow":    "#ffffff",
+    "dim":     244,
+    "pine":    "#6db89c",
+    "berry":   "#e07a92",
+    "amber":   "#e8c468"
+  },
+  "colors": {
+    "accent":             "glacier",
+    "border":             "frost",
+    "borderAccent":       "ice",
+    "borderMuted":        "deep",
+    "success":            "pine",
+    "error":              "berry",
+    "warning":            "amber",
+    "muted":              "frost",
+    "dim":                "dim",
+    "text":               "",
+    "thinkingText":       "frost",
+
+    "selectedBg":         "#1a2f47",
+    "userMessageBg":      "#1a2f47",
+    "userMessageText":    "ice",
+    "customMessageBg":    "#152639",
+    "customMessageText":  "snow",
+    "customMessageLabel": "glacier",
+    "toolPendingBg":      "#142336",
+    "toolSuccessBg":      "#143028",
+    "toolErrorBg":        "#2e1620",
+    "toolTitle":          "glacier",
+    "toolOutput":         "",
+
+    "mdHeading":          "glacier",
+    "mdLink":             "sky",
+    "mdLinkUrl":          "deep",
+    "mdCode":             "ice",
+    "mdCodeBlock":        "",
+    "mdCodeBlockBorder":  "deep",
+    "mdQuote":            "frost",
+    "mdQuoteBorder":      "glacier",
+    "mdHr":               "deep",
+    "mdListBullet":       "glacier",
+
+    "toolDiffAdded":      "pine",
+    "toolDiffRemoved":    "berry",
+    "toolDiffContext":    "dim",
+
+    "syntaxComment":      "dim",
+    "syntaxKeyword":      "glacier",
+    "syntaxFunction":     "sky",
+    "syntaxVariable":     "ice",
+    "syntaxString":       "pine",
+    "syntaxNumber":       "amber",
+    "syntaxType":         "frost",
+    "syntaxOperator":     "snow",
+    "syntaxPunctuation":  "frost",
+
+    "thinkingOff":        "deep",
+    "thinkingMinimal":    "frost",
+    "thinkingLow":        "glacier",
+    "thinkingMedium":     "sky",
+    "thinkingHigh":       "ice",
+    "thinkingXhigh":      "snow",
+
+    "bashMode":           "amber"
+  },
+  "export": {
+    "pageBg": "#0e1d2e",
+    "cardBg": "#152639",
+    "infoBg": "#1f3a3a"
+  }
+}

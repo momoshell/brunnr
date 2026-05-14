@@ -115,6 +115,10 @@ eitri *args:
     [ -d "$PI_GLOBAL/skills" ]  && PI_ARGS+=(--skill           "$PI_GLOBAL/skills")
     [ -d "$PI_GLOBAL/prompts" ] && PI_ARGS+=(--prompt-template "$PI_GLOBAL/prompts")
     [ -d "$PI_GLOBAL/themes" ]  && PI_ARGS+=(--theme           "$PI_GLOBAL/themes")
+    # Bundled snow theme — discoverable inside eitri sessions. Pi only *activates* a
+    # theme via settings.json's `theme:` key, so pick "snow" once via /settings to
+    # apply it (it then persists across pi sessions).
+    [ -f "{{BRUNNR_HOME}}/themes/snow.json" ] && PI_ARGS+=(--theme "{{BRUNNR_HOME}}/themes/snow.json")
     exec pi "${PI_ARGS[@]}" -e "$EITRI_PATH" {{args}}
 
 # Add an item from brunnr to the current project (default) or globally with -g

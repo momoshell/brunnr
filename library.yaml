@@ -282,4 +282,12 @@ extensions: []
 #
 # Default install path: .pi/themes/<name>.json
 # =============================================================================
-themes: []
+themes:
+  - name: snow
+    description: Snow-inspired theme — icy whites and light blues against a deep midnight base. Designed for dark terminals; readable contrast on tool boxes, syntax highlighting, and markdown.
+    source: themes/snow.json
+    tags: [theme, light-blue, white, cool, winter, dark-terminal]
+    dependencies:
+      skills: []
+      agents: []
+    sync: auto
