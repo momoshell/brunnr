@@ -2,16 +2,16 @@
   "$schema": "https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/src/modes/interactive/theme/theme-schema.json",
   "name": "snow",
   "vars": {
-    "ice":     "#e6f4ff",
-    "frost":   "#b8dff5",
-    "glacier": "#7fc4ea",
-    "sky":     "#4f9dd1",
-    "deep":    "#2c6896",
+    "ice":     "#d9efff",
+    "frost":   "#9ad8ff",
+    "glacier": "#4ec8ff",
+    "sky":     "#2a8edb",
+    "deep":    "#1d5587",
     "snow":    "#ffffff",
     "dim":     244,
-    "pine":    "#6db89c",
-    "berry":   "#e07a92",
-    "amber":   "#e8c468"
+    "pine":    "#5dd0a0",
+    "berry":   "#ff7090",
+    "amber":   "#ffcc66"
   },
   "colors": {
     "accent":             "glacier",
@@ -26,15 +26,15 @@
     "text":               "",
     "thinkingText":       "frost",
 
-    "selectedBg":         "#1a2f47",
-    "userMessageBg":      "#1a2f47",
+    "selectedBg":         "#102640",
+    "userMessageBg":      "#102640",
     "userMessageText":    "ice",
-    "customMessageBg":    "#152639",
+    "customMessageBg":    "#0d1f33",
     "customMessageText":  "snow",
     "customMessageLabel": "glacier",
-    "toolPendingBg":      "#142336",
-    "toolSuccessBg":      "#143028",
-    "toolErrorBg":        "#2e1620",
+    "toolPendingBg":      "#0e1e30",
+    "toolSuccessBg":      "#0e2a22",
+    "toolErrorBg":        "#2e1226",
     "toolTitle":          "glacier",
     "toolOutput":         "",
 
@@ -73,8 +73,8 @@
     "bashMode":           "amber"
   },
   "export": {
-    "pageBg": "#0e1d2e",
-    "cardBg": "#152639",
-    "infoBg": "#1f3a3a"
+    "pageBg": "#08182a",
+    "cardBg": "#0d1f33",
+    "infoBg": "#14302c"
   }
 }
