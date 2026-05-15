@@ -307,7 +307,8 @@ brunnr/
 ├── extensions/brokkr/
 │   └── brokkr.ts         # TUI shell for /autoresearch-pipeline (Phase 1)
 ├── themes/
-│   └── snow.json         # Light-blue / white Pi theme for dark terminals
+│   ├── snow.json         # Light-blue / white Pi theme — auto-loaded by eitri
+│   └── forge.json        # Ember / flame / molten Pi theme — auto-loaded by brokkr
 └── lore/                 # Per-command guides
     └── {install,add,remove,use,list,search,push,scrap,status,check,sync}.md
 ```

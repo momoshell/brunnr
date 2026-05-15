@@ -152,8 +152,30 @@ function todayTag(): string {
 export default function (pi: ExtensionAPI) {
 	let widgetCtx: any;
 
+	// Theme the user had selected before brokkr auto-switched to "forge".
+	// Restored in session_shutdown. Undefined if the switch didn't happen.
+	let previousThemeName: string | undefined;
+
 	pi.on("session_start", async (_event, _ctx) => {
 		widgetCtx = _ctx;
+
+		// Auto-switch to the forge theme for brokkr sessions. The recipe makes
+		// forge.json discoverable via --theme; here we activate it and remember
+		// the previous theme so session_shutdown restores it.
+		try {
+			const ui = _ctx?.ui as any;
+			if (ui?.setTheme && ui?.getAllThemes) {
+				const available = (ui.getAllThemes() || []).map((t: any) => t?.name);
+				if (available.includes("forge")) {
+					const current = ui.theme?.name;
+					const result = ui.setTheme("forge");
+					if (result?.success && current && current !== "forge") {
+						previousThemeName = current;
+					}
+				}
+			}
+		} catch { /* don't block session_start on theme failure */ }
+
 		_ctx.ui.setStatus("brokkr", "Brokkr");
 		_ctx.ui.notify(
 			"Brokkr loaded — the bellows keep the fire even.\n\n" +
@@ -162,6 +184,13 @@ export default function (pi: ExtensionAPI) {
 			"Phase 1 surface; live progress widget and resume browser arrive in follow-ups.",
 			"info",
 		);
+	});
+
+	pi.on("session_shutdown", async () => {
+		if (previousThemeName) {
+			try { (widgetCtx?.ui as any)?.setTheme?.(previousThemeName); } catch {}
+			previousThemeName = undefined;
+		}
 	});
 
 	pi.registerCommand("optimize", {

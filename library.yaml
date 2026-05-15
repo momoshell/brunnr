@@ -291,3 +291,12 @@ themes:
       skills: []
       agents: []
     sync: auto
+
+  - name: forge
+    description: Forge-inspired theme — embers, flames, sparks, molten metal against deep coal. Designed for dark terminals; readable contrast across syntax, diffs, and tool boxes. Auto-loaded by the Brokkr extension.
+    source: themes/forge.json
+    tags: [theme, fiery, orange, red, warm, dark-terminal]
+    dependencies:
+      skills: []
+      agents: []
+    sync: auto

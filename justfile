@@ -146,7 +146,14 @@ brokkr *args:
     # commands being eaten by gates). Skills/prompts/agents still auto-discover,
     # so /autoresearch-pipeline and its sub-agents (installed via setup-optimizer)
     # remain available.
-    exec pi --no-extensions -e "$BROKKR_PATH" {{args}}
+    #
+    # Bundled forge theme — made discoverable here, activated by brokkr.ts at
+    # session_start. Pi only *activates* a theme via settings.json's `theme:`
+    # key, so the extension calls setTheme programmatically and restores the
+    # user's previous theme on session_shutdown.
+    PI_ARGS=(--no-extensions)
+    [ -f "{{BRUNNR_HOME}}/themes/forge.json" ] && PI_ARGS+=(--theme "{{BRUNNR_HOME}}/themes/forge.json")
+    exec pi "${PI_ARGS[@]}" -e "$BROKKR_PATH" {{args}}
 
 # Add an item from brunnr to the current project (default) or globally with -g
 add *args:

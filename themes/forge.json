@@ -1,0 +1,79 @@
+{
+  "$schema": "https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/src/modes/interactive/theme/theme-schema.json",
+  "name": "forge",
+  "vars": {
+    "ember":  "#ff6a14",
+    "flame":  "#ff9933",
+    "spark":  "#ffcc33",
+    "glow":   "#ffd9a8",
+    "gold":   "#d4af37",
+    "molten": "#cc3300",
+    "iron":   "#c0c0c0",
+    "ash":    "#8c6c5c",
+    "soot":   242
+  },
+  "colors": {
+    "accent":             "ember",
+    "border":             "flame",
+    "borderAccent":       "spark",
+    "borderMuted":        "ash",
+    "success":            "gold",
+    "error":              "molten",
+    "warning":            "flame",
+    "muted":              "ash",
+    "dim":                "soot",
+    "text":               "",
+    "thinkingText":       "flame",
+
+    "selectedBg":         "#2a140d",
+    "userMessageBg":      "#2a140d",
+    "userMessageText":    "glow",
+    "customMessageBg":    "#1f0e0a",
+    "customMessageText":  "iron",
+    "customMessageLabel": "ember",
+    "toolPendingBg":      "#251208",
+    "toolSuccessBg":      "#1a2614",
+    "toolErrorBg":        "#2e1208",
+    "toolTitle":          "ember",
+    "toolOutput":         "",
+
+    "mdHeading":          "ember",
+    "mdLink":             "flame",
+    "mdLinkUrl":          "ash",
+    "mdCode":             "spark",
+    "mdCodeBlock":        "",
+    "mdCodeBlockBorder":  "ash",
+    "mdQuote":            "flame",
+    "mdQuoteBorder":      "ember",
+    "mdHr":               "ash",
+    "mdListBullet":       "ember",
+
+    "toolDiffAdded":      "gold",
+    "toolDiffRemoved":    "molten",
+    "toolDiffContext":    "soot",
+
+    "syntaxComment":      "soot",
+    "syntaxKeyword":      "ember",
+    "syntaxFunction":     "spark",
+    "syntaxVariable":     "glow",
+    "syntaxString":       "gold",
+    "syntaxNumber":       "flame",
+    "syntaxType":         "flame",
+    "syntaxOperator":     "iron",
+    "syntaxPunctuation":  "ash",
+
+    "thinkingOff":        "ash",
+    "thinkingMinimal":    "soot",
+    "thinkingLow":        "flame",
+    "thinkingMedium":     "ember",
+    "thinkingHigh":       "molten",
+    "thinkingXhigh":      "spark",
+
+    "bashMode":           "spark"
+  },
+  "export": {
+    "pageBg": "#1c0e0a",
+    "cardBg": "#2a140d",
+    "infoBg": "#3a2014"
+  }
+}
