@@ -193,6 +193,58 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 
+	// Budget caps picker. Returns:
+	//   undefined  → user pressed Esc (abort pipeline dispatch)
+	//   { maxExperiments?, maxRuntime? } → values to inject into /autoresearch-pipeline
+	//                                       (either may be unset → no cap on that axis)
+	async function pickBudget(ctx: ExtensionContext): Promise<
+		{ maxExperiments?: string; maxRuntime?: string } | undefined
+	> {
+		// Preset combos cover ~90% of use cases. "Custom" drills into separate pickers.
+		const preset = await pickFromList(ctx, [
+			{ value: "none",      label: "No caps",                       description: "Plateau + saturation only — best results, no time/cost ceiling" },
+			{ value: "quick",     label: "Quick · 20 exp or 30 min",      description: "Testing or exploration" },
+			{ value: "medium",    label: "Medium · 40 exp or 1 hour",     description: "Most skills plateau before this" },
+			{ value: "long",      label: "Long · 80 exp or 2 hours",      description: "Higher headroom for hard skills" },
+			{ value: "overnight", label: "Overnight · 200 exp or 4 hours", description: "Essentially unlimited" },
+			{ value: "custom",    label: "Custom…",                       description: "Pick MAX_EXPERIMENTS and MAX_RUNTIME separately" },
+		]);
+		if (!preset) return undefined;
+
+		switch (preset) {
+			case "none":      return {};
+			case "quick":     return { maxExperiments: "20",  maxRuntime: "30min" };
+			case "medium":    return { maxExperiments: "40",  maxRuntime: "1h" };
+			case "long":      return { maxExperiments: "80",  maxRuntime: "2h" };
+			case "overnight": return { maxExperiments: "200", maxRuntime: "4h" };
+		}
+
+		// Custom: two sequential pickers. Empty value = no cap.
+		const maxExp = await pickFromList(ctx, [
+			{ value: "",    label: "No cap",        description: "Plateau-only on this axis" },
+			{ value: "20",  label: "20 experiments" },
+			{ value: "40",  label: "40 experiments" },
+			{ value: "80",  label: "80 experiments" },
+			{ value: "200", label: "200 experiments" },
+		]);
+		if (maxExp === undefined) return undefined;
+
+		const maxRun = await pickFromList(ctx, [
+			{ value: "",      label: "No cap",       description: "Plateau-only on this axis" },
+			{ value: "30min", label: "30 minutes" },
+			{ value: "1h",    label: "1 hour" },
+			{ value: "2h",    label: "2 hours" },
+			{ value: "4h",    label: "4 hours" },
+			{ value: "8h",    label: "8 hours (overnight)" },
+		]);
+		if (maxRun === undefined) return undefined;
+
+		return {
+			maxExperiments: maxExp || undefined,
+			maxRuntime:     maxRun || undefined,
+		};
+	}
+
 	pi.registerCommand("optimize", {
 		description: "Pick a skill, generate evals, run the optimization pipeline — all from a TUI",
 		handler: async (_args, ctx) => {
@@ -308,8 +360,11 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			if (action === "pipeline") {
+				const budget = await pickBudget(ctx);
+				if (budget === undefined) return;   // Esc on budget picker = abort dispatch
+
 				const epochTag = `opt-${todayTag()}`;
-				const msg = [
+				const lines = [
 					`/autoresearch-pipeline`,
 					`  SKILL=${skill.name}`,
 					`  SKILL_PATH=${skillPath}`,
@@ -317,13 +372,15 @@ export default function (pi: ExtensionAPI) {
 					`  RUNS=3`,
 					`  EPOCH_TAG=${epochTag}`,
 					`  TARGET_PASS_RATE=95`,
-				].join("\n");
+				];
+				if (budget.maxExperiments) lines.push(`  MAX_EXPERIMENTS=${budget.maxExperiments}`);
+				if (budget.maxRuntime)     lines.push(`  MAX_RUNTIME=${budget.maxRuntime}`);
 
 				if (!ctx.isIdle()) {
 					ctx.ui.notify("Agent is busy — wait for the current turn to finish, then re-run /optimize", "warning");
 					return;
 				}
-				pi.sendUserMessage(msg);
+				pi.sendUserMessage(lines.join("\n"));
 				return;
 			}
 		},
