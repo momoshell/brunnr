@@ -39,6 +39,31 @@ To install into a non-default location, pass `BRUNNR_HOME` to bash (the env var 
 curl -fsSL https://raw.githubusercontent.com/momoshell/brunnr/main/install.sh | BRUNNR_HOME=/opt/brunnr bash
 ```
 
+## Quickstart
+
+Zero to optimized skill, in one screen:
+
+```bash
+# 1. Install brunnr + the optimizer agents (one-time)
+curl -fsSL https://raw.githubusercontent.com/momoshell/brunnr/main/install.sh | bash
+brunnr setup-optimizer
+
+# 2. From a project that is a git repo
+cd path/to/your/project
+[ -d .git ] || { git init && git add . && git commit -m "wip"; }
+
+# 3. Build a skill — interactive authoring with Eitri (auto-applies the snow theme)
+brunnr eitri
+#   > "Build a Pi skill that <does X>"        # writes .pi/skills/<name>/SKILL.md
+
+# 4. Optimize it — interactive TUI with Brokkr (auto-applies the forge theme)
+brunnr brokkr
+#   /optimize  →  pick skill  →  Run pipeline
+#   experiment branches land in *your* project repo, not $BRUNNR_HOME
+```
+
+Each step is documented in detail in the per-task sections below.
+
 ## Update / Uninstall
 
 brunnr keeps **catalog content** and **tool behavior** on separate update tracks:
@@ -79,6 +104,8 @@ brunnr add -g <section> <name>  # install globally — every project sees it
 ```bash
 brunnr eitri          # launches Pi with eitri loaded on-demand from $BRUNNR_HOME
 ```
+
+Eitri auto-applies the bundled **snow** theme on session start and restores your previous theme on exit, so plain Pi sessions stay on whatever you had selected.
 
 In Pi, describe what to build:
 
@@ -122,33 +149,39 @@ The six patterns: **checkpoint-and-resume**, **HITL gates**, **coordinator+speci
 
 ### …optimize a skill
 
-Works on **any** skill — project-local skills, catalog skills, doesn't matter. The only requirement is that the skill's file lives inside a git repo (where experiment branches will be recorded). The optimizer doesn't touch `library.yaml`; project-local skills stay project-local.
+Works on **any** skill — project-local or catalog. Only requirement: the skill's file is inside a git repo (where experiment branches will be recorded). The optimizer doesn't touch `library.yaml`; project-local skills stay project-local.
 
-One-time setup — installs the full optimizer stack (agents + slash commands) globally so every Pi session sees them:
+One-time install of the optimizer agents + slash commands (global, persists across projects):
 
 ```bash
-brunnr setup-optimizer       # uninstall later with `brunnr remove-optimizer`
+brunnr setup-optimizer
 ```
 
-**Shortcut: `brunnr brokkr`** launches a Pi session preloaded with the Brokkr extension (eitri's brother in Norse myth — the bellows-worker who tempered what Eitri forged). It puts a TUI in front of all of this: `/optimize` opens a skill picker, then an action picker (generate evals / run pipeline / resume), and fires the right slash command for you. Also wraps `pi --no-extensions` so project-level extension gates don't get in the way. Manual flow below still works.
+**The interactive path — `brunnr brokkr`.** Launches Pi with the [Brokkr extension](extensions/brokkr/) — eitri's brother in Norse myth, the bellows-worker who tempered what Eitri forged. Auto-applies the bundled **forge** theme on session start (restored on exit), and wraps `pi --no-extensions` so project-level extension gates can't block the optimizer.
 
-In plain `pi` (not eitri — eitri blocks prompt-template discovery), from the project root that contains the skill:
-
-```
-/gen-evals                                  # writes evals/evals.json — review and tweak
-
-/autoresearch-pipeline
-  SKILL=code-reviewer
-  SKILL_PATH=.pi/skills/code-reviewer/SKILL.md
-  EVAL_FILE=evals/evals.json
-  RUNS=3
-  EPOCH_TAG=apr14
-  TARGET_PASS_RATE=95
+```bash
+cd path/to/your/project          # must be a git repo
+brunnr brokkr
 ```
 
-Pipeline runs hill-climb → GEPA → compaction; auto-escalates on plateau or stops early on `TARGET_PASS_RATE`.
+Then in the session:
 
-Check progress across all skills:
+```
+/optimize
+```
+
+Bordered TUI overlays walk you through:
+
+1. **Pick a skill** — discovered from `.pi/skills/` (project) and `~/.pi/agent/skills/` (global)
+2. **Pick an action**:
+   - **Run optimization pipeline** — kicks off `/autoresearch-pipeline` with sensible defaults (`RUNS=3`, `TARGET_PASS_RATE=95`, `EPOCH_TAG=opt-YYYYMMDD`)
+   - **Generate evals** — runs `/gen-evals SKILL_PATH=…` first if you don't have `evals/evals.json` yet
+   - **Resume an interrupted run** — scans `autoresearch-skill/*` branches in your repo and offers to continue
+3. **Brokkr fires the slash command** via `pi.sendUserMessage` — the existing prompt templates + `autoresearch-*` agents do the actual optimization. Brokkr is a UX shell.
+
+The pipeline (`hill-climb → GEPA → compaction`) commits experiments to branches in **your project repo** (`autoresearch-skill/<EPOCH_TAG>-stage1`, `-gepa`, `-compact`). Auto-escalates on plateau, stops early when both train AND holdout pass rates hit `TARGET_PASS_RATE`.
+
+Check progress across all skills (works in any Pi session, not just Brokkr):
 
 ```
 /skill-status
@@ -164,13 +197,33 @@ Recommended next:
 2. test-writer    — pass rate 68%, stale. Ready for /autoresearch-pipeline.
 ```
 
+<details>
+<summary><b>Manual flow (without Brokkr)</b> — same outcome, more typing</summary>
+
+In plain `pi` (not Eitri — Eitri blocks prompt-template discovery), from the project root that contains the skill:
+
+```
+/gen-evals
+  SKILL_PATH=.pi/skills/<name>/SKILL.md
+
+/autoresearch-pipeline
+  SKILL=<name>
+  SKILL_PATH=.pi/skills/<name>/SKILL.md
+  EVAL_FILE=evals/evals.json
+  RUNS=3
+  EPOCH_TAG=may15
+  TARGET_PASS_RATE=95
+```
+
 **Resume an interrupted run** — re-invoke with the same `EPOCH_TAG` plus `Resume.`:
 
 ```
-/autoresearch-pipeline SKILL=code-reviewer EPOCH_TAG=apr14 Resume.
+/autoresearch-pipeline SKILL=<name> EPOCH_TAG=may15 Resume.
 ```
 
 The pipeline detects which stage was interrupted from existing branches + `evals.json` history and continues. More examples in `lore/use.md`.
+
+</details>
 
 ### …optimize an agent
 
