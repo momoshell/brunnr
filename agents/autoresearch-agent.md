@@ -60,7 +60,7 @@ This agent does not modify the eval file. If a field is missing, refuse to start
 
 ## Setup protocol (do this exactly once)
 
-1. **Verify the agent is repo-backed.** Look up `AGENT` in `library.yaml`. If `source` starts with `file://` or `https://`, **stop immediately** — you cannot optimize an agent you don't own. Tell the user to run `/fork-agent <AGENT>` to copy it into brunnr and update `library.yaml`, then re-invoke this agent. Do not proceed.
+1. **Locate the agent's git repo.** Resolve the repo containing `AGENT_PATH`: `cd "$(dirname AGENT_PATH)" && git rev-parse --show-toplevel`. If that fails, **stop immediately** — the agent must live inside a git repo so experiment branches can be created. Tell the user to `git init` in the project root and commit the agent, then re-run. All branches and `results.tsv` live in this resolved repo; `library.yaml` membership is not required.
 2. **Read the agent.** Read `AGENT_PATH` fully. Note its tools, structure, and any safety rules already in place.
 3. **Read and validate evals.** Verify schema: every case has `fixture`, `work_copy`, `reset`, `task`, `max_turns`, and assertions with `category`. Count by category. Report:
    ```
@@ -360,12 +360,14 @@ Tell the user:
 - How to merge the winner: `git checkout main && git cherry-pick <winner_commit>` (cherry-pick the winner specifically, not the whole branch — siblings on the front are alternatives, not history).
 - Suggest running `/agent-status` to see where this agent ranks across the catalog.
 
-### 5. Push back to brunnr
+### 5. (Optional) Share to brunnr's catalog
 
-After merge, **explicitly ask** whether to push:
+Only relevant if the experiment repo IS `$BRUNNR_HOME`. Otherwise skip — the improvement is already in the user's project repo where it belongs.
 
-> "The improved agent is merged. Run `brunnr push agent <name>` to update the catalog?"
+If the agent is in the catalog, **explicitly ask** before pushing:
+
+> "The improved agent is merged into `$BRUNNR_HOME`. Run `brunnr push agent <AGENT>` to open a PR against the catalog?"
 
 - If yes: run `brunnr push agent <AGENT>`.
-- If no: remind them brunnr's copy is now behind.
-- Do not push without asking.
+- If no: the improvement stays local to `$BRUNNR_HOME`.
+- Never push without asking.

@@ -59,7 +59,7 @@ Identical to `autoresearch-skill`. See that agent for the schema. This agent doe
 
 ## Setup protocol (do this exactly once)
 
-1. **Verify the skill is repo-backed.** Look up the skill in `library.yaml`. If `source` starts with `file://` or `https://`, **stop immediately** and tell the user to run `/fork-skill <name>` first. Do not proceed.
+1. **Locate the skill's git repo.** Resolve the repo containing `SKILL_PATH`: `cd "$(dirname SKILL_PATH)" && git rev-parse --show-toplevel`. If that fails, **stop immediately** — the skill must live inside a git repo so experiment branches can be created. Tell the user to `git init` in the project root and commit the skill, then re-run. All branches and `results.tsv` live in this resolved repo; `library.yaml` membership is not required.
 2. **Read the skill.** Read `SKILL_PATH` fully.
 3. **Read and validate evals.** Read `EVAL_FILE`. Verify schema. Count assertions by type. Report:
    ```
@@ -357,12 +357,14 @@ Tell the user:
 - How to merge the winner: `git checkout main && git cherry-pick <winner_commit>` (the front members are alternatives, not history — cherry-pick the winner specifically).
 - Suggest running `/skill-status` to confirm where this skill now ranks.
 
-### 5. Push back to brunnr
+### 5. (Optional) Share to brunnr's catalog
 
-After merge, **explicitly ask** whether to push:
+Only relevant if the experiment repo IS `$BRUNNR_HOME`. Otherwise skip — the improvement is already in the user's project repo where it belongs.
 
-> "The improved skill is merged. Run `brunnr push skill <name>` to update the catalog?"
+If the skill is in the catalog, **explicitly ask** before pushing:
+
+> "The improved skill is merged into `$BRUNNR_HOME`. Run `brunnr push skill <SKILL>` to open a PR against the catalog?"
 
 - If yes: run `brunnr push skill <SKILL>`.
-- If no: remind them brunnr's copy is now behind.
-- Do not push without asking.
+- If no: the improvement stays local to `$BRUNNR_HOME`.
+- Never push without asking.

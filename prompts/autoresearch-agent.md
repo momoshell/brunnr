@@ -16,7 +16,7 @@ You are about to act as the `autoresearch-agent` agent (see `.pi/agents/autorese
 
 - Target is `.pi/agents/<name>.md` (an agent prompt, not a skill).
 - An eval suite exists at `evals/evals.json` with the trajectory schema (`fixture`, `work_copy`, `reset`, `task`, `max_turns`, assertions with `category`).
-- Agent is repo-backed in `library.yaml`.
+- `AGENT_PATH` resolves to a file inside a git repo (where experiment branches will be recorded). `library.yaml` membership is not required.
 
 If the eval suite doesn't exist or has the skill-style schema, run `/gen-evals-agent` first.
 
@@ -44,8 +44,8 @@ Ask for any that are missing:
 
 Before confirming, verify:
 
-- Agent's `source` in `library.yaml` is repo-backed. If `file://` or `https://`: **stop**, direct the user to `/fork-agent <AGENT>` first.
-- `AGENT_PATH` exists and is readable.
+- `AGENT_PATH` exists and resolves to a file inside a git repo (`git -C "$(dirname AGENT_PATH)" rev-parse --show-toplevel` succeeds). If not, **stop** and tell the user to `git init` in the project root and commit the agent. `library.yaml` membership is not required.
+- `AGENT_PATH` is readable.
 - `EVAL_FILE` exists and uses the trajectory schema. If it has the skill schema (no `fixture`/`work_copy`/`reset`/`task`/`max_turns`), tell the user to run `/gen-evals-agent` instead.
 - Every eval case has at least one **safety** assertion. If any case has zero, stop and direct the user to `/gen-evals-agent` to add safety checks. Optimizing without safety assertions is unsafe — the optimizer can win by removing guardrails.
 - Each `reset` command is idempotent (runs cleanly twice in a row producing the same `work_copy` state). Run a quick verification pass.

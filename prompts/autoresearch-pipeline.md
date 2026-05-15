@@ -21,7 +21,7 @@ Use `/autoresearch-pipeline` when:
 Do **not** use this for:
 - Continuous re-runs over the same eval set — overfitting compounds. One pipeline pass per epoch.
 - Skills whose evals don't yet exist — run `/gen-evals` first.
-- Skills that aren't repo-backed — run `/fork-skill` first.
+- Skills whose file isn't inside a git repo — experiment branches need somewhere to live. `git init` in the project root first.
 
 ## Pipeline shape
 
@@ -65,7 +65,7 @@ The distinct suffixes prevent the per-stage `git checkout -b` from colliding wit
 
 ## Step 2 — Pre-flight checks
 
-- Verify the skill is repo-backed in `library.yaml`. If not: stop, direct user to `/fork-skill`.
+- Verify `SKILL_PATH` resolves to a file inside a git repo (`git -C "$(dirname SKILL_PATH)" rev-parse --show-toplevel` succeeds). All branches and the per-stage `results.tsv` are recorded in this resolved repo. If not in a repo, stop and tell the user to `git init` in the project root and commit the skill. `library.yaml` membership is NOT required — the skill can be entirely project-local.
 - Verify `SKILL_PATH` and `EVAL_FILE` exist.
 - Report assertion counts and split.
 - Verify the working tree is clean.
@@ -240,8 +240,9 @@ Once the pipeline ends (whichever stage it ended in):
    git cherry-pick <final-winner-commit>
    ```
 
-4. **Ask before pushing to brunnr**:
-   > "The improved skill is merged. Run `brunnr push skill <SKILL>` to update the catalog?"
+4. **(Optional) Ask before pushing to brunnr's catalog** — only if the experiment repo IS `$BRUNNR_HOME` (the skill lives in the catalog):
+   > "The improved skill is merged. Run `brunnr push skill <SKILL>` to open a PR against the catalog?"
+   Skip this step entirely if the skill is project-local — the improvement is already in the user's project repo where it belongs.
 
 ## Pipeline-level safety
 

@@ -84,10 +84,7 @@ If the eval file has no `split` field on evals, assign 70% train / 30% holdout r
 
 ## Setup protocol (do this exactly once)
 
-1. **Verify the skill is repo-backed.** Look up the skill in `library.yaml`. If the `source` starts with `file://` or `https://`, **stop immediately** — you cannot optimize a skill you don't own. Tell the user:
-   - The skill is externally referenced and cannot be edited in place.
-   - They should run `/fork-skill <name>` to copy it into brunnr and update `library.yaml`.
-   - Do not proceed. Do not run evals. Do not create a branch.
+1. **Locate the skill's git repo.** Read `SKILL_PATH` and resolve its containing repo: `cd "$(dirname SKILL_PATH)" && git rev-parse --show-toplevel`. If that fails, **stop immediately** — the skill must live inside a git repo so experiments can be branched and tracked. Tell the user to `git init` in the project root and commit the skill, then re-run. All subsequent steps (branches, `results.tsv`, commits) happen inside **this** resolved repo — the user's project, or `$BRUNNR_HOME` if they're optimizing a catalog skill. The optimizer doesn't care which; no `library.yaml` check.
 2. **Read the skill.** Read `SKILL_PATH` fully. Understand every instruction before changing anything.
 3. **Read and validate evals.** Read `EVAL_FILE`. Verify the schema is correct. Count assertions by type. Report the ratio:
    ```
@@ -349,16 +346,19 @@ This is the permanent record. The `/skill-status` prompt reads these to determin
 
 Tell the user:
 - The branch name containing the improved skill
+- The repo it lives in (the one resolved at setup step 1)
 - How to review: `git log autoresearch-skill/<RUN_TAG>` and `results.tsv`
 - How to merge: `git merge autoresearch-skill/<RUN_TAG>` (if satisfied)
-- Suggest running `/skill-status` to see where this skill ranks across the catalog
+- If the skill is in brunnr's catalog, suggest `/skill-status` to see where it ranks
 
-### 3. Push back to brunnr
+### 3. (Optional) Share to brunnr's catalog
 
-After merge, **explicitly ask** whether to push:
+Only relevant if the experiment repo IS `$BRUNNR_HOME` (i.e., the user was optimizing a catalog skill). Otherwise skip this step entirely — the improvement is already where it belongs, in the user's project repo.
 
-> "The improved skill is merged. Run `brunnr push skill <name>` to update the catalog?"
+If the skill is in the catalog, **explicitly ask** before pushing:
+
+> "The improved skill is merged into `$BRUNNR_HOME`. Run `brunnr push skill <SKILL>` to open a PR against the catalog?"
 
 - If yes: run `brunnr push skill <SKILL>`.
-- If no: remind them brunnr's copy is now behind.
-- Do not push without asking. The user may want to test the skill in their project first.
+- If no: the improvement stays local to `$BRUNNR_HOME`.
+- Never push without asking.

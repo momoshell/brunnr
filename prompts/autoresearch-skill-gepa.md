@@ -37,8 +37,8 @@ Ask for any that are missing:
 
 Before confirming with the user, verify:
 
-- The skill's `source` in `library.yaml` is repo-backed (not `file://` or `https://`). If external, **stop** and direct the user to `/fork-skill` first.
-- `SKILL_PATH` exists and is readable.
+- `SKILL_PATH` resolves to a file inside a git repo (`git -C "$(dirname SKILL_PATH)" rev-parse --show-toplevel` succeeds). If not, **stop** and tell the user to `git init` in the project root and commit the skill. `library.yaml` membership is not required.
+- `SKILL_PATH` is readable.
 - `EVAL_FILE` exists and has valid schema.
 - Report assertion counts: total, deterministic, semantic, train/holdout split.
 - If no eval file exists, suggest `/gen-evals` first.

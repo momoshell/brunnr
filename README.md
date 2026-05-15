@@ -122,16 +122,17 @@ The six patterns: **checkpoint-and-resume**, **HITL gates**, **coordinator+speci
 
 ### …optimize a skill
 
+Works on **any** skill — project-local skills, catalog skills, doesn't matter. The only requirement is that the skill's file lives inside a git repo (where experiment branches will be recorded). The optimizer doesn't touch `library.yaml`; project-local skills stay project-local.
+
 One-time setup — installs the full optimizer stack (agents + slash commands) globally so every Pi session sees them:
 
 ```bash
 brunnr setup-optimizer       # uninstall later with `brunnr remove-optimizer`
 ```
 
-In Pi:
+In plain `pi` (not eitri — eitri blocks prompt-template discovery), from the project root that contains the skill:
 
 ```
-/fork-skill code-reviewer                   # only if source is file:// or https://
 /gen-evals                                  # writes evals/evals.json — review and tweak
 
 /autoresearch-pipeline
@@ -173,10 +174,9 @@ The pipeline detects which stage was interrupted from existing branches + `evals
 
 Same setup — `brunnr setup-optimizer` installs the agent-side tooling (`eval-designer-agent`, `autoresearch-agent`, `/gen-evals-agent`, `/agent-status`) alongside the skill-side tooling. Run once.
 
-In Pi:
+In plain `pi`, from the project root that contains the agent:
 
 ```
-/fork-agent my-coder                        # only if external
 /gen-evals-agent                            # writes trajectory-style evals
 
 /autoresearch-agent

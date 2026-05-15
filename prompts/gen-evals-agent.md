@@ -35,7 +35,7 @@ Ask for any that are missing:
 Before designing evals, verify:
 
 - `AGENT_PATH` exists and is readable.
-- The agent's `source` in `library.yaml` is repo-backed if you intend to optimize it later. If external, suggest running `/fork-agent <name>` first (eval generation itself works on any source, but optimization requires repo-backed).
+- If you intend to optimize this agent later, `AGENT_PATH` should live inside a git repo (where experiment branches will be recorded). `library.yaml` membership is not required.
 - `FIXTURES_DIR` doesn't already contain conflicting case directories. If it does, ask before overwriting.
 - The agent isn't trivially testable as a skill. Multi-turn / multi-tool agents need this; single-shot text-transform agents may be better evaluated with `/gen-evals` against an equivalent skill.
 
