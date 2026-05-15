@@ -239,6 +239,10 @@ You continue indefinitely unless:
 - Train pass rate reaches 100% on 3 consecutive runs — announce and pause (you may have saturated the eval suite).
 - Holdout regression triggers a revert and you cannot find a path forward after 5 more experiments.
 - **Plateau detected** (see next section).
+- **Budget cap reached** — only if the user supplied one:
+  - `MAX_EXPERIMENTS`: stop cleanly after this many experiments have been logged in `results.tsv` on this branch (counts kept + discarded + crashed; cumulative across resumes). Announce `"Stopped at MAX_EXPERIMENTS=<N>"` and run the standard wrap-up.
+  - `MAX_RUNTIME`: stop cleanly after this wall-clock duration has elapsed since setup completed. Record `START_EPOCH=$(date +%s)` at the end of setup; before each new experiment, compare `$(($(date +%s) - START_EPOCH))` against the budget in seconds (parse `30min`/`2h`/`4h30m`/`300s`). Announce `"Stopped at MAX_RUNTIME=<T>"` and run the standard wrap-up. On resume, MAX_RUNTIME measures from the *resumed* setup, not the original start.
+  - **Defaults**: both unset → no cap (plateau and saturation are the only stops). Best results come from letting plateau detection run — use these caps only when you need predictability for cost/time, not as a primary control.
 
 ## Plateau detection
 

@@ -23,6 +23,8 @@ Ask for any that are missing:
 | `EVAL_FILE` | Path to the eval suite (`evals/evals.json`) |
 | `RUNS` | Number of times to run the full eval suite per experiment (default: 3) |
 | `RUN_TAG` | Short tag for the branch name |
+| `MAX_EXPERIMENTS` | Optional cap on total experiments before clean stop. Default: unlimited (plateau-only) |
+| `MAX_RUNTIME` | Optional wall-clock cap (e.g. `30min`, `2h`, `4h30m`). Default: unlimited |
 
 ## Step 2 — Pre-flight checks
 

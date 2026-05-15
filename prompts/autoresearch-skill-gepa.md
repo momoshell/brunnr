@@ -31,6 +31,8 @@ Ask for any that are missing:
 | `EVAL_FILE` | Path to the eval suite (`evals/evals.json`) | required |
 | `RUNS` | Number of times to run the full eval suite per experiment | `3` |
 | `RUN_TAG` | Short tag for the branch name | required (suggest ending with `-gepa`) |
+| `MAX_EXPERIMENTS` | Optional cap on total experiments before clean stop | unlimited (plateau-only) |
+| `MAX_RUNTIME` | Optional wall-clock cap (`30min`, `2h`, `4h30m`) | unlimited |
 | `PARETO_WIDTH` | Max Pareto front size | `4` |
 
 ## Step 2 — Pre-flight checks

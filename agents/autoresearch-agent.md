@@ -242,6 +242,10 @@ You continue indefinitely unless:
 - Holdout regression triggers a front prune and you cannot recover after 5 more experiments.
 - **Safety-violation streak**: 3 consecutive experiments triggered a safety violation. Stop and report — the optimizer is converging toward unsafe edits, which means the safety assertions or the seed agent need rethinking.
 - **Reflection plateau detected** (see next section).
+- **Budget cap reached** — only if the user supplied one:
+  - `MAX_EXPERIMENTS`: stop cleanly after this many experiments logged in `results.tsv` on this branch (cumulative across resumes). Announce `"Stopped at MAX_EXPERIMENTS=<N>"` and run the standard wrap-up.
+  - `MAX_RUNTIME`: stop cleanly after this wall-clock duration since setup. Record `START_EPOCH=$(date +%s)` at end of setup; check elapsed before each new experiment (parse `30min`/`2h`/`4h30m`/`300s`). Announce `"Stopped at MAX_RUNTIME=<T>"` and run the standard wrap-up.
+  - **Defaults**: both unset → no cap (plateau, saturation, and safety-streak are the only stops). Agent runs are expensive — caps are most useful here. But default behavior produces best results.
 
 ## Reflection plateau detection
 

@@ -55,6 +55,8 @@ The pipeline also supports resume-from-checkpoint: include `Resume.` in the kick
 | `RUNS` | Eval runs per experiment | `3` |
 | `EPOCH_TAG` | Short tag identifying this epoch (used as a prefix for stage branches) | required |
 | `TARGET_PASS_RATE` | Stop early if a stage reaches this on train AND holdout | `95` |
+| `MAX_EXPERIMENTS` | Optional **per-stage** experiment cap — passed unchanged to each of the three stages. Worst-case total = `3 × MAX_EXPERIMENTS`. | unlimited |
+| `MAX_RUNTIME` | Optional **per-stage** wall-clock cap (`30min`, `2h`, `4h30m`) — passed unchanged to each stage. Worst-case total = `3 × MAX_RUNTIME`. | unlimited |
 
 The pipeline creates three branches and uses three distinct run_tags:
 - Stage 1: branch `autoresearch-skill/<EPOCH_TAG>-stage1`, `RUN_TAG=<EPOCH_TAG>-stage1`
@@ -131,6 +133,7 @@ When the table calls for **running a stage fresh** during a resume (because earl
 
 **Fresh case (default):** hand off to the `autoresearch-skill` agent with parameters:
 - `SKILL`, `SKILL_PATH`, `EVAL_FILE`, `RUNS` — as collected
+- `MAX_EXPERIMENTS`, `MAX_RUNTIME` — pass through unchanged if the user supplied them; omit if not
 - `RUN_TAG` = `<EPOCH_TAG>-stage1`
 
 The agent runs its loop until **one of these triggers** (the orchestrator monitors `results.tsv` and the agent's own stopping conditions):
@@ -155,6 +158,7 @@ Before advancing, the orchestrator:
 
 **Fresh case (default):** position the working tree at the seed commit *without* creating the branch yet — the agent's setup protocol creates the branch itself and aborts if one already exists. Use `git checkout <seed_commit>` to enter detached-HEAD on the seed commit. Then hand off to the `autoresearch-skill-gepa` agent with parameters:
 - `SKILL`, `SKILL_PATH`, `EVAL_FILE`, `RUNS` — as before
+- `MAX_EXPERIMENTS`, `MAX_RUNTIME` — pass through unchanged if supplied
 - `RUN_TAG` = `<EPOCH_TAG>-gepa`
 - `PARETO_WIDTH` = `4`
 
@@ -180,6 +184,7 @@ GEPA tends to grow the skill. Stage 3 is a compaction pass.
 
 **Fresh case (default):** position the working tree at the stage-2 winner commit without pre-creating the stage-3 branch (`git checkout <winner_commit>`). Hand off to the `autoresearch-skill` agent with parameters:
 - `SKILL`, `SKILL_PATH`, `EVAL_FILE`, `RUNS` — as before
+- `MAX_EXPERIMENTS`, `MAX_RUNTIME` — pass through unchanged if supplied
 - `RUN_TAG` = `<EPOCH_TAG>-compact`
 
 Plus this kickoff line in the hand-off prompt, which the agent recognizes as triggering its formal **delete-only mode** (see `agents/autoresearch-skill.md` "Delete-only mode"):

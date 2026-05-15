@@ -37,6 +37,8 @@ Ask for any that are missing:
 | `EVAL_FILE` | Path to evals.json | required |
 | `RUNS` | Eval runs per experiment | `2` (lower than skills — agent runs are expensive) |
 | `RUN_TAG` | Short tag for the branch name | required (suggest ending with `-agent`) |
+| `MAX_EXPERIMENTS` | Optional cap on total experiments before clean stop | unlimited (plateau-only) |
+| `MAX_RUNTIME` | Optional wall-clock cap (`30min`, `2h`, `4h30m`) | unlimited |
 | `PARETO_WIDTH` | Max Pareto front size | `4` |
 | `EVAL_PARALLEL` | Eval cases run in parallel | `2` (set to `1` if you suspect any case can write outside its sandbox) |
 

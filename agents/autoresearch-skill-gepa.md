@@ -246,6 +246,10 @@ You continue indefinitely unless:
 - Best train pass rate reaches 100% on 3 consecutive runs — pause (eval suite saturated).
 - Holdout regression triggers a front prune and you cannot find a path forward after 5 more experiments.
 - **Reflection plateau detected** (see next section).
+- **Budget cap reached** — only if the user supplied one:
+  - `MAX_EXPERIMENTS`: stop cleanly after this many experiments logged in `results.tsv` on this branch (cumulative across resumes). Announce `"Stopped at MAX_EXPERIMENTS=<N>"` and run the standard wrap-up.
+  - `MAX_RUNTIME`: stop cleanly after this wall-clock duration since setup. Record `START_EPOCH=$(date +%s)` at end of setup; before each new experiment compare elapsed against the budget (parse `30min`/`2h`/`4h30m`/`300s`). Announce `"Stopped at MAX_RUNTIME=<T>"` and run the standard wrap-up.
+  - **Defaults**: both unset → no cap (reflection plateau and saturation are the only stops). Best results come from letting the reflection loop run to its natural plateau; use caps only when you need cost/time predictability.
 
 ## Reflection plateau detection
 
