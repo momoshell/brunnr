@@ -1,5 +1,10 @@
 /**
- * brunnr-optimizer — TUI shell for the autoresearch skill-optimization workflow.
+ * Brokkr — TUI shell for the autoresearch skill-optimization workflow.
+ *
+ * Named after Brokkr, Eitri's brother in Norse myth. They worked the same
+ * forge: Eitri shaped the metal, Brokkr worked the bellows to keep the heat
+ * perfectly tempered. The metaphor maps cleanly — eitri builds Pi
+ * components, brokkr refines them.
  *
  * Phase 1: skill picker + action picker + dispatch via pi.sendUserMessage.
  * The extension never runs the optimization itself; it just collects inputs
@@ -10,7 +15,7 @@
  *   2. Live progress widget watching results.tsv
  *   3. Resume picker + eval review TUI + per-agent model/thinking tuning
  *
- * Loaded on-demand via `brunnr optimize`, never installed into Pi's extension
+ * Loaded on-demand via `brunnr brokkr`, never installed into Pi's extension
  * search paths.
  */
 
@@ -149,9 +154,9 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_start", async (_event, _ctx) => {
 		widgetCtx = _ctx;
-		_ctx.ui.setStatus("optimizer", "Optimizer");
+		_ctx.ui.setStatus("brokkr", "Brokkr");
 		_ctx.ui.notify(
-			"brunnr-optimizer loaded.\n\n" +
+			"Brokkr loaded — the bellows keep the fire even.\n\n" +
 			"/optimize    Pick a skill, run gen-evals or the pipeline\n" +
 			"\n" +
 			"Phase 1 surface; live progress widget and resume browser arrive in follow-ups.",

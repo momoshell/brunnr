@@ -111,7 +111,8 @@
       "Bash(sed -n '60,68p' /Users/x/Development/brunnr/agents/autoresearch-skill-gepa.md)",
       "Bash(sed -n '360,370p' /Users/x/Development/brunnr/agents/autoresearch-skill-gepa.md)",
       "Bash(sed -n '60,67p' /Users/x/Development/brunnr/agents/autoresearch-agent.md)",
-      "Bash(sed -n '363,372p' /Users/x/Development/brunnr/agents/autoresearch-agent.md)"
+      "Bash(sed -n '363,372p' /Users/x/Development/brunnr/agents/autoresearch-agent.md)",
+      "Bash(grep -n \"In plain \\\\`pi\\\\`\" /Users/x/Development/brunnr/README.md)"
     ]
   }
 }

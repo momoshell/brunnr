@@ -130,7 +130,7 @@ One-time setup — installs the full optimizer stack (agents + slash commands) g
 brunnr setup-optimizer       # uninstall later with `brunnr remove-optimizer`
 ```
 
-**Shortcut: `brunnr optimize`** launches a Pi session preloaded with the brunnr-optimizer extension, which puts a TUI in front of all of this — `/optimize` opens a skill picker, then an action picker (generate evals / run pipeline / resume), and fires the right slash command for you. Also wraps `pi --no-extensions` so project-level extension gates don't get in the way. Manual flow below still works.
+**Shortcut: `brunnr brokkr`** launches a Pi session preloaded with the Brokkr extension (eitri's brother in Norse myth — the bellows-worker who tempered what Eitri forged). It puts a TUI in front of all of this: `/optimize` opens a skill picker, then an action picker (generate evals / run pipeline / resume), and fires the right slash command for you. Also wraps `pi --no-extensions` so project-level extension gates don't get in the way. Manual flow below still works.
 
 In plain `pi` (not eitri — eitri blocks prompt-template discovery), from the project root that contains the skill:
 
@@ -304,8 +304,8 @@ brunnr/
 │   └── agents/eitri/
 │       ├── eitri-orchestrator.md
 │       └── {ext,theme,skill,config,tui,prompt,agent,pattern,keybinding,cli}-expert.md
-├── extensions/optimizer/
-│   └── optimizer.ts      # TUI shell for /autoresearch-pipeline (Phase 1)
+├── extensions/brokkr/
+│   └── brokkr.ts         # TUI shell for /autoresearch-pipeline (Phase 1)
 ├── themes/
 │   └── snow.json         # Light-blue / white Pi theme for dark terminals
 └── lore/                 # Per-command guides

@@ -42,7 +42,7 @@ THEMES_SRC := BRUNNR_HOME / "themes"
     echo "Commands:"
     echo "  install              Initialize brunnr in current project (creates .pi/ subdirs)"
     echo "  eitri                Launch Pi with the eitri authoring extension (loaded on-demand from BRUNNR_HOME)"
-    echo "  optimize             Launch Pi with the brunnr-optimizer extension (skill picker + pipeline launcher)"
+    echo "  brokkr               Launch Pi with the Brokkr extension (skill picker + pipeline launcher)"
     echo "  add [-g] <section> <name>    Install item to project (.pi/) or globally with -g (~/.pi/agent/)"
     echo "  remove [-g] <section> <name> Uninstall item from project or globally with -g"
     echo "  push <section> <name> Push a new item to brunnr (opens a PR)"
@@ -124,15 +124,15 @@ eitri *args:
     [ -f "{{BRUNNR_HOME}}/themes/snow.json" ] && PI_ARGS+=(--theme "{{BRUNNR_HOME}}/themes/snow.json")
     exec pi "${PI_ARGS[@]}" -e "$EITRI_PATH" {{args}}
 
-# Launch Pi with the brunnr-optimizer extension — TUI shell for /autoresearch-pipeline.
-optimize *args:
+# Launch Pi with Brokkr — Eitri's brother in Norse myth, here a TUI shell for /autoresearch-pipeline.
+brokkr *args:
     #!/usr/bin/env bash
     set -euo pipefail
     cd "{{invocation_directory()}}"
 
-    OPT_PATH="{{BRUNNR_HOME}}/extensions/optimizer/optimizer.ts"
-    if [ ! -f "$OPT_PATH" ]; then
-        echo "Error: optimizer.ts not found at $OPT_PATH"
+    BROKKR_PATH="{{BRUNNR_HOME}}/extensions/brokkr/brokkr.ts"
+    if [ ! -f "$BROKKR_PATH" ]; then
+        echo "Error: brokkr.ts not found at $BROKKR_PATH"
         echo "  Check that BRUNNR_HOME points at your brunnr clone (currently: {{BRUNNR_HOME}})"
         exit 1
     fi
@@ -146,7 +146,7 @@ optimize *args:
     # commands being eaten by gates). Skills/prompts/agents still auto-discover,
     # so /autoresearch-pipeline and its sub-agents (installed via setup-optimizer)
     # remain available.
-    exec pi --no-extensions -e "$OPT_PATH" {{args}}
+    exec pi --no-extensions -e "$BROKKR_PATH" {{args}}
 
 # Add an item from brunnr to the current project (default) or globally with -g
 add *args:
@@ -1664,7 +1664,7 @@ check:
       # Orphan check — files on disk not referenced by library.yaml.
       # Built-in capabilities (eitri) live under extensions/ but are intentionally
       # not catalog items, so they're whitelisted here.
-      bundled_paths = ["extensions/eitri/", "extensions/optimizer/"]
+      bundled_paths = ["extensions/eitri/", "extensions/brokkr/"]
 
       on_disk = {
         "skills"     => Dir.glob("skills/*/SKILL.md"),
