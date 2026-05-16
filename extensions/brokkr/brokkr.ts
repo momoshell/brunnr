@@ -158,53 +158,173 @@ export default function (pi: ExtensionAPI) {
 
 	// Progress watcher state.
 	// After /optimize dispatches the pipeline, we poll the project's results.tsv
-	// (written by autoresearch-* agents) and update a setStatus line so the user
-	// sees stage / experiment / pass-rate without leaving the chat.
+	// (written by autoresearch-* agents) and render a bordered dashboard widget
+	// above the editor so the user sees stage / experiment / pass-rates / history
+	// without leaving the chat.
+	interface ProgressSnapshot {
+		skillName: string;
+		stage: string;                 // "stage1" | "gepa" | "compact" | ""
+		expCount: number;              // rows after header
+		latestExp: string;
+		latestTrain: string;
+		latestHoldout: string;
+		latestStatus: string;          // baseline | keep | discard | crash
+		baselineTrain?: number;
+		baselineHoldout?: number;
+		bestTrain?: number;
+		bestHoldout?: number;
+		history: string[];             // last 24 statuses (oldest first)
+	}
+
 	let progressTimer: NodeJS.Timeout | undefined;
-	let progressRepoRoot: string | undefined;
-	let progressLastMtime: number = 0;
-	let progressLastSize: number = 0;
+	let progressLastMtime = 0;
+	let progressLastSize  = 0;
+	let progressSnapshot: ProgressSnapshot | undefined;
 
 	function stopProgressWatcher(): void {
 		if (progressTimer) { clearInterval(progressTimer); progressTimer = undefined; }
-		progressRepoRoot = undefined;
-		try { widgetCtx?.ui?.setStatus?.("brokkr-progress", ""); } catch {}
+		progressSnapshot = undefined;
+		try { widgetCtx?.ui?.setWidget?.("brokkr-progress", undefined); } catch {}
 	}
 
-	function startProgressWatcher(ctx: ExtensionContext, repoRoot: string): void {
+	function renderProgressDashboard(snap: ProgressSnapshot | undefined, width: number, theme: any): string[] {
+		const inner = Math.max(width - 4, 30);
+		const horiz = "━".repeat(Math.max(width - 2, 0));
+		const accent = (s: string) => theme.bold(theme.fg("accent", s));
+		const v = accent("┃");
+		const top    = accent(`┏${horiz}┓`);
+		const bottom = accent(`┗${horiz}┛`);
+		const pad = (line: string) => {
+			const vis = visibleWidth(line);
+			return `${v} ${line}${" ".repeat(Math.max(0, inner - vis))} ${v}`;
+		};
+
+		if (!snap) {
+			return [top, pad(theme.fg("dim", "Brokkr · no run in progress")), bottom];
+		}
+
+		const lines: string[] = [top];
+		// Title row
+		const title = theme.bold(theme.fg("accent", "Brokkr")) + theme.fg("dim", " · ") + theme.fg("text", snap.skillName);
+		lines.push(pad(title));
+		lines.push(pad(""));
+
+		// Stage row
+		const stageLabel: Record<string, string> = {
+			stage1:  "Stage 1 · hill-climb",
+			gepa:    "Stage 2 · GEPA reflection",
+			compact: "Stage 3 · compaction",
+		};
+		const stageText = stageLabel[snap.stage] || (snap.stage || "Stage —");
+		lines.push(pad(theme.fg("warning", stageText) + theme.fg("dim", `   experiments: ${snap.expCount}`)));
+
+		// Latest row
+		const statusColor: Record<string, string> = {
+			keep:     "success",
+			baseline: "muted",
+			discard:  "muted",
+			crash:    "error",
+		};
+		const sColor = statusColor[snap.latestStatus] || "text";
+		const latestStatus = theme.fg(sColor, snap.latestStatus.padEnd(8));
+		const latestLine = `Latest: ${latestStatus}  train ${theme.fg("accent", snap.latestTrain + "%")}  holdout ${theme.fg("accent", snap.latestHoldout + "%")}`;
+		lines.push(pad(latestLine));
+
+		// Best row + delta
+		if (snap.bestTrain !== undefined && snap.bestHoldout !== undefined) {
+			const bestLine = `Best:             train ${theme.fg("success", snap.bestTrain.toFixed(1) + "%")}  holdout ${theme.fg("success", snap.bestHoldout.toFixed(1) + "%")}`;
+			lines.push(pad(bestLine));
+			if (snap.baselineTrain !== undefined && snap.baselineHoldout !== undefined) {
+				const dt = snap.bestTrain - snap.baselineTrain;
+				const dh = snap.bestHoldout - snap.baselineHoldout;
+				const fmt = (n: number) => {
+					const sign = n >= 0 ? "+" : "";
+					const color = n > 0 ? "success" : n < 0 ? "error" : "muted";
+					return theme.fg(color, `${sign}${n.toFixed(1)} pts`);
+				};
+				lines.push(pad(theme.fg("dim", "Δ vs baseline: ") + `train ${fmt(dt)}  ·  holdout ${fmt(dh)}`));
+			}
+		}
+
+		// History strip (last 24 statuses, K/D/X/B color-coded)
+		if (snap.history.length > 0) {
+			lines.push(pad(""));
+			const glyph: Record<string, string> = { keep: "K", baseline: "B", discard: "D", crash: "X" };
+			const colored = snap.history.slice(-24).map(s => {
+				const g = glyph[s] || "?";
+				const c = statusColor[s] || "text";
+				return theme.fg(c, g);
+			}).join(" ");
+			lines.push(pad(theme.fg("dim", "History: ") + colored));
+		}
+
+		lines.push(bottom);
+		return lines;
+	}
+
+	function parseTsvRows(tsv: string): { exp: string; trainRate: string; holdoutRate: string; status: string }[] {
+		const lines = tsv.trim().split("\n").filter(Boolean);
+		if (lines.length < 2) return [];
+		const rows = lines.slice(1).map(line => {
+			const cols = line.split("\t");
+			return {
+				exp:         cols[0] || "?",
+				trainRate:   cols[2] || "?",
+				holdoutRate: cols[3] || "?",
+				status:      (cols[6] || "?").toLowerCase(),
+			};
+		});
+		return rows;
+	}
+
+	function startProgressWatcher(ctx: ExtensionContext, repoRoot: string, skillName: string): void {
 		stopProgressWatcher();
-		progressRepoRoot = repoRoot;
 		progressLastMtime = 0;
-		progressLastSize = 0;
+		progressLastSize  = 0;
+		progressSnapshot  = undefined;
 
 		const tsvPath = join(repoRoot, "results.tsv");
 
+		// Register the widget once. Its factory reads progressSnapshot from closure
+		// scope, so re-rendering only requires invalidating the underlying TUI —
+		// which Pi does automatically when setWidget is called again. To trigger
+		// re-render on data change without resetting state, we re-register the
+		// widget with a fresh factory each update tick.
+		const renderWidget = () => {
+			ctx.ui.setWidget("brokkr-progress", (_tui: any, theme: any) => ({
+				dispose: () => {},
+				invalidate: () => {},
+				render: (width: number) => renderProgressDashboard(progressSnapshot, width, theme),
+			}));
+		};
+
 		const update = () => {
 			if (!existsSync(tsvPath)) {
-				try { ctx.ui.setStatus("brokkr-progress", "brokkr · waiting for first experiment…"); } catch {}
+				progressSnapshot = {
+					skillName,
+					stage: "",
+					expCount: 0,
+					latestExp: "—",
+					latestTrain: "—",
+					latestHoldout: "—",
+					latestStatus: "waiting",
+					history: [],
+				};
+				renderWidget();
 				return;
 			}
 			let st: ReturnType<typeof statSync>;
 			try { st = statSync(tsvPath); } catch { return; }
-			// Skip the read if file hasn't changed since last tick.
 			if (st.mtimeMs === progressLastMtime && st.size === progressLastSize) return;
 			progressLastMtime = st.mtimeMs;
 			progressLastSize  = st.size;
 
 			let content: string;
 			try { content = readFileSync(tsvPath, "utf-8"); } catch { return; }
-			const lines = content.trim().split("\n").filter(Boolean);
-			if (lines.length < 2) return;  // just the header
+			const rows = parseTsvRows(content);
+			if (rows.length === 0) return;
 
-			// TSV schema (per autoresearch-skill.md): experiment, commit, pass_rate_train,
-			// pass_rate_holdout, semantic_count, tokens, status, description
-			const last = lines[lines.length - 1].split("\t");
-			const exp        = last[0] || "?";
-			const trainRate  = last[2] || "?";
-			const holdoutRate = last[3] || "?";
-			const status     = last[6] || "?";
-
-			// Detect current stage from git branch.
+			// Stage detection
 			let stage = "";
 			try {
 				const branch = execSync(`git -C "${repoRoot}" branch --show-current`, { stdio: ["pipe", "pipe", "ignore"] })
@@ -212,15 +332,42 @@ export default function (pi: ExtensionAPI) {
 				const m = branch.match(/^autoresearch-(skill|skill-gepa|agent)\/.+-(stage1|gepa|compact)$/);
 				if (m) stage = m[2];
 				else if (branch.startsWith("autoresearch-")) stage = branch.split("/")[0].replace("autoresearch-", "");
-			} catch { /* no branch info, fine */ }
+			} catch { /* fine */ }
 
-			const expCount = lines.length - 1;  // excluding header
-			const stagePart = stage ? `${stage} · ` : "";
-			const line = `brokkr · ${stagePart}exp ${exp} (${expCount} total) · train ${trainRate}% · holdout ${holdoutRate}% · ${status}`;
-			try { ctx.ui.setStatus("brokkr-progress", line); } catch {}
+			// Baseline = first row(s) with status="baseline"; take the first one.
+			const baseline = rows.find(r => r.status === "baseline");
+			const baselineTrain   = baseline ? parseFloat(baseline.trainRate)   : undefined;
+			const baselineHoldout = baseline ? parseFloat(baseline.holdoutRate) : undefined;
+
+			// Best = max train + holdout across kept experiments (latest kept usually = best).
+			const kepts = rows.filter(r => r.status === "keep");
+			const bestTrain = kepts.length > 0
+				? Math.max(...kepts.map(r => parseFloat(r.trainRate)).filter(n => !isNaN(n)))
+				: baselineTrain;
+			const bestHoldout = kepts.length > 0
+				? Math.max(...kepts.map(r => parseFloat(r.holdoutRate)).filter(n => !isNaN(n)))
+				: baselineHoldout;
+
+			const latest = rows[rows.length - 1];
+
+			progressSnapshot = {
+				skillName,
+				stage,
+				expCount: rows.length,
+				latestExp: latest.exp,
+				latestTrain: latest.trainRate,
+				latestHoldout: latest.holdoutRate,
+				latestStatus: latest.status,
+				baselineTrain,
+				baselineHoldout,
+				bestTrain,
+				bestHoldout,
+				history: rows.map(r => r.status),
+			};
+			renderWidget();
 		};
 
-		update();  // render whatever's there now
+		update();  // render whatever's there now (probably nothing on a fresh kickoff)
 		progressTimer = setInterval(update, 2000);
 	}
 
@@ -425,7 +572,7 @@ export default function (pi: ExtensionAPI) {
 					return;
 				}
 				pi.sendUserMessage(`/autoresearch-pipeline\n  SKILL=${skill.name}\n  EPOCH_TAG=${picked}\n  Resume.`);
-				startProgressWatcher(ctx, repoRoot);
+				startProgressWatcher(ctx, repoRoot, skill.name);
 				return;
 			}
 
@@ -451,10 +598,10 @@ export default function (pi: ExtensionAPI) {
 					return;
 				}
 				pi.sendUserMessage(lines.join("\n"));
-				// Begin live status updates from the project's results.tsv. The pipeline
-				// hasn't written it yet — the watcher tolerates that and renders a
-				// "waiting" line until the first experiment lands.
-				startProgressWatcher(ctx, repoRoot);
+				// Begin live dashboard updates from the project's results.tsv. The
+				// pipeline hasn't written it yet — the watcher tolerates that and
+				// renders a "waiting" widget until the first experiment lands.
+				startProgressWatcher(ctx, repoRoot, skill.name);
 				return;
 			}
 		},
