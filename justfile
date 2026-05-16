@@ -142,16 +142,29 @@ brokkr *args:
         exit 1
     fi
 
-    # --no-extensions blocks project-level extensions (a common cause of slash
-    # commands being eaten by gates). Skills/prompts/agents still auto-discover,
-    # so /autoresearch-pipeline and its sub-agents (installed via setup-optimizer)
-    # remain available.
+    # Full isolation from the project's Pi state. Otherwise project-level kiosks /
+    # gates / system-prompt overrides (e.g. an `AGENTS.md` or `.pi/prompts/*.md`
+    # that declares "freeform chat disabled") will hijack the session before
+    # Brokkr can render. This mirrors eitri's recipe — both extensions need to
+    # stand on their own surface, not inherit project-specific behavior.
     #
+    # Disabled at the project level:                         Re-passed from globals:
+    #   --no-extensions   .pi/extensions/*.ts                  (extensions stay isolated;
+    #   --no-skills       .pi/skills/                          only the bundled brokkr
+    #   --no-prompt-templates .pi/prompts/                     extension loads via -e)
+    #   --no-themes       .pi/themes/                          --skill / --prompt-template
+    #   --no-context-files AGENTS.md / CLAUDE.md auto-load     / --theme on $PI_GLOBAL
+    #
+    # /autoresearch-pipeline and the autoresearch-* agents are installed globally
+    # via `brunnr setup-optimizer` so they survive the --no-* flags.
+    PI_GLOBAL="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
+    PI_ARGS=(--no-extensions --no-skills --no-prompt-templates --no-themes --no-context-files)
+    [ -d "$PI_GLOBAL/skills"  ] && PI_ARGS+=(--skill           "$PI_GLOBAL/skills")
+    [ -d "$PI_GLOBAL/prompts" ] && PI_ARGS+=(--prompt-template "$PI_GLOBAL/prompts")
+    [ -d "$PI_GLOBAL/themes"  ] && PI_ARGS+=(--theme           "$PI_GLOBAL/themes")
     # Bundled forge theme — made discoverable here, activated by brokkr.ts at
-    # session_start. Pi only *activates* a theme via settings.json's `theme:`
-    # key, so the extension calls setTheme programmatically and restores the
-    # user's previous theme on session_shutdown.
-    PI_ARGS=(--no-extensions)
+    # session_start (it calls setTheme programmatically and restores the user's
+    # previous theme on session_shutdown).
     [ -f "{{BRUNNR_HOME}}/themes/forge.json" ] && PI_ARGS+=(--theme "{{BRUNNR_HOME}}/themes/forge.json")
     exec pi "${PI_ARGS[@]}" -e "$BROKKR_PATH" {{args}}
 
