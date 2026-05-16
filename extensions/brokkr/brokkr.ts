@@ -24,8 +24,8 @@ import { getSelectListTheme } from "@mariozechner/pi-coding-agent";
 import type { Component } from "@mariozechner/pi-tui";
 import { SelectList, visibleWidth } from "@mariozechner/pi-tui";
 import { execSync } from "child_process";
-import { existsSync, readdirSync, readFileSync, statSync } from "fs";
-import { join } from "path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "fs";
+import { dirname, join } from "path";
 
 // ── Bordered overlay wrapper ─────────────────────────────────────────────
 // Same pattern as eitri's /experts-tune. SelectList is Component but NOT
@@ -581,8 +581,9 @@ export default function (pi: ExtensionAPI) {
 		_ctx.ui.setStatus("brokkr", "Brokkr");
 		_ctx.ui.notify(
 			"Brokkr loaded — the bellows keep the fire even.\n\n" +
-			"/optimize       Pick a skill, run gen-evals or the pipeline\n" +
-			"/optimize-stop  Abort the running pipeline cleanly (resume later)\n",
+			"/optimize         Pick a skill, run gen-evals or the pipeline\n" +
+			"/optimize-config  Tune model + thinking per optimizer agent\n" +
+			"/optimize-stop    Abort the running pipeline cleanly (resume later)\n",
 			"info",
 		);
 	});
@@ -646,6 +647,253 @@ export default function (pi: ExtensionAPI) {
 			maxRuntime:     maxRun || undefined,
 		};
 	}
+
+	// ── Per-agent model/thinking overrides (Phase 4) ──────────────────────────
+	// Tunes the optimizer agents' own runtime: which model is running the
+	// autoresearch-skill / autoresearch-skill-gepa / autoresearch-agent /
+	// eval-designer brains, and at what thinking level.
+	//
+	// Mechanism: Pi's Task tool reads each sub-agent's frontmatter (`model:`,
+	// `thinking:`) at dispatch time, so the override has to live in the
+	// frontmatter of the globally-installed agent file at ~/.pi/agent/agents/.
+	// Brokkr also records picks in <project>/.pi/brokkr-overrides.json so
+	// nothing is lost when `brunnr remove-optimizer && brunnr setup-optimizer`
+	// re-copies fresh frontmatter from $BRUNNR_HOME (user re-applies via
+	// /optimize-config). The JSON record is the source-of-truth intent; the
+	// frontmatter is the in-effect state.
+
+	const OPTIMIZER_AGENTS = [
+		"autoresearch-skill",
+		"autoresearch-skill-gepa",
+		"autoresearch-agent",
+		"eval-designer",
+		"eval-designer-agent",
+	];
+
+	const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"];
+
+	interface OptimizerOverride {
+		model?: string;
+		thinking?: string;
+	}
+
+	interface BrokkrOverridesFile {
+		agents?: Record<string, OptimizerOverride>;
+	}
+
+	function piAgentDir(): string {
+		return process.env.PI_CODING_AGENT_DIR
+			? join(process.env.PI_CODING_AGENT_DIR, "agents")
+			: join(process.env.HOME || "", ".pi/agent/agents");
+	}
+
+	function optimizerAgentPath(name: string): string {
+		return join(piAgentDir(), `${name}.md`);
+	}
+
+	function brokkrOverridesPath(): string {
+		return join(process.cwd(), ".pi", "brokkr-overrides.json");
+	}
+
+	function loadBrokkrOverrides(): BrokkrOverridesFile {
+		const p = brokkrOverridesPath();
+		if (!existsSync(p)) return {};
+		try {
+			const parsed = JSON.parse(readFileSync(p, "utf-8"));
+			return (parsed && typeof parsed === "object") ? parsed : {};
+		} catch { return {}; }
+	}
+
+	function saveBrokkrOverrides(o: BrokkrOverridesFile): void {
+		const p = brokkrOverridesPath();
+		try {
+			mkdirSync(dirname(p), { recursive: true });
+			writeFileSync(p, JSON.stringify(o, null, 2) + "\n");
+		} catch { /* don't block */ }
+	}
+
+	// Read a single line scalar field from the frontmatter block (everything
+	// between the first two `---` lines). Returns undefined if not present.
+	function readAgentField(filePath: string, field: string): string | undefined {
+		if (!existsSync(filePath)) return undefined;
+		const content = readFileSync(filePath, "utf-8");
+		const m = content.match(/^---\n([\s\S]*?)\n---/);
+		if (!m) return undefined;
+		const lineMatch = m[1].match(new RegExp(`^${field}:\\s*(.+)$`, "m"));
+		if (!lineMatch) return undefined;
+		return lineMatch[1].trim().replace(/^["']|["']$/g, "");
+	}
+
+	function readAgentOverride(name: string): OptimizerOverride {
+		const p = optimizerAgentPath(name);
+		return {
+			model:    readAgentField(p, "model"),
+			thinking: readAgentField(p, "thinking"),
+		};
+	}
+
+	// Replace the frontmatter's `model:` / `thinking:` lines with the override
+	// values. Removes the line entirely if the value is undefined/empty. Inserts
+	// after the `name:` line if not previously present.
+	function applyAgentFrontmatter(name: string, override: OptimizerOverride): boolean {
+		const filePath = optimizerAgentPath(name);
+		if (!existsSync(filePath)) return false;
+		const content = readFileSync(filePath, "utf-8");
+		const fmMatch = content.match(/^(---\n)([\s\S]*?)(\n---)/);
+		if (!fmMatch) return false;
+
+		let fm = fmMatch[2];
+
+		const setField = (block: string, field: string, value: string | undefined): string => {
+			const re = new RegExp(`^${field}:\\s*.+$\\n?`, "m");
+			if (!value) return block.replace(re, "");
+			if (re.test(block)) return block.replace(re, `${field}: ${value}\n`);
+			// Insert after `name:` line if present, else at top of frontmatter
+			if (/^name:.+$/m.test(block)) {
+				return block.replace(/^(name:.+)$/m, `$1\n${field}: ${value}`);
+			}
+			return `${field}: ${value}\n${block}`;
+		};
+
+		fm = setField(fm, "model",    override.model);
+		fm = setField(fm, "thinking", override.thinking);
+		fm = fm.replace(/\n{3,}/g, "\n\n").replace(/\n+$/, "");
+
+		const newContent = fmMatch[1] + fm + fmMatch[3] + content.slice(fmMatch[0].length);
+		writeFileSync(filePath, newContent);
+		return true;
+	}
+
+	pi.registerCommand("optimize-config", {
+		description: "Set per-agent model + thinking for the optimizer agents (autoresearch-*, eval-designer-*)",
+		handler: async (_args, ctx) => {
+			if (!ctx.hasUI) {
+				ctx.ui.notify("This command needs an interactive UI", "warning");
+				return;
+			}
+
+			// Outer loop: tune as many agents as you want in one /optimize-config call.
+			// Esc on the top picker exits.
+			while (true) {
+				// Build agent items showing CURRENT applied state (read from frontmatter).
+				const agentItems = OPTIMIZER_AGENTS.map(name => {
+					const cur = readAgentOverride(name);
+					const exists = existsSync(optimizerAgentPath(name));
+					if (!exists) {
+						return {
+							value: name,
+							label: name + theme(ctx, "  (not installed — run `brunnr setup-optimizer`)", "warning"),
+							description: "n/a",
+						};
+					}
+					const bits: string[] = [];
+					bits.push(`model=${cur.model || "default"}`);
+					bits.push(`thinking=${cur.thinking || "default"}`);
+					return {
+						value: name,
+						label: name + (cur.model || cur.thinking ? "  *" : ""),
+						description: bits.join("  ·  "),
+					};
+				});
+				agentItems.push({
+					value: "__reset_all__",
+					label: "Reset ALL to defaults",
+					description: "Clear model/thinking on every optimizer agent",
+				});
+
+				const picked = await pickFromList(ctx, agentItems);
+				if (!picked) return;
+
+				if (picked === "__reset_all__") {
+					const confirm = await pickFromList(ctx, [
+						{ value: "yes", label: "Yes, reset every optimizer agent" },
+						{ value: "no",  label: "Cancel" },
+					]);
+					if (confirm !== "yes") continue;
+					for (const n of OPTIMIZER_AGENTS) applyAgentFrontmatter(n, {});
+					saveBrokkrOverrides({});
+					ctx.ui.notify("All optimizer overrides cleared. Frontmatter restored to ship defaults.", "info");
+					continue;
+				}
+
+				if (!existsSync(optimizerAgentPath(picked))) {
+					ctx.ui.notify(`${picked} isn't installed at ${optimizerAgentPath(picked)}. Run \`brunnr setup-optimizer\` first.`, "warning");
+					continue;
+				}
+
+				const current = readAgentOverride(picked);
+
+				const action = await pickFromList(ctx, [
+					{ value: "model",    label: "Set model",          description: current.model    ? `currently: ${current.model}`    : "currently: default (inherits parent session)" },
+					{ value: "thinking", label: "Set thinking level", description: current.thinking ? `currently: ${current.thinking}` : "currently: default" },
+					{ value: "reset",    label: "Reset this agent",   description: "Remove both overrides" },
+				]);
+				if (!action) continue;
+
+				if (action === "reset") {
+					applyAgentFrontmatter(picked, {});
+					const overrides = loadBrokkrOverrides();
+					if (overrides.agents) delete overrides.agents[picked];
+					saveBrokkrOverrides(overrides);
+					ctx.ui.notify(`${picked}: overrides cleared`, "info");
+					continue;
+				}
+
+				if (action === "model") {
+					const available = ctx.modelRegistry.getAvailable();
+					if (available.length === 0) {
+						ctx.ui.notify("No models with configured auth. Set an API key or `gh auth login` first.", "warning");
+						continue;
+					}
+					const modelItems = available.map((m: any) => ({
+						value: `${m.provider?.id ?? m.provider}/${m.id}`,
+						label: m.name || m.id,
+						description: `${m.provider?.id ?? m.provider}/${m.id}${m.reasoning ? "  · reasoning" : ""}`,
+					}));
+					const pickedModel = await pickFromList(ctx, modelItems, current.model);
+					if (!pickedModel) continue;
+
+					const next: OptimizerOverride = { ...current, model: pickedModel };
+					if (!applyAgentFrontmatter(picked, next)) {
+						ctx.ui.notify(`Failed to write ${optimizerAgentPath(picked)}`, "error");
+						continue;
+					}
+					const overrides = loadBrokkrOverrides();
+					overrides.agents = overrides.agents || {};
+					overrides.agents[picked] = next;
+					saveBrokkrOverrides(overrides);
+					ctx.ui.notify(`${picked}: model → ${pickedModel}`, "info");
+					continue;
+				}
+
+				if (action === "thinking") {
+					const pickedLevel = await pickFromList(ctx,
+						THINKING_LEVELS.map(l => ({ value: l, label: l })),
+						current.thinking,
+					);
+					if (!pickedLevel) continue;
+
+					const next: OptimizerOverride = { ...current, thinking: pickedLevel };
+					if (!applyAgentFrontmatter(picked, next)) {
+						ctx.ui.notify(`Failed to write ${optimizerAgentPath(picked)}`, "error");
+						continue;
+					}
+					const overrides = loadBrokkrOverrides();
+					overrides.agents = overrides.agents || {};
+					overrides.agents[picked] = next;
+					saveBrokkrOverrides(overrides);
+					ctx.ui.notify(`${picked}: thinking → ${pickedLevel}`, "info");
+					continue;
+				}
+			}
+		},
+	});
+
+	// Tiny helper so the agentItems builder above can splice colored snippets
+	// into label strings without dragging the SelectList theme into scope.
+	// (SelectList itself does most of the colorization via its theme; this is
+	// only for inline annotations like "(not installed)".)
+	function theme(_ctx: ExtensionContext, text: string, _token: string): string { return text; }
 
 	pi.registerCommand("optimize-stop", {
 		description: "Abort the running optimization pipeline cleanly. Resume later with /optimize → Resume.",
