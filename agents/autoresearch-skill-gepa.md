@@ -112,7 +112,9 @@ Identical to `autoresearch-skill`. See that agent for the schema. This agent doe
 
 ## Running an eval
 
-Identical to `autoresearch-skill` (spawn subagent with skill loaded → feed prompt + files → capture output → check assertions → repeat `RUNS` times). The difference is what you do with the *output*: store the full text of every failing run for later reflection.
+The eval-execution protocol is **identical to `autoresearch-skill`** — see its "Running an eval" section for the exact `pi -p "$EVAL_PROMPT" --skill "$SKILL_PATH" --no-* --mode json --print` shell invocation, the deterministic-check shell patterns, and the haiku-class semantic-judge re-spawn. Do not approximate any of this; spawn pi for real.
+
+GEPA's *only* difference from the base protocol: store the full text of every failing run for later reflection. Don't discard outputs after assertion-checking — save them to `results/failures/cand-<id>/eval-<eval_id>-run-<r>.txt` (see below).
 
 For each experiment, after running all train evals, write a `failure-log` entry **keyed by candidate id, not experiment number** — this is essential because the next experiment will look up its parent's failures by candidate id, and `git reset --hard` on a discard does not delete untracked dirs, so an `exp-<N>`-keyed scheme would leak stale traces from discarded siblings:
 

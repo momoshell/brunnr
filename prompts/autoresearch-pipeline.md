@@ -207,19 +207,41 @@ Stage 3 only ends; it never advances. There is no stage 4.
 
 Once the pipeline ends (whichever stage it ended in):
 
-1. **Report the trajectory** across all stages:
-   ```
-   Pipeline summary for <SKILL> [epoch <EPOCH_TAG>]
+1. **Produce the pipeline summary report.** Use the per-stage `results.tsv` files (read each stage's branch's TSV via `git show <branch>:results.tsv`) plus the per-stage `evals.json` history entries. Do **not** approximate — compute these from the actual data.
 
-   Stage 1 (autoresearch-skill):    <experiments>, baseline X% → Y%
-   Stage 2 (autoresearch-skill-gepa): <experiments>, Y% → Z%
-   Stage 3 (compaction):            <experiments>, Z% pass rate held, lines W → V
-
-   Final winner: <branch>@<commit>
-   Train pass rate:    <final>%
-   Holdout pass rate:  <final>%
-   Token cost change:  <±N%>
    ```
+   ╭─ Pipeline summary — <SKILL> · epoch <EPOCH_TAG> ────────────────────╮
+   │  Stage 1 (hill-climb):  <exp> exp · <baseline>% → <s1_best>% train  │
+   │                                       · <s1_holdout>% holdout        │
+   │  Stage 2 (GEPA):        <exp> exp · <s1_best>% → <s2_best>% train   │
+   │                                       · <s2_holdout>% holdout        │
+   │  Stage 3 (compaction):  <exp> exp · <s2_best>% held · lines <a>→<b> │
+   │                                                                      │
+   │  Overall:                                                            │
+   │    Baseline →  Final:   <baseline>% →  <final>% train                │
+   │                          <b_hold>%  →  <f_hold>%  holdout            │
+   │    Improvement:         +<Δ_train> pts train (+<rel>% relative)      │
+   │                         +<Δ_holdout> pts holdout                     │
+   │    Total experiments:   <sum across stages>                          │
+   │    Total elapsed:       <wall_clock_sum>                             │
+   │    Token cost change:   <±N%> (vs baseline; from results.tsv tokens) │
+   │                                                                      │
+   │  Final winner:          <branch>@<short-sha>                         │
+   │  Stop reason:           <reason for terminal stage>                  │
+   ╰──────────────────────────────────────────────────────────────────────╯
+   ```
+
+   Then **trend diagnosis + next-run suggestion** — analyze the trajectory:
+
+   | Pattern | Diagnosis | "Next run" suggestion |
+   |---|---|---|
+   | All three stages improved | Pipeline working as designed | "Re-invoke for a fresh epoch if you can broaden the eval suite. Same evals → overfitting." |
+   | Stage 1 improved, stage 2 didn't | Hill-climb capped; reflection didn't help either | "Plateau is structural. Improve eval suite (add diverse cases) or decompose the skill before running again." |
+   | Stage 1 modest, stage 2 big jump | Reflection was the key | "GEPA paid off. Pipeline well-suited; re-invoke after evolving the eval suite." |
+   | Improvement < 5 pts overall | Marginal gain | "Skill may already be near-optimal for this eval suite. Add harder cases or accept the result." |
+   | Holdout < train by ≥10 pts | Overfitting | "**Don't re-run on this suite.** Add diverse holdout cases, rotate split assignment." |
+   | Pipeline stopped via budget cap (`MAX_*`) | Cut short | "Trend was still rising. Re-invoke with `Resume.` and a larger budget — at this slope, ~<estimate> more experiments may push another <est> pts." |
+   | Stage 3 compaction shrank the skill ≥30% | Big compression win | "Skill was bloated. Consider running compaction-only (`/autoresearch-skill SKILL_PATH=... RUN_TAG=compact-pass run in delete-only mode`) on future skills earlier." |
 
 2. **Append epoch summary to `evals.json` history**. Each stage's agent already wrote its own entry (`run_tag` = `<EPOCH_TAG>-stage1` / `-gepa` / `-compact`). Now append one additional pipeline-level entry:
    ```json

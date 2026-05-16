@@ -24,7 +24,7 @@ import { getSelectListTheme } from "@mariozechner/pi-coding-agent";
 import type { Component } from "@mariozechner/pi-tui";
 import { SelectList, visibleWidth } from "@mariozechner/pi-tui";
 import { execSync } from "child_process";
-import { existsSync, readdirSync } from "fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "fs";
 import { join } from "path";
 
 // ── Bordered overlay wrapper ─────────────────────────────────────────────
@@ -156,6 +156,74 @@ export default function (pi: ExtensionAPI) {
 	// Restored in session_shutdown. Undefined if the switch didn't happen.
 	let previousThemeName: string | undefined;
 
+	// Progress watcher state.
+	// After /optimize dispatches the pipeline, we poll the project's results.tsv
+	// (written by autoresearch-* agents) and update a setStatus line so the user
+	// sees stage / experiment / pass-rate without leaving the chat.
+	let progressTimer: NodeJS.Timeout | undefined;
+	let progressRepoRoot: string | undefined;
+	let progressLastMtime: number = 0;
+	let progressLastSize: number = 0;
+
+	function stopProgressWatcher(): void {
+		if (progressTimer) { clearInterval(progressTimer); progressTimer = undefined; }
+		progressRepoRoot = undefined;
+		try { widgetCtx?.ui?.setStatus?.("brokkr-progress", ""); } catch {}
+	}
+
+	function startProgressWatcher(ctx: ExtensionContext, repoRoot: string): void {
+		stopProgressWatcher();
+		progressRepoRoot = repoRoot;
+		progressLastMtime = 0;
+		progressLastSize = 0;
+
+		const tsvPath = join(repoRoot, "results.tsv");
+
+		const update = () => {
+			if (!existsSync(tsvPath)) {
+				try { ctx.ui.setStatus("brokkr-progress", "brokkr · waiting for first experiment…"); } catch {}
+				return;
+			}
+			let st: ReturnType<typeof statSync>;
+			try { st = statSync(tsvPath); } catch { return; }
+			// Skip the read if file hasn't changed since last tick.
+			if (st.mtimeMs === progressLastMtime && st.size === progressLastSize) return;
+			progressLastMtime = st.mtimeMs;
+			progressLastSize  = st.size;
+
+			let content: string;
+			try { content = readFileSync(tsvPath, "utf-8"); } catch { return; }
+			const lines = content.trim().split("\n").filter(Boolean);
+			if (lines.length < 2) return;  // just the header
+
+			// TSV schema (per autoresearch-skill.md): experiment, commit, pass_rate_train,
+			// pass_rate_holdout, semantic_count, tokens, status, description
+			const last = lines[lines.length - 1].split("\t");
+			const exp        = last[0] || "?";
+			const trainRate  = last[2] || "?";
+			const holdoutRate = last[3] || "?";
+			const status     = last[6] || "?";
+
+			// Detect current stage from git branch.
+			let stage = "";
+			try {
+				const branch = execSync(`git -C "${repoRoot}" branch --show-current`, { stdio: ["pipe", "pipe", "ignore"] })
+					.toString().trim();
+				const m = branch.match(/^autoresearch-(skill|skill-gepa|agent)\/.+-(stage1|gepa|compact)$/);
+				if (m) stage = m[2];
+				else if (branch.startsWith("autoresearch-")) stage = branch.split("/")[0].replace("autoresearch-", "");
+			} catch { /* no branch info, fine */ }
+
+			const expCount = lines.length - 1;  // excluding header
+			const stagePart = stage ? `${stage} · ` : "";
+			const line = `brokkr · ${stagePart}exp ${exp} (${expCount} total) · train ${trainRate}% · holdout ${holdoutRate}% · ${status}`;
+			try { ctx.ui.setStatus("brokkr-progress", line); } catch {}
+		};
+
+		update();  // render whatever's there now
+		progressTimer = setInterval(update, 2000);
+	}
+
 	pi.on("session_start", async (_event, _ctx) => {
 		widgetCtx = _ctx;
 
@@ -187,6 +255,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("session_shutdown", async () => {
+		stopProgressWatcher();
 		if (previousThemeName) {
 			try { (widgetCtx?.ui as any)?.setTheme?.(previousThemeName); } catch {}
 			previousThemeName = undefined;
@@ -356,6 +425,7 @@ export default function (pi: ExtensionAPI) {
 					return;
 				}
 				pi.sendUserMessage(`/autoresearch-pipeline\n  SKILL=${skill.name}\n  EPOCH_TAG=${picked}\n  Resume.`);
+				startProgressWatcher(ctx, repoRoot);
 				return;
 			}
 
@@ -381,6 +451,10 @@ export default function (pi: ExtensionAPI) {
 					return;
 				}
 				pi.sendUserMessage(lines.join("\n"));
+				// Begin live status updates from the project's results.tsv. The pipeline
+				// hasn't written it yet — the watcher tolerates that and renders a
+				// "waiting" line until the first experiment lands.
+				startProgressWatcher(ctx, repoRoot);
 				return;
 			}
 		},

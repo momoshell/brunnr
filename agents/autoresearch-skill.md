@@ -115,16 +115,56 @@ If the eval file has no `split` field on evals, assign 70% train / 30% holdout r
 
 ## Running an eval
 
-For each eval case in the suite:
+For each eval case in the suite, execute the **current** version of `SKILL_PATH` against the eval's prompt and capture the output. Use `Bash` to spawn a fresh `pi` subprocess — this is the *only* supported eval mechanism. Do **not** try to "statically reason" about whether assertions would pass; that produces zero signal and ruins the optimization.
 
-1. **Spawn a subagent** with the skill loaded (the current version of `SKILL_PATH`).
-2. **Feed it the eval prompt** and any `files` specified.
-3. **Capture the full output.**
-4. **Check each assertion:**
-   - `deterministic`: case-insensitive string/regex match against the output. Pass = match found. Fail = no match.
-   - `semantic`: ask a haiku-class model: *"Given this output: [output]. Does it satisfy this assertion: [check]? Answer only YES or NO."* Pass = YES. Fail = NO.
-5. **Record** pass/fail for each assertion.
-6. **Repeat `RUNS` times** and average the pass rate for stability.
+### 1. Spawn pi with the skill loaded
+
+```bash
+# Per-eval execution. $EVAL_PROMPT is the case's `prompt` field.
+# $FILE_ATTACHMENTS is a space-separated list of `@path` tokens for each entry
+# in the case's `files` field (e.g. "@evals/fixtures/case1/input.svg").
+pi -p "$EVAL_PROMPT $FILE_ATTACHMENTS" \
+   --skill "$SKILL_PATH" \
+   --no-extensions --no-skills --no-prompt-templates --no-themes \
+   --no-session \
+   --mode json \
+   --print
+```
+
+Flag meanings:
+- `--skill <path>` — explicitly loads the skill being optimized. Combined with `--no-skills` (which disables discovery), only this one skill is in the prompt; nothing else from the user's `~/.pi/agent/skills/` interferes.
+- `--no-extensions / --no-prompt-templates / --no-themes` — isolate further. The eval run sees a clean Pi.
+- `--no-session` — ephemeral; no chat log saved.
+- `--mode json --print` — single-shot, JSON-shaped output you can parse.
+
+If `pi` exits non-zero, record the eval as a **crash** (not a fail) and surface to the experiment-loop's crash counter. Three consecutive crashes triggers an undiagnosable-crash stop.
+
+### 2. Check each assertion against the captured output
+
+For each `assertion` on the eval:
+
+- **`type: deterministic`** — shell-evaluate the `check` field against the output. Examples:
+  - `output contains 'viewBox='` → `grep -q 'viewBox=' <<< "$OUTPUT"`
+  - `output starts with '<svg'` → `[[ "$OUTPUT" == "<svg"* ]]`
+  - `distinct fill colors count <= 6` → `grep -oE 'fill="[^"]*"' <<< "$OUTPUT" | sort -u | wc -l` then numeric comparison
+  - `output is valid XML` → `xmllint --noout <<< "$OUTPUT"` exit code 0
+  - You may need short inline scripts; that's fine. Just don't write to disk or modify state.
+- **`type: semantic`** — re-spawn pi with a cheap judging model:
+  ```bash
+  pi -p "Given this output:\n$OUTPUT\n\nDoes it satisfy this assertion: $CHECK\nAnswer with exactly one word: YES or NO." \
+     --model anthropic/claude-haiku-4-5 \
+     --thinking off \
+     --no-extensions --no-skills --no-prompt-templates --no-themes \
+     --no-session \
+     --print
+  ```
+  Pass = response matches `/^\s*YES\b/i`. Anything else = fail. (Be strict — "Yes, but…" is a fail, since the judge is hedging.)
+
+### 3. Record and repeat
+
+Record pass/fail for each assertion. Repeat the whole eval `RUNS` times — this catches LLM nondeterminism. Average the per-assertion pass rates across runs.
+
+**Do not skip any of these steps.** If you find yourself wanting to "estimate" or "reason about" pass rates without running the commands above, **stop and tell the user the optimizer cannot proceed without measurement**. Don't fabricate metrics.
 
 **Persist per-eval data.** After each experiment, write `results/per-eval/exp-<N>.json` with the per-eval, per-run, per-assertion results. **Include each assertion's `check` text** — the single-cluster pattern diagnosis (below) groups failures by assertion theme, which requires the text, not just the id:
 
@@ -346,13 +386,48 @@ The `method` field distinguishes hill-climb runs (`autoresearch`) from GEPA runs
 
 This is the permanent record. The `/skill-status` prompt reads these to determine which skills are stale or need attention.
 
-### 2. Advise on next steps
+### 2. Produce the improvement report
+
+Compute and display a summary block. **Do not** simply say "improvements were made" — produce concrete numbers from `results.tsv`.
+
+```
+╭─ Optimization summary ──────────────────────────────────────────╮
+│  Skill:        <SKILL>                                          │
+│  Branch:       autoresearch-skill/<RUN_TAG>                     │
+│  Repo:         <experiment repo root>                           │
+│                                                                 │
+│  Baseline:     <baseline_train>% train · <baseline_holdout>% holdout │
+│  Final best:   <best_train>% train · <best_holdout>% holdout    │
+│  Improvement:  +<Δ_train> pts train · +<Δ_holdout> pts holdout  │
+│                (relative: +<rel>% train)                        │
+│                                                                 │
+│  Experiments:  <total> total · <kept> kept · <discard> discard · <crash> crash  │
+│  Kept rate:    <kept/total>%                                    │
+│  Elapsed:      <wall_clock>                                     │
+│  Stopped via:  <stop_reason: target-hit | plateau | MAX_EXPERIMENTS | MAX_RUNTIME | user-stop | saturation> │
+╰─────────────────────────────────────────────────────────────────╯
+```
+
+Then **trend diagnosis** — look at the last 10 kept experiments' pass-rate trajectory:
+
+| Pattern in last 10 kept | Diagnosis | "Next run" suggestion |
+|---|---|---|
+| Pass rate rising steadily, no flattening | Still climbing | "Trend still rising at experiment N. Re-invoke with `Resume.` and a higher `MAX_EXPERIMENTS` — at this slope, ~N×1.5 experiments may push another <est_delta> pts." |
+| Slope flat for last 5+ kept experiments | Plateaued cleanly | "Plateaued at <best>%. See plateau diagnosis above — likely fix is improving the eval suite, not more compute. Run `/gen-evals` to draft additions, then start a fresh epoch." |
+| Train rising, holdout flat or falling | Overfitting | "Overfit risk: train +X, holdout +Y. **Do not run again on this suite.** Add diverse holdout cases; rotate train/holdout assignment." |
+| Reached `TARGET_PASS_RATE` | Target hit | "Hit target on experiment N. If you want to push further, re-invoke with `TARGET_PASS_RATE=98` (or higher) and `Resume.`." |
+| Hit `MAX_EXPERIMENTS` / `MAX_RUNTIME` while trend was climbing | Budget cut climb short | "Budget cap stopped a still-climbing run. Re-invoke with `Resume.` and a larger cap to continue." |
+
+Use the actual numbers from `results.tsv`; don't fabricate. If `results.tsv` has fewer than 5 kept rows, skip the trend diagnosis and say "Too few kept experiments for trend analysis — likely the skill is too brittle or evals are too strict."
+
+### 3. Practical next-step block
 
 Tell the user:
 - The branch name containing the improved skill
 - The repo it lives in (the one resolved at setup step 1)
-- How to review: `git log autoresearch-skill/<RUN_TAG>` and `results.tsv`
+- How to review: `git log autoresearch-skill/<RUN_TAG>` and `cat results.tsv`
 - How to merge: `git merge autoresearch-skill/<RUN_TAG>` (if satisfied)
+- How to discard: `git branch -D autoresearch-skill/<RUN_TAG>` (if the report says don't bother)
 - If the skill is in brunnr's catalog, suggest `/skill-status` to see where it ranks
 
 ### 3. (Optional) Share to brunnr's catalog
