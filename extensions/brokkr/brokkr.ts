@@ -176,7 +176,21 @@ export default function (pi: ExtensionAPI) {
 		history: string[];             // last 24 statuses (oldest first)
 		trainSeries: number[];         // all parseable train rates, oldest first
 		holdoutSeries: number[];       // ditto for holdout
+		// Phase 2 additions
+		totalTokens: number;           // summed from `tokens` column
+		costEstimate: number;          // totalTokens × $/M
+		elapsedSec: number;            // seconds since watcher started
+		etaSec?: number;               // estimated remaining seconds (only if cap is known)
+		maxExperiments?: number;       // from dispatch kickoff, if user set it
+		consecutiveDiscards: number;   // for plateau preview
+		stopped: boolean;              // detected end of run (no changes for >= STOPPED_THRESHOLD_MS)
 	}
+
+	// Blended token rate — sonnet-ish ballpark. Users with different model mixes
+	// can override via env. Single rate is intentional: results.tsv has one
+	// `tokens` column (combined), not separated input/output.
+	const DEFAULT_TOKEN_RATE_PER_MILLION = parseFloat(process.env.BROKKR_TOKEN_RATE || "5");
+	const STOPPED_THRESHOLD_MS = 90_000;  // 90s of no results.tsv changes = pipeline done
 
 	const SPARK_CHARS = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
 
@@ -190,6 +204,21 @@ export default function (pi: ExtensionAPI) {
 			const idx = Math.min(SPARK_CHARS.length - 1, Math.floor((clamped / 100) * SPARK_CHARS.length));
 			return SPARK_CHARS[idx];
 		}).join("");
+	}
+
+	function formatDuration(sec: number): string {
+		if (!isFinite(sec) || sec < 0) return "—";
+		if (sec < 60) return `${Math.round(sec)}s`;
+		const m = Math.floor(sec / 60);
+		if (m < 60) return `${m}m`;
+		const h = Math.floor(m / 60);
+		return `${h}h ${m % 60}m`;
+	}
+
+	function formatTokens(n: number): string {
+		if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+		if (n >= 1_000)     return `${(n / 1_000).toFixed(1)}k`;
+		return `${n}`;
 	}
 
 	// Trend arrow comparing the last ~5 values against the preceding ~5.
@@ -299,6 +328,25 @@ export default function (pi: ExtensionAPI) {
 			if (holdoutLine) lines.push(pad(holdoutLine));
 		}
 
+		// Cost + ETA row
+		if (snap.totalTokens > 0 || snap.elapsedSec > 0) {
+			lines.push(pad(""));
+			const tokensStr = formatTokens(snap.totalTokens);
+			const costStr   = `$${snap.costEstimate.toFixed(2)}`;
+			const elapsedStr = formatDuration(snap.elapsedSec);
+			const etaPart = snap.etaSec !== undefined
+				? `   ETA ${theme.fg("warning", formatDuration(snap.etaSec))}${snap.maxExperiments ? theme.fg("dim", `  (${snap.expCount}/${snap.maxExperiments} exp)`) : ""}`
+				: "";
+			const costLine = `${theme.fg("dim", "Cost ")}${theme.fg("text", tokensStr.padStart(6) + " tokens · ")}${theme.fg("accent", costStr)}${theme.fg("dim", "    Elapsed ")}${theme.fg("text", elapsedStr)}${etaPart}`;
+			lines.push(pad(costLine));
+		}
+
+		// Plateau watch — only shows if we're climbing the discard streak
+		if (snap.consecutiveDiscards >= 3) {
+			const plateauColor = snap.consecutiveDiscards >= 7 ? "warning" : "muted";
+			lines.push(pad(theme.fg(plateauColor, `Plateau watch: ${snap.consecutiveDiscards}/10 consecutive non-kept experiments`)));
+		}
+
 		// History strip (last 24 statuses, K/D/X/B color-coded)
 		if (snap.history.length > 0) {
 			lines.push(pad(""));
@@ -311,30 +359,46 @@ export default function (pi: ExtensionAPI) {
 			lines.push(pad(theme.fg("dim", "History: ") + colored));
 		}
 
+		// Stopped banner
+		if (snap.stopped) {
+			lines.push(pad(""));
+			lines.push(pad(theme.bold(theme.fg("success", "✓ Pipeline finished — see chat for summary"))));
+		}
+
 		lines.push(bottom);
 		return lines;
 	}
 
-	function parseTsvRows(tsv: string): { exp: string; trainRate: string; holdoutRate: string; status: string }[] {
+	function parseTsvRows(tsv: string): { exp: string; trainRate: string; holdoutRate: string; tokens: number; status: string }[] {
 		const lines = tsv.trim().split("\n").filter(Boolean);
 		if (lines.length < 2) return [];
 		const rows = lines.slice(1).map(line => {
 			const cols = line.split("\t");
+			const tokens = parseInt(cols[5] || "0", 10);
 			return {
 				exp:         cols[0] || "?",
 				trainRate:   cols[2] || "?",
 				holdoutRate: cols[3] || "?",
+				tokens:      isFinite(tokens) ? tokens : 0,
 				status:      (cols[6] || "?").toLowerCase(),
 			};
 		});
 		return rows;
 	}
 
-	function startProgressWatcher(ctx: ExtensionContext, repoRoot: string, skillName: string): void {
+	function startProgressWatcher(
+		ctx: ExtensionContext,
+		repoRoot: string,
+		skillName: string,
+		maxExperiments?: number,
+	): void {
 		stopProgressWatcher();
 		progressLastMtime = 0;
 		progressLastSize  = 0;
 		progressSnapshot  = undefined;
+
+		const startEpochMs = Date.now();
+		let stoppedAnnounced = false;
 
 		const tsvPath = join(repoRoot, "results.tsv");
 
@@ -364,13 +428,35 @@ export default function (pi: ExtensionAPI) {
 					history: [],
 					trainSeries: [],
 					holdoutSeries: [],
+					totalTokens: 0,
+					costEstimate: 0,
+					elapsedSec: (Date.now() - startEpochMs) / 1000,
+					maxExperiments,
+					consecutiveDiscards: 0,
+					stopped: false,
 				};
 				renderWidget();
 				return;
 			}
 			let st: ReturnType<typeof statSync>;
 			try { st = statSync(tsvPath); } catch { return; }
-			if (st.mtimeMs === progressLastMtime && st.size === progressLastSize) return;
+
+			// Stopped detection — the *only* time we don't bail on unchanged file is
+			// when we want to flip stopped=true after the threshold passes.
+			const unchangedMs = Date.now() - st.mtimeMs;
+			const fileUnchanged = st.mtimeMs === progressLastMtime && st.size === progressLastSize;
+			const shouldMarkStopped = fileUnchanged && progressSnapshot && progressSnapshot.expCount > 0 && unchangedMs >= STOPPED_THRESHOLD_MS && !progressSnapshot.stopped;
+
+			if (fileUnchanged && !shouldMarkStopped) {
+				// Still refresh elapsed/ETA-based fields on the existing snapshot so
+				// the user sees elapsed clock advance even when no new experiment landed.
+				if (progressSnapshot) {
+					progressSnapshot.elapsedSec = (Date.now() - startEpochMs) / 1000;
+					renderWidget();
+				}
+				return;
+			}
+
 			progressLastMtime = st.mtimeMs;
 			progressLastSize  = st.size;
 
@@ -409,6 +495,26 @@ export default function (pi: ExtensionAPI) {
 			const trainSeries   = rows.map(r => parseFloat(r.trainRate)).filter(n => isFinite(n));
 			const holdoutSeries = rows.map(r => parseFloat(r.holdoutRate)).filter(n => isFinite(n));
 
+			// Cost: sum tokens, apply blended $/M rate.
+			const totalTokens  = rows.reduce((sum, r) => sum + r.tokens, 0);
+			const costEstimate = (totalTokens / 1_000_000) * DEFAULT_TOKEN_RATE_PER_MILLION;
+
+			// ETA: avg seconds per experiment × remaining experiments (only if cap known).
+			const elapsedSec = (Date.now() - startEpochMs) / 1000;
+			let etaSec: number | undefined;
+			if (maxExperiments && rows.length > 0 && rows.length < maxExperiments) {
+				const avgPerExp = elapsedSec / rows.length;
+				etaSec = avgPerExp * (maxExperiments - rows.length);
+			}
+
+			// Plateau watch: count tail consecutive non-keep, non-baseline rows.
+			let consecutiveDiscards = 0;
+			for (let i = rows.length - 1; i >= 0; i--) {
+				const s = rows[i].status;
+				if (s === "discard" || s === "crash") consecutiveDiscards++;
+				else break;
+			}
+
 			progressSnapshot = {
 				skillName,
 				stage,
@@ -424,8 +530,28 @@ export default function (pi: ExtensionAPI) {
 				history: rows.map(r => r.status),
 				trainSeries,
 				holdoutSeries,
+				totalTokens,
+				costEstimate,
+				elapsedSec,
+				etaSec,
+				maxExperiments,
+				consecutiveDiscards,
+				stopped: shouldMarkStopped || (progressSnapshot?.stopped ?? false),
 			};
 			renderWidget();
+
+			// Completion notification — fire bell + chat notify once when we detect
+			// the pipeline has wrapped up (no results.tsv changes for STOPPED_THRESHOLD_MS).
+			if (shouldMarkStopped && !stoppedAnnounced) {
+				stoppedAnnounced = true;
+				try { process.stdout.write("\x07"); } catch {}
+				try {
+					ctx.ui.notify(
+						`Pipeline finished — ${rows.length} experiments, best train ${bestTrain?.toFixed(1) ?? "—"}% / holdout ${bestHoldout?.toFixed(1) ?? "—"}%. See chat for the full summary.`,
+						"info",
+					);
+				} catch {}
+			}
 		};
 
 		update();  // render whatever's there now (probably nothing on a fresh kickoff)
@@ -455,9 +581,8 @@ export default function (pi: ExtensionAPI) {
 		_ctx.ui.setStatus("brokkr", "Brokkr");
 		_ctx.ui.notify(
 			"Brokkr loaded — the bellows keep the fire even.\n\n" +
-			"/optimize    Pick a skill, run gen-evals or the pipeline\n" +
-			"\n" +
-			"Phase 1 surface; live progress widget and resume browser arrive in follow-ups.",
+			"/optimize       Pick a skill, run gen-evals or the pipeline\n" +
+			"/optimize-stop  Abort the running pipeline cleanly (resume later)\n",
 			"info",
 		);
 	});
@@ -521,6 +646,39 @@ export default function (pi: ExtensionAPI) {
 			maxRuntime:     maxRun || undefined,
 		};
 	}
+
+	pi.registerCommand("optimize-stop", {
+		description: "Abort the running optimization pipeline cleanly. Resume later with /optimize → Resume.",
+		handler: async (_args, ctx) => {
+			if (ctx.isIdle()) {
+				ctx.ui.notify("No pipeline is running.", "info");
+				return;
+			}
+			try {
+				ctx.abort();
+				ctx.ui.notify(
+					"Pipeline abort requested. The current experiment is being interrupted.\n" +
+					"All completed experiments are already checkpointed in results.tsv / branches.\n" +
+					"Resume later with /optimize → 'Resume an interrupted run'.",
+					"info",
+				);
+				// Mark stopped in the dashboard immediately so the user sees the change
+				// before the agent actually finishes its current turn.
+				if (progressSnapshot) {
+					progressSnapshot.stopped = true;
+					if (widgetCtx) {
+						try { widgetCtx.ui.setWidget("brokkr-progress", (_tui: any, theme: any) => ({
+							dispose: () => {},
+							invalidate: () => {},
+							render: (width: number) => renderProgressDashboard(progressSnapshot, width, theme),
+						})); } catch {}
+					}
+				}
+			} catch (err) {
+				ctx.ui.notify(`Abort failed: ${(err as Error).message}`, "error");
+			}
+		},
+	});
 
 	pi.registerCommand("optimize", {
 		description: "Pick a skill, generate evals, run the optimization pipeline — all from a TUI",
@@ -662,7 +820,8 @@ export default function (pi: ExtensionAPI) {
 				// Begin live dashboard updates from the project's results.tsv. The
 				// pipeline hasn't written it yet — the watcher tolerates that and
 				// renders a "waiting" widget until the first experiment lands.
-				startProgressWatcher(ctx, repoRoot, skill.name);
+				const maxExp = budget.maxExperiments ? parseInt(budget.maxExperiments, 10) : undefined;
+				startProgressWatcher(ctx, repoRoot, skill.name, maxExp);
 				return;
 			}
 		},
