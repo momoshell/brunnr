@@ -174,6 +174,37 @@ export default function (pi: ExtensionAPI) {
 		bestTrain?: number;
 		bestHoldout?: number;
 		history: string[];             // last 24 statuses (oldest first)
+		trainSeries: number[];         // all parseable train rates, oldest first
+		holdoutSeries: number[];       // ditto for holdout
+	}
+
+	const SPARK_CHARS = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+
+	// Render a sparkline normalized to [0, 100] (pass-rate semantics).
+	// Returns at most `maxLen` block characters.
+	function sparkline(values: number[], maxLen = 28): string {
+		if (values.length === 0) return "";
+		const clipped = values.slice(-maxLen);
+		return clipped.map(v => {
+			const clamped = Math.max(0, Math.min(100, v));
+			const idx = Math.min(SPARK_CHARS.length - 1, Math.floor((clamped / 100) * SPARK_CHARS.length));
+			return SPARK_CHARS[idx];
+		}).join("");
+	}
+
+	// Trend arrow comparing the last ~5 values against the preceding ~5.
+	// Returns { glyph, colorToken } so the renderer can theme it.
+	function trendArrow(values: number[]): { glyph: string; color: string } {
+		if (values.length < 4) return { glyph: "·", color: "muted" };
+		const half = Math.max(2, Math.floor(Math.min(5, values.length / 2)));
+		const recent = values.slice(-half);
+		const earlier = values.slice(-2 * half, -half);
+		if (earlier.length === 0) return { glyph: "·", color: "muted" };
+		const avg = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+		const delta = avg(recent) - avg(earlier);
+		if (delta >  2) return { glyph: "↗", color: "success" };
+		if (delta < -2) return { glyph: "↘", color: "error"   };
+		return { glyph: "→", color: "muted" };
 	}
 
 	let progressTimer: NodeJS.Timeout | undefined;
@@ -246,6 +277,28 @@ export default function (pi: ExtensionAPI) {
 			}
 		}
 
+		// Sparklines — train and holdout pass-rate trajectory with trend arrow.
+		// Each block character = one experiment. Normalized to [0, 100].
+		if (snap.trainSeries.length >= 2 || snap.holdoutSeries.length >= 2) {
+			lines.push(pad(""));
+			const renderSpark = (label: string, series: number[]) => {
+				if (series.length === 0) return null;
+				const sl = sparkline(series, 28);
+				const last = series[series.length - 1];
+				const lastStr = isFinite(last) ? `${last.toFixed(1)}%` : "—";
+				const arrow = trendArrow(series);
+				const labelPart = theme.fg("dim", `${label.padEnd(8)}`);
+				const sparkPart = theme.fg("accent", sl);
+				const valuePart = theme.fg("text", `  ${lastStr.padStart(6)}`);
+				const arrowPart = `  ${theme.bold(theme.fg(arrow.color, arrow.glyph))}`;
+				return labelPart + sparkPart + valuePart + arrowPart;
+			};
+			const trainLine   = renderSpark("Train",   snap.trainSeries);
+			const holdoutLine = renderSpark("Holdout", snap.holdoutSeries);
+			if (trainLine)   lines.push(pad(trainLine));
+			if (holdoutLine) lines.push(pad(holdoutLine));
+		}
+
 		// History strip (last 24 statuses, K/D/X/B color-coded)
 		if (snap.history.length > 0) {
 			lines.push(pad(""));
@@ -309,6 +362,8 @@ export default function (pi: ExtensionAPI) {
 					latestHoldout: "—",
 					latestStatus: "waiting",
 					history: [],
+					trainSeries: [],
+					holdoutSeries: [],
 				};
 				renderWidget();
 				return;
@@ -350,6 +405,10 @@ export default function (pi: ExtensionAPI) {
 
 			const latest = rows[rows.length - 1];
 
+			// Series for sparklines — keep every parseable row, oldest first.
+			const trainSeries   = rows.map(r => parseFloat(r.trainRate)).filter(n => isFinite(n));
+			const holdoutSeries = rows.map(r => parseFloat(r.holdoutRate)).filter(n => isFinite(n));
+
 			progressSnapshot = {
 				skillName,
 				stage,
@@ -363,6 +422,8 @@ export default function (pi: ExtensionAPI) {
 				bestTrain,
 				bestHoldout,
 				history: rows.map(r => r.status),
+				trainSeries,
+				holdoutSeries,
 			};
 			renderWidget();
 		};
