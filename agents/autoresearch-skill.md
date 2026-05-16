@@ -76,8 +76,10 @@ The eval file must follow this schema (compatible with skill-creator):
 
 Each assertion has:
 - `check`: the assertion statement
-- `type`: `"deterministic"` (string/regex match) or `"semantic"` (LLM binary judge — YES/NO)
+- `type`: `"deterministic"` (string/regex match), `"semantic"` (text LLM binary judge — YES/NO on raw output), or `"visual"` (vision LLM binary judge — YES/NO on the rendered artifact)
 - `reason` (required if semantic): why this can't be deterministic
+- `selector` (optional, visual only): artifact type to extract from output; default `"svg"` (first `<svg>...</svg>` block)
+- `render` (optional, visual only): renderer command; default `"rsvg-convert"` for SVG
 - Parent eval has `split`: `"train"` or `"holdout"`
 
 If the eval file has no `split` field on evals, assign 70% train / 30% holdout randomly on first run and log the assignment.
@@ -88,10 +90,10 @@ If the eval file has no `split` field on evals, assign 70% train / 30% holdout r
 2. **Read the skill.** Read `SKILL_PATH` fully. Understand every instruction before changing anything.
 3. **Read and validate evals.** Read `EVAL_FILE`. Verify the schema is correct. Count assertions by type. Report the ratio:
    ```
-   Assertions: 24 total (19 deterministic, 5 semantic)
+   Assertions: 24 total (19 deterministic, 5 semantic, 0 visual)
    Split: 17 train, 7 holdout
    ```
-   If >50% are semantic, warn the user that eval quality may be low and suggest rewriting assertions.
+   If `(semantic + visual)` > 50%, warn the user that eval quality may be low and suggest rewriting assertions. If any visual assertions exist, verify the configured renderer is on PATH (default `rsvg-convert` for SVG); abort with an actionable install hint if not — most setups need one of `brew install librsvg`, `apt-get install librsvg2-bin`, or equivalent.
 4. **Pin the eval file.** Record the git hash or file checksum of `EVAL_FILE` in the log. If evals change mid-run, past experiments are no longer comparable.
 5. **Create or resume the experiment branch.**
    - **Fresh run (default):** `git checkout -b autoresearch-skill/<RUN_TAG>`. Abort if the branch already exists.
@@ -159,6 +161,21 @@ For each `assertion` on the eval:
      --print
   ```
   Pass = response matches `/^\s*YES\b/i`. Anything else = fail. (Be strict — "Yes, but…" is a fail, since the judge is hedging.)
+- **`type: visual`** — extract the artifact, render to image, spawn a vision-capable judge:
+  ```bash
+  # 1. Extract the first artifact matching the selector (default: svg)
+  printf "%s" "$OUTPUT" | awk '/<svg[ >]/,/<\/svg>/' > /tmp/eval-artifact.svg
+  # 2. Render to PNG using the configured renderer (default: rsvg-convert)
+  rsvg-convert /tmp/eval-artifact.svg -o /tmp/eval-artifact.png
+  # 3. Judge with a vision-capable model. Use the project's standard image-attachment syntax.
+  pi -p "@/tmp/eval-artifact.png\nDoes the image satisfy this assertion: $CHECK\nAnswer with exactly one word: YES or NO." \
+     --model anthropic/claude-sonnet-4-6 \
+     --thinking off \
+     --no-extensions --no-skills --no-prompt-templates --no-themes \
+     --no-session \
+     --print
+  ```
+  Pass = response matches `/^\s*YES\b/i`. Same strict-binary contract as semantic. Three cases that count as **fail** (not crash): the selector matches no artifact in the output; the renderer exits non-zero; the rendered file is empty. Surface these in per-eval logs so the user can distinguish "skill didn't emit an SVG" from "skill emitted an SVG the judge dislikes." A vision judge call that itself errors (network, model unavailable) is a **crash**, same as a semantic-judge crash.
 
 ### 3. Record and repeat
 

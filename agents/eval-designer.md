@@ -73,6 +73,11 @@ Can it be checked with a regex pattern?
 Can it be rewritten to be deterministic?
   → YES: rewrite it. "Recommends parameterized queries" → "output contains 'parameterized' or 'prepared statement'"
 
+Does the skill produce a visual/structured artifact (SVG, HTML, chart)
+and is the property a rendered-only quality (drop shadow, hierarchy, polish)?
+  → MAYBE visual: see "Extended workflow — artifact-producing skills" below.
+    Author as type = "visual" only after exhausting structural deterministic patterns.
+
 None of the above work?
   → type = semantic, reason = "<why this can't be deterministic>"
 ```
@@ -113,6 +118,12 @@ Output `evals/evals.json` following this schema:
           "check": "suggests a fix that does not introduce a new vulnerability",
           "type": "semantic",
           "reason": "requires understanding of fix safety"
+        },
+        {
+          "check": "image shows a vertical grouped bar chart with at least 9 bars in 3 clusters of 3",
+          "type": "visual",
+          "selector": "svg",
+          "render": "rsvg-convert"
         }
       ],
       "split": "train"
@@ -120,6 +131,8 @@ Output `evals/evals.json` following this schema:
   ]
 }
 ```
+
+The `visual` example is shown for completeness; only use it for artifact-producing skills after reading the extended workflow below.
 
 ### Step 7 — Report and review
 
@@ -150,12 +163,105 @@ Present the eval suite to the user with:
 
 Do not finalize until the user confirms. Generated evals are a draft.
 
+## Extended workflow — artifact-producing skills
+
+The main workflow above produces good evals for prose-output skills. When the target skill produces a structured **artifact** (SVG, HTML, JSON, markdown table, etc.) rather than free prose, the eval suite needs additional structural assertions and optionally visual assertions. This section is the playbook for those skills.
+
+### When this branch applies
+
+Trigger when any of the following hold for the target skill:
+
+- Frontmatter declares `artifact-type:` (e.g., `artifact-type: svg`), `output-mode: inline-svg`, or similar
+- The skill body describes rendering, drawing, charting, diagramming, or fixed-layout output
+- The user provides a reference image, screenshot, or visual target of what good output should look like
+- Outputs are intended to be consumed visually (rendered to a screen) rather than read as text
+
+If you're unsure, ask the user explicitly: "Is this skill producing a visual artifact, and if so, do you have a reference image of the target style?"
+
+### SVG structural-deterministic patterns
+
+For SVG-producing skills, prefer these structural patterns over thin string matches. They lock in the visual *shape* without depending on any judge.
+
+| Property to check | Deterministic pattern |
+|---|---|
+| Bar / element count in a chart | `output contains at least N occurrences of 'fill="#<color>"'` (one occurrence per element of that color) |
+| Threshold / reference line | `output contains 'stroke-dasharray' and '<threshold-label-text>'` |
+| Axis tick labels | `output contains at least M of '<tick1>', '<tick2>', '<tick3>', ...` |
+| Value labels (text positioned above marks) | `output contains 'text-anchor="middle"' and '<expected-value-string>'` |
+| Callout / finding box | `output contains '<box-title-text>' and 'stroke="<expected-color>"'` |
+| Grouped layout (N groups visible) | `output contains '<group-label-1>' and '<group-label-2>' and ...` |
+| Required filter or marker | `output contains 'filter="url(#<filter-id>)"'` or `output contains 'marker-end="url(#<marker-id>)"'` |
+| Required typography stack | `output contains 'Inter' and 'ui-sans-serif' and 'system-ui'` |
+| Required namespace + a11y | `output contains 'xmlns="http://www.w3.org/2000/svg"' and 'role="img"' and 'aria-labelledby'` |
+| Required dimensions | `output contains 'width="<W>"' and 'height="<H>"' and 'viewBox="0 0 <W> <H>"'` |
+| Forbidden constructs (safety) | `output does not contain '<script'`, `output does not contain '<!--'`, `output does not contain 'http://' and 'https://'` (allow only the required SVG namespace if applicable) |
+| Single-artifact constraint | `output contains exactly one '<svg' block` |
+| Resolved-color requirement | `output uses resolved hex colors matching /#[0-9a-fA-F]{6}/` |
+
+Apply these aggressively. Every visual property that can be encoded structurally **must** be a deterministic check — visual judges are scarce, and structural checks are free.
+
+### Visual assertions — binary decomposition
+
+Some visual properties genuinely cannot be expressed in markup: drop shadows, rounded corners, color contrast, visual hierarchy, "looks like a polished bar chart." For those, use `type: "visual"`.
+
+The visual assertion type is **the same binary YES/NO contract** as semantic. The judge sees a rendered image of the artifact, not the raw markup. Each visual assertion checks exactly one binary property.
+
+#### Decomposition pattern (when the user provides a reference image)
+
+When the user says "I want it to look like this McKinsey chart" and attaches an image, **do not** author a single fuzzy assertion like "matches the reference style" — that's exactly the kind of hedging-prone judge call the binary contract rejects. Instead, decompose the reference into N atomic binary visual questions, each answerable YES or NO.
+
+Example decomposition from a polished bar-chart reference:
+
+- "Does the image show a vertical grouped bar chart with at least 9 bars in 3 clusters of 3?" → YES/NO
+- "Does each bar have a numeric value label rendered above its top edge?" → YES/NO
+- "Is there a horizontal dashed reference line across the chart, annotated with a chip-style label on the right end?" → YES/NO
+- "Are there visible y-axis tick labels showing currency amounts at regular intervals?" → YES/NO
+- "Is there a legend below the x-axis with colored dots mapping to scenario names?" → YES/NO
+- "Is there a callout/finding box below the chart with a bold accent-colored title and bulleted content?" → YES/NO
+- "Are bars rendered with subtle drop shadows and rounded top corners?" → YES/NO
+
+Each question is one assertion. Cross-check against the structural deterministic checks already authored — if `<rect>`/`<path>` count is already a deterministic check, don't waste a visual assertion on it. Visual checks should only carry load the structural ones genuinely can't reach: drop shadow, rounded corners, hierarchy, polish, visual coherence.
+
+#### Reference-image anchoring
+
+The reference image (if provided) can be attached to the judge prompt as visual context to anchor style-related questions ("are bars rendered with drop shadows similar to the reference?"). Even with anchoring, each question stays strictly binary — `YES/NO`, no scales. Treat reference-image attachment as available but not required; many visual properties (e.g., "value labels above each bar") are clear enough on their own.
+
+#### Question template
+
+When phrasing visual checks, follow this shape:
+
+- Start with "Does the image show…" / "Is there…" / "Are bars…" / "Does each…"
+- One property per question
+- Specific, not aspirational ("rounded top corners" not "polished bars")
+- Avoid stylistic adjectives unless concretely visible ("subtle drop shadow under each bar" is fine; "professional look" is not)
+
+#### Assertion shape
+
+```json
+{
+  "check": "image shows a vertical grouped bar chart with at least 9 bars in 3 clusters of 3",
+  "type": "visual",
+  "selector": "svg",
+  "render": "rsvg-convert"
+}
+```
+
+`selector` and `render` default to `"svg"` and `"rsvg-convert"`; omit for SVG-producing skills using the default renderer. See `autoresearch-skill` for the execution recipe (extract → render → vision judge with YES/NO).
+
+### Ratio target for artifact skills
+
+Structural deterministic checks count toward the deterministic ratio. The combined `(semantic + visual)` ratio should still be under 25% — i.e., the deterministic ratio (including structural) stays above 75% for artifact-producing skills (slightly relaxed from the 80% target for prose skills, because some visual qualities are irreducible to structure).
+
+Aim for: 3–6 structural deterministic assertions per artifact case, plus 1–3 visual assertions for properties that resist structural encoding.
+
 ## Quality targets
 
 | Metric | Target | Why |
 |---|---|---|
-| Deterministic ratio | >80% | Keeps evals reliable and cheap |
-| Semantic ratio | <20% | Semantic checks are noisier |
+| Deterministic ratio (prose skills) | >80% | Keeps evals reliable and cheap |
+| Deterministic ratio (artifact skills) | >75% | Slightly relaxed; some visual qualities are irreducible to structure |
+| Semantic + visual combined ratio | <25% | Judge-based checks are noisier; cap them |
+| Visual ratio (when applicable) | <15% | Vision-judge calls are the most expensive; structural checks should carry most of the load |
 | Total assertions | 30–80 per skill | Enough signal without excessive runtime |
 | Case diversity | All 4 types covered | Prevents overfitting to one pattern |
 | Fixture size | <100 lines each | Fast to process |
@@ -166,3 +272,6 @@ Do not finalize until the user confirms. Generated evals are a draft.
 - **Don't write assertions from the skill's own wording.** The skill says "identify security issues" — don't write `"check": "output mentions security issues"`. That's tautological. Write specific checks tied to the fixture content.
 - **Don't front-load all hard cases in holdout.** Both splits need a mix of difficulty.
 - **Don't generate more than 80 assertions** without checking with the user — runtime adds up at `RUNS` × assertions × cases.
+- **Don't author fuzzy visual judges.** "Matches the reference style" / "looks professional" / "is well-designed" — these violate the binary contract. Decompose into atomic YES/NO properties (see Extended workflow).
+- **Don't use visual assertions for properties that are checkable structurally.** If you can grep for `<rect>` count or `stroke-dasharray`, do that. Visual judges are scarce; spend them on drop shadows, rounded corners, hierarchy, and other rendered-only qualities.
+- **Don't skip the structural deterministic patterns** for artifact-producing skills. A bar-chart skill that only has `output contains 'width="960"'` and a single visual judge is under-tested — the structural shape needs to be locked in deterministically.

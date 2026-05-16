@@ -14,6 +14,7 @@ The installer (`install.sh`) checks for these and offers to `brew install` any t
 | **just** | Runs `brunnr` commands |
 | **gh** | GitHub CLI — powers `brunnr push` / `scrap` / `status` (requires `gh auth login` before first push) |
 | **Pi** | The coding agent that reads your skills, agents, prompts, extensions, themes — [pi-mono](https://github.com/badlogic/pi-mono) |
+| **rsvg-convert** *(optional)* | SVG → PNG renderer used by `type: visual` eval assertions (`brew install librsvg`). Only needed when optimizing artifact-producing skills with visual judge calls. |
 
 ## Install
 
@@ -224,6 +225,14 @@ In plain `pi` (not Eitri — Eitri blocks prompt-template discovery), from the p
 The pipeline detects which stage was interrupted from existing branches + `evals.json` history and continues. More examples in `lore/use.md`.
 
 </details>
+
+**Artifact-producing skills (SVG, HTML, JSON, charts).** Skills that emit a structured artifact rather than free prose get an extended eval-authoring workflow and a third assertion type:
+
+- `eval-designer` adds an "Extended workflow — artifact-producing skills" section that documents SVG structural-deterministic patterns (bar counts, threshold lines, axis ticks, callout boxes, typography, namespaces) and the binary-decomposition pattern for visual assertions ("decompose 'matches the reference style' into N atomic YES/NO visual questions, not one fuzzy judge call").
+- `autoresearch-skill` executes `type: visual` assertions by extracting the artifact, rendering to PNG via `rsvg-convert`, and calling a vision-capable judge with the same strict binary YES/NO contract as `type: semantic`.
+- Quality targets for these skills: deterministic ≥75% (slightly relaxed from 80% for prose), combined semantic+visual <25%, visual <15% — structural checks should carry most of the load; visual judges only for rendered-only qualities like drop shadows, rounded corners, hierarchy.
+
+`type: visual` is opt-in. Skills that don't author visual assertions keep working exactly as before.
 
 ### …optimize an agent
 
