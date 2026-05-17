@@ -176,9 +176,17 @@ Bordered TUI overlays walk you through:
 1. **Pick a skill** — discovered from `.pi/skills/` (project) and `~/.pi/agent/skills/` (global)
 2. **Pick an action**:
    - **Run optimization pipeline** — kicks off `/autoresearch-pipeline` with sensible defaults (`RUNS=3`, `TARGET_PASS_RATE=95`, `EPOCH_TAG=opt-YYYYMMDD`)
-   - **Generate evals** — runs `/gen-evals SKILL_PATH=…` first if you don't have `evals/evals.json` yet
+   - **Generate evals** — runs `/gen-evals SKILL_PATH=…` first if you don't have an eval file yet
    - **Resume an interrupted run** — scans `autoresearch-skill/*` branches in your repo and offers to continue
 3. **Brokkr fires the slash command** via `pi.sendUserMessage` — the existing prompt templates + `autoresearch-*` agents do the actual optimization. Brokkr is a UX shell.
+
+**Per-skill eval files (multi-skill projects).** Brokkr resolves the eval file for the picked skill in this order, first hit wins:
+
+1. `evals/<skill-name>.json` — full skill directory name (e.g., `evals/argon-stance-map.json`)
+2. `evals/<short-name>.json` — first hyphen-prefix stripped (e.g., `evals/stance-map.json`)
+3. `evals/evals.json` — legacy single-file fallback
+
+When `/gen-evals` runs from Brokkr, it writes to `evals/evals.json` if the project has only one skill (preserving the original convention), or to the per-skill short-name path when there are multiple skills (so generating evals for skill B does not clobber skill A's evals).
 
 The pipeline (`hill-climb → GEPA → compaction`) commits experiments to branches in **your project repo** (`autoresearch-skill/<EPOCH_TAG>-stage1`, `-gepa`, `-compact`). Auto-escalates on plateau, stops early when both train AND holdout pass rates hit `TARGET_PASS_RATE`.
 

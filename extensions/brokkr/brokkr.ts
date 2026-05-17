@@ -11,6 +11,10 @@
  * and fires the existing /autoresearch-pipeline (or /gen-evals) prompt into
  * the chat, which Pi's main agent + the autoresearch-* sub-agents handle.
  *
+ * Multi-skill projects: eval files are resolved per skill in this order:
+ * evals/<skill-name>.json → evals/<short-name>.json → evals/evals.json.
+ * See resolveEvalFile() for details.
+ *
  * Future phases (separate commits):
  *   2. Live progress widget watching results.tsv
  *   3. Resume picker + eval review TUI + per-agent model/thinking tuning
@@ -117,6 +121,45 @@ function discoverSkills(cwd: string): SkillRef[] {
 	}
 
 	return skills;
+}
+
+// ── Per-skill eval file resolution ───────────────────────────────────────
+// Multi-skill projects need per-skill eval files: a single evals/evals.json
+// gets overwritten when /gen-evals runs against a second skill. We resolve
+// in order: full skill name → short name (strip first hyphen-prefix) →
+// legacy evals/evals.json. The legacy fallback keeps single-skill projects
+// working unchanged.
+//
+// Examples for skill "argon-stance-map":
+//   evals/argon-stance-map.json   (full)
+//   evals/stance-map.json         (short — current convention)
+//   evals/evals.json              (legacy)
+
+function shortNameForSkill(name: string): string {
+	const i = name.indexOf("-");
+	return i >= 0 ? name.slice(i + 1) : name;
+}
+
+function resolveEvalFile(cwd: string, skillName: string): { path: string; exists: boolean } {
+	const candidates = [
+		join(cwd, "evals", `${skillName}.json`),
+		join(cwd, "evals", `${shortNameForSkill(skillName)}.json`),
+		join(cwd, "evals", "evals.json"),
+	];
+	for (const p of candidates) {
+		if (existsSync(p)) return { path: p, exists: true };
+	}
+	return { path: defaultEvalFileForSkill(cwd, skillName), exists: false };
+}
+
+function defaultEvalFileForSkill(cwd: string, skillName: string): string {
+	// In a project with one skill, write to the legacy evals/evals.json so
+	// existing single-skill projects see no behavior change. In a project
+	// with multiple skills, write to a per-skill file so generating evals
+	// for skill B does not clobber skill A's evals.
+	const projectSkillCount = discoverSkills(cwd).filter(s => s.scope === "project").length;
+	if (projectSkillCount <= 1) return join(cwd, "evals", "evals.json");
+	return join(cwd, "evals", `${shortNameForSkill(skillName)}.json`);
 }
 
 function isInGitRepo(filePath: string): boolean {
@@ -976,9 +1019,9 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			// Step 4: pick action — depends on whether evals exist
-			const evalFile = join(ctx.cwd, "evals", "evals.json");
-			const hasEvals = existsSync(evalFile);
+			// Step 4: pick action — depends on whether evals exist.
+			// Multi-skill projects use per-skill eval files; see resolveEvalFile.
+			const { path: evalFile, exists: hasEvals } = resolveEvalFile(ctx.cwd, skill.name);
 
 			const actionItems: { value: string; label: string; description?: string }[] = hasEvals
 				? [
@@ -1000,7 +1043,7 @@ export default function (pi: ExtensionAPI) {
 					ctx.ui.notify("Agent is busy — wait for the current turn to finish, then re-run /optimize", "warning");
 					return;
 				}
-				pi.sendUserMessage(`/gen-evals\n  SKILL_PATH=${skillPath}`);
+				pi.sendUserMessage(`/gen-evals\n  SKILL_PATH=${skillPath}\n  EVAL_OUTPUT=${evalFile}`);
 				return;
 			}
 
