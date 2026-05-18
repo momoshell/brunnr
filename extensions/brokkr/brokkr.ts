@@ -513,6 +513,52 @@ export default function (pi: ExtensionAPI) {
 		} catch { return undefined; }
 	}
 
+	// Find the most recent *-report.md file in .pi/autoresearch/<skill>/.
+	// The autoresearch agent writes the report as the *last* step of its wrap-up
+	// loop — so a report file appearing post-start is a strong "pipeline done"
+	// signal even when results.tsv was never populated (custom batch runners).
+	function findLatestReport(repoRoot: string, skillName: string): { path: string; mtimeMs: number } | undefined {
+		const dir = join(repoRoot, ".pi", "autoresearch", skillName);
+		if (!existsSync(dir)) return undefined;
+		try {
+			let best: { path: string; mtimeMs: number } | undefined;
+			for (const entry of readdirSync(dir)) {
+				if (!entry.endsWith("-report.md")) continue;
+				const p = join(dir, entry);
+				try {
+					const s = statSync(p);
+					if (!s.isFile()) continue;
+					if (!best || s.mtimeMs > best.mtimeMs) best = { path: p, mtimeMs: s.mtimeMs };
+				} catch { /* skip */ }
+			}
+			return best;
+		} catch { return undefined; }
+	}
+
+	// Max mtime among the indicator paths under .pi/autoresearch/<skill>/.
+	// Used to decide whether activity has been seen post-start and whether the
+	// run has gone quiet for STOPPED_THRESHOLD_MS. Cheap — just stats a few
+	// known paths instead of walking the tree.
+	function lastActivityMtimeMs(repoRoot: string, skillName: string): number {
+		const base = join(repoRoot, ".pi", "autoresearch", skillName);
+		const candidates = [
+			join(repoRoot, "results.tsv"),
+			join(base, "progress.json"),
+			base,
+		];
+		let max = 0;
+		for (const p of candidates) {
+			try {
+				if (!existsSync(p)) continue;
+				const m = statSync(p).mtimeMs;
+				if (m > max) max = m;
+			} catch { /* skip */ }
+		}
+		const report = findLatestReport(repoRoot, skillName);
+		if (report && report.mtimeMs > max) max = report.mtimeMs;
+		return max;
+	}
+
 	function parseTsvRows(tsv: string): { exp: string; trainRate: string; holdoutRate: string; tokens: number; status: string }[] {
 		const lines = tsv.trim().split("\n").filter(Boolean);
 		if (lines.length < 2) return [];
@@ -543,8 +589,33 @@ export default function (pi: ExtensionAPI) {
 
 		const startEpochMs = Date.now();
 		let stoppedAnnounced = false;
+		// When the run is detected as stopped, this captures the wall-clock
+		// instant of stop. Freezing elapsedSec at (stoppedAtMs - startEpochMs)
+		// stops the widget timer from ticking after the pipeline has actually
+		// finished. Unset while the run is still active.
+		let stoppedAtMs: number | undefined;
 
 		const tsvPath = join(repoRoot, "results.tsv");
+
+		// Returns the wall-clock mtime to freeze at when the run is detected
+		// as stopped, or undefined while still running. Two paths:
+		//   1. A *-report.md file in .pi/autoresearch/<skill>/ written after
+		//      the watcher started — the autoresearch agent writes the report
+		//      as the *last* wrap-up step, so a fresh report = run done.
+		//   2. Any indicator (results.tsv, progress.json, autoresearch dir)
+		//      was touched post-start and has been quiet for STOPPED_THRESHOLD_MS —
+		//      fallback for cases where the agent never writes a report (crashed,
+		//      aborted, or non-standard exit).
+		const detectStop = (): number | undefined => {
+			if (stoppedAtMs !== undefined) return stoppedAtMs;
+			const report = findLatestReport(repoRoot, skillName);
+			if (report && report.mtimeMs >= startEpochMs) return report.mtimeMs;
+			const activity = lastActivityMtimeMs(repoRoot, skillName);
+			if (activity >= startEpochMs && (Date.now() - activity) >= STOPPED_THRESHOLD_MS) {
+				return activity;
+			}
+			return undefined;
+		};
 
 		// Register the widget once. Its factory reads progressSnapshot from closure
 		// scope, so re-rendering only requires invalidating the underlying TUI —
@@ -561,6 +632,15 @@ export default function (pi: ExtensionAPI) {
 
 		const update = () => {
 			if (!existsSync(tsvPath)) {
+				// No results.tsv yet — but the agent may have already finished
+				// via a custom batch runner that wrote a report without ever
+				// populating results.tsv. detectStop() catches that.
+				const stopMs = detectStop();
+				if (stopMs && stoppedAtMs === undefined) stoppedAtMs = stopMs;
+				const elapsedSec = stoppedAtMs
+					? (stoppedAtMs - startEpochMs) / 1000
+					: (Date.now() - startEpochMs) / 1000;
+				const stopped = stoppedAtMs !== undefined;
 				progressSnapshot = {
 					skillName,
 					stage: "",
@@ -568,30 +648,42 @@ export default function (pi: ExtensionAPI) {
 					latestExp: "—",
 					latestTrain: "—",
 					latestHoldout: "—",
-					latestStatus: "waiting",
+					latestStatus: stopped ? "done" : "waiting",
 					history: [],
 					trainSeries: [],
 					holdoutSeries: [],
 					totalTokens: 0,
 					costEstimate: 0,
-					elapsedSec: (Date.now() - startEpochMs) / 1000,
+					elapsedSec,
 					maxExperiments,
 					consecutiveDiscards: 0,
-					stopped: false,
+					stopped,
 					live: readLiveProgress(repoRoot, skillName),
 				};
 				renderWidget();
+				if (stopped && !stoppedAnnounced) {
+					stoppedAnnounced = true;
+					try { process.stdout.write("\x07"); } catch {}
+					try {
+						ctx.ui.notify(
+							"Pipeline finished — see chat for the full summary.",
+							"info",
+						);
+					} catch {}
+				}
 				return;
 			}
 			let st: ReturnType<typeof statSync>;
 			try { st = statSync(tsvPath); } catch { return; }
 
-			// Stopped detection — the *only* time we don't bail on unchanged file is
-			// when we want to flip stopped=true after the threshold passes.
-			const unchangedMs = Date.now() - st.mtimeMs;
-			const fileUnchanged = st.mtimeMs === progressLastMtime && st.size === progressLastSize;
-			const shouldMarkStopped = fileUnchanged && progressSnapshot && progressSnapshot.expCount > 0 && unchangedMs >= STOPPED_THRESHOLD_MS && !progressSnapshot.stopped;
+			// Unified stop detection (report file post-start, or all indicators
+			// quiet for STOPPED_THRESHOLD_MS). Replaces the old tsv-only check
+			// which missed runs that never wrote a results.tsv row.
+			const stopMs = detectStop();
+			if (stopMs && stoppedAtMs === undefined) stoppedAtMs = stopMs;
+			const shouldMarkStopped = stoppedAtMs !== undefined && !(progressSnapshot?.stopped);
 
+			const fileUnchanged = st.mtimeMs === progressLastMtime && st.size === progressLastSize;
 			if (fileUnchanged && !shouldMarkStopped) {
 				// Still refresh elapsed/ETA-based fields on the existing snapshot so
 				// the user sees elapsed clock advance even when no new experiment landed.
@@ -599,7 +691,9 @@ export default function (pi: ExtensionAPI) {
 				// after each eval+run, so this is where live mid-experiment activity
 				// surfaces between durable results.tsv updates.
 				if (progressSnapshot) {
-					progressSnapshot.elapsedSec = (Date.now() - startEpochMs) / 1000;
+					progressSnapshot.elapsedSec = stoppedAtMs
+						? (stoppedAtMs - startEpochMs) / 1000
+						: (Date.now() - startEpochMs) / 1000;
 					progressSnapshot.live = readLiveProgress(repoRoot, skillName);
 					renderWidget();
 				}
@@ -649,9 +743,12 @@ export default function (pi: ExtensionAPI) {
 			const costEstimate = (totalTokens / 1_000_000) * DEFAULT_TOKEN_RATE_PER_MILLION;
 
 			// ETA: avg seconds per experiment × remaining experiments (only if cap known).
-			const elapsedSec = (Date.now() - startEpochMs) / 1000;
+			// Elapsed freezes at stoppedAtMs once we've detected pipeline completion.
+			const elapsedSec = stoppedAtMs
+				? (stoppedAtMs - startEpochMs) / 1000
+				: (Date.now() - startEpochMs) / 1000;
 			let etaSec: number | undefined;
-			if (maxExperiments && rows.length > 0 && rows.length < maxExperiments) {
+			if (!stoppedAtMs && maxExperiments && rows.length > 0 && rows.length < maxExperiments) {
 				const avgPerExp = elapsedSec / rows.length;
 				etaSec = avgPerExp * (maxExperiments - rows.length);
 			}
@@ -685,13 +782,14 @@ export default function (pi: ExtensionAPI) {
 				etaSec,
 				maxExperiments,
 				consecutiveDiscards,
-				stopped: shouldMarkStopped || (progressSnapshot?.stopped ?? false),
+				stopped: stoppedAtMs !== undefined,
 				live: readLiveProgress(repoRoot, skillName),
 			};
 			renderWidget();
 
 			// Completion notification — fire bell + chat notify once when we detect
-			// the pipeline has wrapped up (no results.tsv changes for STOPPED_THRESHOLD_MS).
+			// the pipeline has wrapped up (report file appeared, or all indicators
+			// went quiet for STOPPED_THRESHOLD_MS).
 			if (shouldMarkStopped && !stoppedAnnounced) {
 				stoppedAnnounced = true;
 				try { process.stdout.write("\x07"); } catch {}

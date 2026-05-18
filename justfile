@@ -6,7 +6,7 @@
 # Tool version — bump when changing justfile / install.sh in a way that catalog
 # entries may depend on. `brunnr sync` compares this against library.yaml's
 # `min_tool_version` and refuses if the local tool is older.
-export TOOL_VERSION := "3.0.3"
+export TOOL_VERSION := "3.0.4"
 
 # Default path to brunnr repository
 export BRUNNR_HOME := env_var_or_default("BRUNNR_HOME", env_var('HOME') / ".config/brunnr")
