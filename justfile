@@ -6,7 +6,7 @@
 # Tool version — bump when changing justfile / install.sh in a way that catalog
 # entries may depend on. `brunnr sync` compares this against library.yaml's
 # `min_tool_version` and refuses if the local tool is older.
-export TOOL_VERSION := "3.0.6"
+export TOOL_VERSION := "3.0.7"
 
 # Default path to brunnr repository
 export BRUNNR_HOME := env_var_or_default("BRUNNR_HOME", env_var('HOME') / ".config/brunnr")
@@ -1351,6 +1351,60 @@ setup-optimizer:
     for name in "${PROMPTS[@]}"; do install_item prompt "$name"; done
     say "Done — agents at ~/.pi/agent/agents/, prompts at ~/.pi/agent/prompts/"
     say "Run /gen-evals (or /gen-evals-agent) in any pi session to get started"
+
+# Refresh already-installed optimizer agents+prompts from the catalog. Use
+# this after `brunnr sync` if the catalog has newer versions of agent or
+# prompt files than the ones Pi is loading. Unlike setup-optimizer (which
+# refuses to overwrite via `add`), update-optimizer copies the catalog
+# version directly when the installed file differs.
+update-optimizer:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    BRUNNR_HOME="{{BRUNNR_HOME}}"
+    AGENTS_TARGET="{{GLOBAL_AGENTS_DIR}}"
+    PROMPTS_TARGET="{{GLOBAL_PROMPTS_DIR}}"
+
+    [ -t 1 ] && C=$'\033[1;36m' G=$'\033[1;32m' Y=$'\033[1;33m' X=$'\033[0m' || C= G= Y= X=
+    say()  { printf "%s==>%s %s\n" "$C" "$X" "$*"; }
+    ok()   { printf "%s  ✓%s %s\n" "$G" "$X" "$*"; }
+    same() { printf "%s  =%s %s\n" "$Y" "$X" "$*"; }
+    miss() { printf "%s  -%s %s\n" "$Y" "$X" "$*"; }
+
+    # Keep these two lists in sync with setup-optimizer and remove-optimizer.
+    AGENTS=(
+        autoresearch autoresearch-skill autoresearch-skill-gepa
+        autoresearch-agent eval-designer eval-designer-agent
+    )
+    PROMPTS=(
+        autoresearch autoresearch-skill autoresearch-skill-gepa
+        autoresearch-pipeline autoresearch-agent gen-evals gen-evals-agent
+        skill-status agent-status fork-skill fork-agent
+    )
+
+    refresh() {
+        local kind=$1 name=$2 src_dir=$3 dst_dir=$4
+        local src="$src_dir/$name.md"
+        local dst="$dst_dir/$name.md"
+        if [ ! -f "$src" ]; then
+            miss "$kind: $name (not in catalog)"
+            return
+        fi
+        if [ ! -f "$dst" ]; then
+            miss "$kind: $name (not installed — run 'brunnr setup-optimizer')"
+            return
+        fi
+        if diff -q "$src" "$dst" >/dev/null 2>&1; then
+            same "$kind: $name"
+            return
+        fi
+        cp "$src" "$dst"
+        ok "$kind: $name (refreshed)"
+    }
+
+    say "Refreshing optimizer stack from catalog @ $BRUNNR_HOME"
+    for name in "${AGENTS[@]}";  do refresh agent  "$name" "$BRUNNR_HOME/agents"  "$AGENTS_TARGET";  done
+    for name in "${PROMPTS[@]}"; do refresh prompt "$name" "$BRUNNR_HOME/prompts" "$PROMPTS_TARGET"; done
+    say "Done"
 
 # Remove the full optimization stack from the global install. Items not present are skipped.
 remove-optimizer:

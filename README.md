@@ -180,6 +180,8 @@ Bordered TUI overlays walk you through:
    - **Resume an interrupted run** — scans `autoresearch-skill/*` branches in your repo and offers to continue
 3. **Brokkr fires the slash command** via `pi.sendUserMessage` — the existing prompt templates + `autoresearch-*` agents do the actual optimization. Brokkr is a UX shell.
 
+**Refreshing the optimizer stack.** `brunnr sync` updates the catalog at `~/.config/brunnr/`, but Pi loads agents from `~/.pi/agent/agents/` — a separate install path that `brunnr setup-optimizer` populates and refuses to overwrite. After a `sync` that bumps an agent or prompt file, run `brunnr update-optimizer` to copy the fresher catalog versions into Pi's load path. Idempotent — it diffs each file and only copies the ones that drifted.
+
 **Per-skill eval files (multi-skill projects).** Brokkr resolves the eval file for the picked skill in this order, first hit wins:
 
 1. `evals/<skill-name>.json` — full skill directory name (e.g., `evals/argon-stance-map.json`)
