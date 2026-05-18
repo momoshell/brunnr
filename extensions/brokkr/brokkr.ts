@@ -290,7 +290,38 @@ export default function (pi: ExtensionAPI) {
 		try { widgetCtx?.ui?.setWidget?.("brokkr-progress", undefined); } catch {}
 	}
 
-	function renderProgressDashboard(snap: ProgressSnapshot | undefined, width: number, theme: any): string[] {
+	// Read the latest thinking-level change entry from the session, if any.
+	// Pi records thinking changes as session entries; we walk backwards to
+	// find the current value. Returns undefined if never explicitly set.
+	function getCurrentThinkingLevel(ctx: any): string | undefined {
+		try {
+			const entries = ctx?.sessionManager?.getEntries?.();
+			if (!Array.isArray(entries)) return undefined;
+			for (let i = entries.length - 1; i >= 0; i--) {
+				const e = entries[i];
+				if (e && e.type === "thinking_level_change" && typeof e.thinkingLevel === "string") {
+					return e.thinkingLevel;
+				}
+			}
+		} catch { /* fall through */ }
+		return undefined;
+	}
+
+	// Format a single-line "Model: X · Thinking: Y" snippet using the
+	// current parent-session model and thinking level. Returns null when
+	// no ctx is available (so callers can skip the row entirely).
+	function formatModelThinking(ctx: any, theme: any): string | null {
+		if (!ctx) return null;
+		const modelId = ctx?.model?.id ? String(ctx.model.id) : undefined;
+		const thinking = getCurrentThinkingLevel(ctx);
+		const dim = (s: string) => theme.fg("dim", s);
+		const fg  = (s: string) => theme.fg("text", s);
+		const modelPart    = `${dim("Model: ")}${fg(modelId ?? "—")}`;
+		const thinkingPart = `${dim("Thinking: ")}${fg(thinking ?? "default")}`;
+		return `${modelPart}   ${thinkingPart}`;
+	}
+
+	function renderProgressDashboard(snap: ProgressSnapshot | undefined, width: number, theme: any, ctx?: any): string[] {
 		const inner = Math.max(width - 4, 30);
 		const horiz = "━".repeat(Math.max(width - 2, 0));
 		const accent = (s: string) => theme.bold(theme.fg("accent", s));
@@ -302,14 +333,20 @@ export default function (pi: ExtensionAPI) {
 			return `${v} ${line}${" ".repeat(Math.max(0, inner - vis))} ${v}`;
 		};
 
+		const modelLine = formatModelThinking(ctx ?? widgetCtx, theme);
+
 		if (!snap) {
-			return [top, pad(theme.fg("dim", "Brokkr · no run in progress")), bottom];
+			const out = [top, pad(theme.fg("dim", "Brokkr · no run in progress"))];
+			if (modelLine) out.push(pad(modelLine));
+			out.push(bottom);
+			return out;
 		}
 
 		const lines: string[] = [top];
 		// Title row
 		const title = theme.bold(theme.fg("accent", "Brokkr")) + theme.fg("dim", " · ") + theme.fg("text", snap.skillName);
 		lines.push(pad(title));
+		if (modelLine) lines.push(pad(modelLine));
 		lines.push(pad(""));
 
 		// Stage row
@@ -454,7 +491,7 @@ export default function (pi: ExtensionAPI) {
 			ctx.ui.setWidget("brokkr-progress", (_tui: any, theme: any) => ({
 				dispose: () => {},
 				invalidate: () => {},
-				render: (width: number) => renderProgressDashboard(progressSnapshot, width, theme),
+				render: (width: number) => renderProgressDashboard(progressSnapshot, width, theme, ctx),
 			}));
 		};
 
@@ -961,7 +998,7 @@ export default function (pi: ExtensionAPI) {
 						try { widgetCtx.ui.setWidget("brokkr-progress", (_tui: any, theme: any) => ({
 							dispose: () => {},
 							invalidate: () => {},
-							render: (width: number) => renderProgressDashboard(progressSnapshot, width, theme),
+							render: (width: number) => renderProgressDashboard(progressSnapshot, width, theme, widgetCtx),
 						})); } catch {}
 					}
 				}
