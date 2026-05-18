@@ -220,6 +220,36 @@ This file is what the plateau diagnosis reads to classify failure patterns. With
 - Total tokens used across all eval runs (proxy for skill verbosity/cost)
 - Count of semantic assertions invoked (track the ratio)
 
+**Live progress file.** Experiments run for many minutes; `results.tsv` only updates after the *whole* experiment completes (all evals × all runs). To let UIs like Brokkr surface mid-experiment activity, after each eval+run finishes overwrite `.pi/autoresearch/<skill>/progress.json` with the current state. Path is fixed per skill, not per run-tag — overwritten in place. Schema:
+
+```json
+{
+  "runTag": "stance-map-baseline",
+  "stage": "stage1",
+  "experiment": 2,
+  "currentEval": 8,
+  "totalEvals": 8,
+  "currentRun": 1,
+  "totalRuns": 3,
+  "latestPass": 6,
+  "latestTotal": 6,
+  "ts": "2026-05-18T12:37:28Z"
+}
+```
+
+Field meanings:
+- `runTag` — the `RUN_TAG` parameter for this run.
+- `stage` — `stage1` | `gepa` | `compact` | `""` (single-stage runs leave it empty).
+- `experiment` — the experiment number currently in progress (matches the `experiment` column of the row about to be written to `results.tsv`).
+- `currentEval` / `totalEvals` — index and total of the eval whose *latest* completed run is reported in `latestPass` / `latestTotal`.
+- `currentRun` / `totalRuns` — the run index within that eval (1-indexed), and `RUNS`.
+- `latestPass` / `latestTotal` — pass count and total assertion count of the most recently completed eval+run.
+- `ts` — ISO-8601 UTC timestamp of the write.
+
+Write the file even when the eval-running mechanism is a custom batch script (a Python runner, a parallel orchestrator). UIs that watch this file are agnostic to *how* you ran the evals; they only care that each completion event lands here.
+
+Add `.pi/autoresearch/` to `.gitignore` if not already (it usually is — output is runtime artifact, not catalog content).
+
 ## The experiment loop
 
 Repeat forever:

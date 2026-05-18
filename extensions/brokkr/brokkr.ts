@@ -227,6 +227,19 @@ export default function (pi: ExtensionAPI) {
 		maxExperiments?: number;       // from dispatch kickoff, if user set it
 		consecutiveDiscards: number;   // for plateau preview
 		stopped: boolean;              // detected end of run (no changes for >= STOPPED_THRESHOLD_MS)
+		// Live mid-experiment progress (from .pi/autoresearch/<skill>/progress.json)
+		// Written by the autoresearch agents after each eval+run completes; lets
+		// the widget surface activity during the long gap between experiment rows.
+		live?: {
+			experiment?: number;
+			currentEval?: number;
+			totalEvals?: number;
+			currentRun?: number;
+			totalRuns?: number;
+			latestPass?: number;
+			latestTotal?: number;
+			ts?: string;               // ISO-8601 from the agent
+		};
 	}
 
 	// Blended token rate — sonnet-ish ballpark. Users with different model mixes
@@ -358,6 +371,34 @@ export default function (pi: ExtensionAPI) {
 		const stageText = stageLabel[snap.stage] || (snap.stage || "Stage —");
 		lines.push(pad(theme.fg("warning", stageText) + theme.fg("dim", `   experiments: ${snap.expCount}`)));
 
+		// Live mid-experiment activity row (from progress.json). Hidden when the
+		// agent hasn't written one yet — keeps the widget compact for skills that
+		// finish experiments fast enough to make this redundant.
+		if (snap.live && (snap.live.currentEval !== undefined || snap.live.experiment !== undefined)) {
+			const bits: string[] = [];
+			if (snap.live.experiment !== undefined) bits.push(`exp ${snap.live.experiment}`);
+			if (snap.live.currentEval !== undefined && snap.live.totalEvals !== undefined) {
+				bits.push(`eval ${snap.live.currentEval}/${snap.live.totalEvals}`);
+			} else if (snap.live.currentEval !== undefined) {
+				bits.push(`eval ${snap.live.currentEval}`);
+			}
+			if (snap.live.currentRun !== undefined && snap.live.totalRuns !== undefined) {
+				bits.push(`run ${snap.live.currentRun}/${snap.live.totalRuns}`);
+			}
+			if (snap.live.latestPass !== undefined && snap.live.latestTotal !== undefined) {
+				const passColor = snap.live.latestPass === snap.live.latestTotal ? "success" : "warning";
+				bits.push(`last ${theme.fg(passColor, `${snap.live.latestPass}/${snap.live.latestTotal}`)}`);
+			}
+			if (snap.live.ts) {
+				// Show only HH:MM:SS if the timestamp is ISO-8601; otherwise use as-is.
+				const m = snap.live.ts.match(/T(\d{2}:\d{2}:\d{2})/);
+				bits.push(theme.fg("dim", m ? m[1] : snap.live.ts));
+			}
+			if (bits.length > 0) {
+				lines.push(pad(theme.fg("dim", "Now: ") + bits.join(theme.fg("dim", " · "))));
+			}
+		}
+
 		// Latest row
 		const statusColor: Record<string, string> = {
 			keep:     "success",
@@ -449,6 +490,29 @@ export default function (pi: ExtensionAPI) {
 		return lines;
 	}
 
+	// Read the live progress.json written by autoresearch agents mid-experiment.
+	// Returns undefined if the file is missing or malformed — callers treat that
+	// as "no live data yet", same as the agent simply not having written one.
+	function readLiveProgress(repoRoot: string, skillName: string): ProgressSnapshot["live"] | undefined {
+		const p = join(repoRoot, ".pi", "autoresearch", skillName, "progress.json");
+		if (!existsSync(p)) return undefined;
+		try {
+			const raw = readFileSync(p, "utf-8");
+			const j = JSON.parse(raw);
+			if (typeof j !== "object" || j === null) return undefined;
+			return {
+				experiment:   typeof j.experiment   === "number" ? j.experiment   : undefined,
+				currentEval:  typeof j.currentEval  === "number" ? j.currentEval  : undefined,
+				totalEvals:   typeof j.totalEvals   === "number" ? j.totalEvals   : undefined,
+				currentRun:   typeof j.currentRun   === "number" ? j.currentRun   : undefined,
+				totalRuns:    typeof j.totalRuns    === "number" ? j.totalRuns    : undefined,
+				latestPass:   typeof j.latestPass   === "number" ? j.latestPass   : undefined,
+				latestTotal:  typeof j.latestTotal  === "number" ? j.latestTotal  : undefined,
+				ts:           typeof j.ts           === "string" ? j.ts           : undefined,
+			};
+		} catch { return undefined; }
+	}
+
 	function parseTsvRows(tsv: string): { exp: string; trainRate: string; holdoutRate: string; tokens: number; status: string }[] {
 		const lines = tsv.trim().split("\n").filter(Boolean);
 		if (lines.length < 2) return [];
@@ -514,6 +578,7 @@ export default function (pi: ExtensionAPI) {
 					maxExperiments,
 					consecutiveDiscards: 0,
 					stopped: false,
+					live: readLiveProgress(repoRoot, skillName),
 				};
 				renderWidget();
 				return;
@@ -530,8 +595,12 @@ export default function (pi: ExtensionAPI) {
 			if (fileUnchanged && !shouldMarkStopped) {
 				// Still refresh elapsed/ETA-based fields on the existing snapshot so
 				// the user sees elapsed clock advance even when no new experiment landed.
+				// Also re-read progress.json — the autoresearch agent overwrites it
+				// after each eval+run, so this is where live mid-experiment activity
+				// surfaces between durable results.tsv updates.
 				if (progressSnapshot) {
 					progressSnapshot.elapsedSec = (Date.now() - startEpochMs) / 1000;
+					progressSnapshot.live = readLiveProgress(repoRoot, skillName);
 					renderWidget();
 				}
 				return;
@@ -617,6 +686,7 @@ export default function (pi: ExtensionAPI) {
 				maxExperiments,
 				consecutiveDiscards,
 				stopped: shouldMarkStopped || (progressSnapshot?.stopped ?? false),
+				live: readLiveProgress(repoRoot, skillName),
 			};
 			renderWidget();
 
