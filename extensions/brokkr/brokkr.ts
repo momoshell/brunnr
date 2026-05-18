@@ -297,10 +297,27 @@ export default function (pi: ExtensionAPI) {
 	let progressLastSize  = 0;
 	let progressSnapshot: ProgressSnapshot | undefined;
 
+	// Re-register the widget with the standard factory. Used both for the
+	// initial idle widget on session_start and to refresh the widget after
+	// a watcher stops (so the snapshot=undefined idle state appears).
+	function registerIdleWidget(): void {
+		if (!widgetCtx) return;
+		try {
+			widgetCtx.ui.setWidget("brokkr-progress", (_tui: any, theme: any) => ({
+				dispose: () => {},
+				invalidate: () => {},
+				render: (width: number) => renderProgressDashboard(progressSnapshot, width, theme, widgetCtx),
+			}));
+		} catch { /* widget API may be unavailable in some modes */ }
+	}
+
 	function stopProgressWatcher(): void {
 		if (progressTimer) { clearInterval(progressTimer); progressTimer = undefined; }
 		progressSnapshot = undefined;
-		try { widgetCtx?.ui?.setWidget?.("brokkr-progress", undefined); } catch {}
+		// Keep the widget registered so the user always sees Brokkr's status
+		// (model + thinking + "no run in progress"). The widget is only
+		// fully removed on session_shutdown.
+		registerIdleWidget();
 	}
 
 	// Read the latest thinking-level change entry from the session, if any.
@@ -857,10 +874,18 @@ export default function (pi: ExtensionAPI) {
 			"/optimize-stop    Abort the running pipeline cleanly (resume later)\n",
 			"info",
 		);
+
+		// Show the persistent idle widget right away — model/thinking line +
+		// "no run in progress". Replaced by the active dashboard when a run
+		// starts; refreshed back to idle when the run ends.
+		registerIdleWidget();
 	});
 
 	pi.on("session_shutdown", async () => {
 		stopProgressWatcher();
+		// Now that the session is ending, remove the widget for real.
+		// stopProgressWatcher itself leaves the idle widget visible mid-session.
+		try { widgetCtx?.ui?.setWidget?.("brokkr-progress", undefined); } catch {}
 		if (previousThemeName) {
 			try { (widgetCtx?.ui as any)?.setTheme?.(previousThemeName); } catch {}
 			previousThemeName = undefined;
