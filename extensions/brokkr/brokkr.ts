@@ -515,8 +515,8 @@ export default function (pi: ExtensionAPI) {
 
 	// Find the most recent *-report.md file in .pi/autoresearch/<skill>/.
 	// The autoresearch agent writes the report as the *last* step of its wrap-up
-	// loop — so a report file appearing post-start is a strong "pipeline done"
-	// signal even when results.tsv was never populated (custom batch runners).
+	// loop — so a report file appearing post-start is a "pipeline done" signal,
+	// but only when nothing in the tree was modified after it (see detectStop).
 	function findLatestReport(repoRoot: string, skillName: string): { path: string; mtimeMs: number } | undefined {
 		const dir = join(repoRoot, ".pi", "autoresearch", skillName);
 		if (!existsSync(dir)) return undefined;
@@ -535,27 +535,43 @@ export default function (pi: ExtensionAPI) {
 		} catch { return undefined; }
 	}
 
-	// Max mtime among the indicator paths under .pi/autoresearch/<skill>/.
-	// Used to decide whether activity has been seen post-start and whether the
-	// run has gone quiet for STOPPED_THRESHOLD_MS. Cheap — just stats a few
-	// known paths instead of walking the tree.
+	// Walk .pi/autoresearch/<skill>/ recursively (bounded depth) and return
+	// the freshest mtime found anywhere in the tree.
+	//
+	// Why recursion: custom eval runners write per-eval output to subdirs
+	// like opt-<tag>-run1/eval01_run1.txt. Those writes update the subdir's
+	// mtime but NOT the parent dir's mtime. A naive top-level-only scan
+	// would see the parent dir frozen at its creation time and falsely
+	// declare the run "stopped" after 90s. Walking the tree fixes that.
+	//
+	// Depth is bounded so a runaway dir (eg from a misbehaving agent) can't
+	// hang the watcher. Each scan is throwaway — no caching — because the
+	// tree is small (one skill's outputs) and scans run every 2s.
 	function lastActivityMtimeMs(repoRoot: string, skillName: string): number {
 		const base = join(repoRoot, ".pi", "autoresearch", skillName);
-		const candidates = [
-			join(repoRoot, "results.tsv"),
-			join(base, "progress.json"),
-			base,
-		];
 		let max = 0;
-		for (const p of candidates) {
-			try {
-				if (!existsSync(p)) continue;
-				const m = statSync(p).mtimeMs;
+		const tsv = join(repoRoot, "results.tsv");
+		try {
+			if (existsSync(tsv)) {
+				const m = statSync(tsv).mtimeMs;
 				if (m > max) max = m;
+			}
+		} catch { /* skip */ }
+		if (!existsSync(base)) return max;
+		const MAX_DEPTH = 4;
+		const stack: { path: string; depth: number }[] = [{ path: base, depth: 0 }];
+		while (stack.length > 0) {
+			const { path, depth } = stack.pop()!;
+			try {
+				const s = statSync(path);
+				if (s.mtimeMs > max) max = s.mtimeMs;
+				if (s.isDirectory() && depth < MAX_DEPTH) {
+					for (const entry of readdirSync(path)) {
+						stack.push({ path: join(path, entry), depth: depth + 1 });
+					}
+				}
 			} catch { /* skip */ }
 		}
-		const report = findLatestReport(repoRoot, skillName);
-		if (report && report.mtimeMs > max) max = report.mtimeMs;
 		return max;
 	}
 
@@ -600,17 +616,24 @@ export default function (pi: ExtensionAPI) {
 		// Returns the wall-clock mtime to freeze at when the run is detected
 		// as stopped, or undefined while still running. Two paths:
 		//   1. A *-report.md file in .pi/autoresearch/<skill>/ written after
-		//      the watcher started — the autoresearch agent writes the report
-		//      as the *last* wrap-up step, so a fresh report = run done.
-		//   2. Any indicator (results.tsv, progress.json, autoresearch dir)
-		//      was touched post-start and has been quiet for STOPPED_THRESHOLD_MS —
-		//      fallback for cases where the agent never writes a report (crashed,
-		//      aborted, or non-standard exit).
+		//      the watcher started AND no file in the tree is newer than it.
+		//      The autoresearch agent writes the report as its last wrap-up
+		//      step, so this combo means everything else has stopped writing.
+		//      The "nothing newer" check defends against placeholder report
+		//      files the agent might create at the start.
+		//   2. Any file in the tree (deep scan) has been quiet for
+		//      STOPPED_THRESHOLD_MS — fallback for cases where the agent
+		//      never writes a report (crashed, aborted, non-standard exit).
 		const detectStop = (): number | undefined => {
 			if (stoppedAtMs !== undefined) return stoppedAtMs;
-			const report = findLatestReport(repoRoot, skillName);
-			if (report && report.mtimeMs >= startEpochMs) return report.mtimeMs;
 			const activity = lastActivityMtimeMs(repoRoot, skillName);
+			const report = findLatestReport(repoRoot, skillName);
+			if (report && report.mtimeMs >= startEpochMs && report.mtimeMs >= activity - 1) {
+				// Report exists post-start AND is the (joint-)latest file in the tree.
+				// The -1ms slack handles the case where the report IS the latest write
+				// but its own contribution to the tree mtime is identical.
+				return report.mtimeMs;
+			}
 			if (activity >= startEpochMs && (Date.now() - activity) >= STOPPED_THRESHOLD_MS) {
 				return activity;
 			}
