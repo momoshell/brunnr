@@ -242,6 +242,43 @@ export default function (pi: ExtensionAPI) {
 		};
 	}
 
+	// Live activity tracked directly from Pi events. Independent of whether
+	// the agent writes results.tsv or progress.json — these handlers fire on
+	// every tool call and turn boundary, so the widget always has something
+	// to show even when the agent ignores the file-based protocol.
+	interface LiveActivity {
+		turn: number;
+		currentTool?: { name: string; summary: string; startedAt: number; toolCallId: string };
+		lastTool?:    { name: string; summary: string; endedAt: number };
+		toolCounts: Record<string, number>;
+		totals: {
+			input: number;
+			output: number;
+			cacheRead: number;
+			cacheWrite: number;
+			cost: number;        // dollars, summed from AssistantMessage.usage.cost.total
+		};
+		// Layer 2: synthetic experiment tracking derived from tool-call patterns.
+		// Used as a fallback display when results.tsv has no rows.
+		experiments: ("keep" | "discard")[];
+		// True after we observe an edit on *SKILL.md; reset after a
+		// commit/reset closes the cycle. Bridges edit→evals→commit-or-reset.
+		skillEditedSinceLastBoundary: boolean;
+		// Set when agent_end fires, the cleanest run-complete signal.
+		agentEndedAt?: number;
+		agentEndNotified?: boolean;
+		// Last turn_end timestamp — for "no turns for N seconds" stop fallback.
+		lastTurnEndAt?: number;
+	}
+
+	const liveActivity: LiveActivity = {
+		turn: 0,
+		toolCounts: {},
+		totals: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
+		experiments: [],
+		skillEditedSinceLastBoundary: false,
+	};
+
 	// Blended token rate — sonnet-ish ballpark. Users with different model mixes
 	// can override via env. Single rate is intentional: results.tsv has one
 	// `tokens` column (combined), not separated input/output.
@@ -275,6 +312,91 @@ export default function (pi: ExtensionAPI) {
 		if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
 		if (n >= 1_000)     return `${(n / 1_000).toFixed(1)}k`;
 		return `${n}`;
+	}
+
+	// Build the live-activity rows from the LiveActivity closure state.
+	// Returns 0 rows when nothing has happened yet, 1-3 rows when active.
+	// Caller is responsible for padding/border.
+	function renderLiveActivity(theme: any, _inner: number): string[] {
+		if (liveActivity.turn === 0) return [];
+		const dim = (s: string) => theme.fg("dim", s);
+		const text = (s: string) => theme.fg("text", s);
+		const accent = (s: string) => theme.fg("accent", s);
+		const out: string[] = [];
+
+		// Row 1: Turn N · Now: <current-tool>  OR  Last: <last-tool>
+		const turnPart = `${dim("Turn ")}${accent(String(liveActivity.turn))}`;
+		let nowPart = "";
+		if (liveActivity.currentTool) {
+			const elapsed = ((Date.now() - liveActivity.currentTool.startedAt) / 1000).toFixed(0);
+			nowPart = `${dim("  Now: ")}${text(liveActivity.currentTool.summary)}${dim(` · ${elapsed}s`)}`;
+		} else if (liveActivity.lastTool) {
+			nowPart = `${dim("  Last: ")}${text(liveActivity.lastTool.summary)}`;
+		}
+		out.push(turnPart + nowPart);
+
+		// Row 2: usage totals — ↑input ↓output R/W cache · $cost
+		const t = liveActivity.totals;
+		if (t.input > 0 || t.output > 0 || t.cost > 0) {
+			const parts: string[] = [];
+			if (t.input > 0)      parts.push(`↑${formatTokens(t.input)}`);
+			if (t.output > 0)     parts.push(`↓${formatTokens(t.output)}`);
+			if (t.cacheRead > 0)  parts.push(`R${formatTokens(t.cacheRead)}`);
+			if (t.cacheWrite > 0) parts.push(`W${formatTokens(t.cacheWrite)}`);
+			if (t.cost > 0)       parts.push(`$${t.cost.toFixed(3)}`);
+			out.push(dim(parts.join("  ")));
+		}
+
+		// Row 3: tool-call tally
+		const counts = Object.entries(liveActivity.toolCounts)
+			.filter(([, n]) => n > 0)
+			.sort((a, b) => b[1] - a[1]);
+		if (counts.length > 0) {
+			const tally = counts.map(([name, n]) => `${name} ${n}`).join(" · ");
+			out.push(`${dim("Tools: ")}${text(tally)}`);
+		}
+
+		return out;
+	}
+
+	// Compact one-liner describing a tool call. Modeled after the pi subagent
+	// example's formatToolCall. Returns plain text — caller themes it.
+	function formatToolCall(toolName: string, input: any): string {
+		const basename = (p: string) => (typeof p === "string" ? p.split("/").pop() || p : "?");
+		const truncate = (s: string, max: number) =>
+			s.length > max ? `${s.slice(0, max)}…` : s;
+		switch (toolName) {
+			case "bash": {
+				const cmd = typeof input?.command === "string" ? input.command : "";
+				return `$ ${truncate(cmd.replace(/\s+/g, " "), 56)}`;
+			}
+			case "edit": {
+				const path = basename(input?.path);
+				const n = Array.isArray(input?.edits) ? input.edits.length : 0;
+				return `edit ${path} (${n} edit${n === 1 ? "" : "s"})`;
+			}
+			case "write": {
+				const path = basename(input?.path);
+				const size = typeof input?.content === "string" ? input.content.length : 0;
+				return `write ${path} (${formatTokens(size)}b)`;
+			}
+			case "read": {
+				return `read ${basename(input?.path)}`;
+			}
+			case "grep": {
+				const pattern = typeof input?.pattern === "string" ? input.pattern : "";
+				return `grep ${truncate(pattern, 40)}`;
+			}
+			case "find": {
+				const pattern = typeof input?.pattern === "string" ? input.pattern : "";
+				return `find ${truncate(pattern, 40)}`;
+			}
+			case "ls": {
+				return `ls ${basename(input?.path)}`;
+			}
+			default:
+				return toolName;
+		}
 	}
 
 	// Trend arrow comparing the last ~5 values against the preceding ~5.
@@ -365,9 +487,20 @@ export default function (pi: ExtensionAPI) {
 
 		const modelLine = formatModelThinking(ctx ?? widgetCtx, theme);
 
+		// Event-driven live activity rows. Always rendered when there's any
+		// turn data. Independent of results.tsv / progress.json.
+		const liveRows = renderLiveActivity(theme, inner);
+
 		if (!snap) {
-			const out = [top, pad(theme.fg("dim", "Brokkr · no run in progress"))];
+			const titleLine = liveActivity.turn > 0
+				? theme.bold(theme.fg("accent", "Brokkr")) + theme.fg("dim", " · ") + theme.fg("text", "active session")
+				: theme.fg("dim", "Brokkr · no run in progress");
+			const out = [top, pad(titleLine)];
 			if (modelLine) out.push(pad(modelLine));
+			if (liveRows.length > 0) {
+				out.push(pad(""));
+				for (const row of liveRows) out.push(pad(row));
+			}
 			out.push(bottom);
 			return out;
 		}
@@ -377,6 +510,12 @@ export default function (pi: ExtensionAPI) {
 		const title = theme.bold(theme.fg("accent", "Brokkr")) + theme.fg("dim", " · ") + theme.fg("text", snap.skillName);
 		lines.push(pad(title));
 		if (modelLine) lines.push(pad(modelLine));
+		// Live event-driven activity rows. These render before stage/latest so
+		// users see real-time agent activity at the top of the dashboard.
+		if (liveRows.length > 0) {
+			lines.push(pad(""));
+			for (const row of liveRows) lines.push(pad(row));
+		}
 		lines.push(pad(""));
 
 		// Stage row
@@ -386,7 +525,16 @@ export default function (pi: ExtensionAPI) {
 			compact: "Stage 3 · compaction",
 		};
 		const stageText = stageLabel[snap.stage] || (snap.stage || "Stage —");
-		lines.push(pad(theme.fg("warning", stageText) + theme.fg("dim", `   experiments: ${snap.expCount}`)));
+		// Prefer file-based experiment count when available; fall back to the
+		// event-derived synthetic count (Layer 2). The synthetic count is a
+		// best-effort pattern match on git commit / git reset --hard following
+		// a SKILL.md edit — labeled with "~" to flag the approximation.
+		const expDisplay = snap.expCount > 0
+			? `experiments: ${snap.expCount}`
+			: liveActivity.experiments.length > 0
+				? `experiments: ~${liveActivity.experiments.length}`
+				: `experiments: 0`;
+		lines.push(pad(theme.fg("warning", stageText) + theme.fg("dim", `   ${expDisplay}`)));
 
 		// Live mid-experiment activity row (from progress.json). Hidden when the
 		// agent hasn't written one yet — keeps the widget compact for skills that
@@ -485,16 +633,27 @@ export default function (pi: ExtensionAPI) {
 			lines.push(pad(theme.fg(plateauColor, `Plateau watch: ${snap.consecutiveDiscards}/10 consecutive non-kept experiments`)));
 		}
 
-		// History strip (last 24 statuses, K/D/X/B color-coded)
+		// History strip (last 24 statuses, K/D/X/B color-coded). When results.tsv
+		// has rows, use those (full per-experiment status). Otherwise fall back
+		// to the Layer-2 synthetic history derived from observed git commits /
+		// resets — labeled "~History" to flag the approximation.
+		const glyph: Record<string, string> = { keep: "K", baseline: "B", discard: "D", crash: "X" };
 		if (snap.history.length > 0) {
 			lines.push(pad(""));
-			const glyph: Record<string, string> = { keep: "K", baseline: "B", discard: "D", crash: "X" };
 			const colored = snap.history.slice(-24).map(s => {
 				const g = glyph[s] || "?";
 				const c = statusColor[s] || "text";
 				return theme.fg(c, g);
 			}).join(" ");
 			lines.push(pad(theme.fg("dim", "History: ") + colored));
+		} else if (liveActivity.experiments.length > 0) {
+			lines.push(pad(""));
+			const colored = liveActivity.experiments.slice(-24).map(s => {
+				const g = glyph[s] || "?";
+				const c = statusColor[s] || "text";
+				return theme.fg(c, g);
+			}).join(" ");
+			lines.push(pad(theme.fg("dim", "~History: ") + colored));
 		}
 
 		// Stopped banner
@@ -631,28 +790,35 @@ export default function (pi: ExtensionAPI) {
 		const tsvPath = join(repoRoot, "results.tsv");
 
 		// Returns the wall-clock mtime to freeze at when the run is detected
-		// as stopped, or undefined while still running. Two paths:
-		//   1. A *-report.md file in .pi/autoresearch/<skill>/ written after
-		//      the watcher started AND no file in the tree is newer than it.
-		//      The autoresearch agent writes the report as its last wrap-up
-		//      step, so this combo means everything else has stopped writing.
-		//      The "nothing newer" check defends against placeholder report
-		//      files the agent might create at the start.
-		//   2. Any file in the tree (deep scan) has been quiet for
-		//      STOPPED_THRESHOLD_MS — fallback for cases where the agent
-		//      never writes a report (crashed, aborted, non-standard exit).
+		// as stopped, or undefined while still running. Three paths, first wins:
+		//   1. Pi fired `agent_end` (most authoritative; from liveActivity).
+		//   2. A *-report.md file appeared post-start AND nothing in the tree
+		//      is newer (defends against placeholder reports).
+		//   3. All file indicators quiet for STOPPED_THRESHOLD_MS, OR no turn_end
+		//      for the same threshold (event-based fallback when the agent
+		//      never writes any files).
 		const detectStop = (): number | undefined => {
 			if (stoppedAtMs !== undefined) return stoppedAtMs;
+			// Path 1 — event-based: agent_end is the cleanest signal.
+			if (liveActivity.agentEndedAt && liveActivity.agentEndedAt >= startEpochMs) {
+				return liveActivity.agentEndedAt;
+			}
 			const activity = lastActivityMtimeMs(repoRoot, skillName);
 			const report = findLatestReport(repoRoot, skillName);
+			// Path 2 — report file is the last write in the tree.
 			if (report && report.mtimeMs >= startEpochMs && report.mtimeMs >= activity - 1) {
-				// Report exists post-start AND is the (joint-)latest file in the tree.
-				// The -1ms slack handles the case where the report IS the latest write
-				// but its own contribution to the tree mtime is identical.
 				return report.mtimeMs;
 			}
+			// Path 3a — files have gone quiet.
 			if (activity >= startEpochMs && (Date.now() - activity) >= STOPPED_THRESHOLD_MS) {
 				return activity;
+			}
+			// Path 3b — turns have gone quiet (Pi event-based fallback). Only
+			// trip when we've seen at least one turn; otherwise an idle session
+			// with no activity yet would falsely register stopped.
+			if (liveActivity.lastTurnEndAt && liveActivity.turn > 0
+				&& (Date.now() - liveActivity.lastTurnEndAt) >= STOPPED_THRESHOLD_MS) {
+				return liveActivity.lastTurnEndAt;
 			}
 			return undefined;
 		};
@@ -880,6 +1046,114 @@ export default function (pi: ExtensionAPI) {
 		// starts; refreshed back to idle when the run ends.
 		registerIdleWidget();
 	});
+
+	// ── Live-activity event hooks (Layer 1 event-driven monitoring) ─────────
+	// These run for *every* Pi turn and tool call regardless of whether the
+	// autoresearch agent writes results.tsv / progress.json. The widget pulls
+	// from `liveActivity` on every render — see renderProgressDashboard.
+
+	pi.on("turn_start", async (event) => {
+		liveActivity.turn = event.turnIndex;
+		liveActivity.currentTool = undefined;
+		invalidateIfActive();
+	});
+
+	pi.on("tool_call", async (event) => {
+		const input = (event as any).input;
+		liveActivity.currentTool = {
+			name: event.toolName,
+			summary: formatToolCall(event.toolName, input),
+			startedAt: Date.now(),
+			toolCallId: event.toolCallId,
+		};
+
+		// Layer 2: derive experiment cycles from tool-call patterns.
+		// edit *SKILL.md  → mark cycle in progress
+		// bash 'git commit'     → if in progress, close as "keep"
+		// bash 'git reset --hard' → if in progress, close as "discard"
+		try {
+			if (event.toolName === "edit" && typeof input?.path === "string" && /SKILL\.md$/.test(input.path)) {
+				liveActivity.skillEditedSinceLastBoundary = true;
+			} else if (event.toolName === "write" && typeof input?.path === "string" && /SKILL\.md$/.test(input.path)) {
+				liveActivity.skillEditedSinceLastBoundary = true;
+			} else if (event.toolName === "bash" && typeof input?.command === "string") {
+				const cmd = input.command;
+				const isCommit       = /(^|[\s&;])git\s+commit\b/.test(cmd);
+				const isHardReset    = /(^|[\s&;])git\s+reset\s+--hard\b/.test(cmd);
+				const isRestoreSkill = /(^|[\s&;])git\s+restore\b.*SKILL\.md/.test(cmd);
+				if (liveActivity.skillEditedSinceLastBoundary) {
+					if (isCommit) {
+						liveActivity.experiments.push("keep");
+						liveActivity.skillEditedSinceLastBoundary = false;
+					} else if (isHardReset || isRestoreSkill) {
+						liveActivity.experiments.push("discard");
+						liveActivity.skillEditedSinceLastBoundary = false;
+					}
+					// Cap history so memory stays bounded.
+					if (liveActivity.experiments.length > 256) {
+						liveActivity.experiments.splice(0, liveActivity.experiments.length - 256);
+					}
+				}
+			}
+		} catch { /* never let event handlers crash the agent loop */ }
+
+		invalidateIfActive();
+	});
+
+	pi.on("tool_execution_end", async (event) => {
+		if (liveActivity.currentTool && liveActivity.currentTool.toolCallId === event.toolCallId) {
+			liveActivity.lastTool = {
+				name: liveActivity.currentTool.name,
+				summary: liveActivity.currentTool.summary,
+				endedAt: Date.now(),
+			};
+			liveActivity.currentTool = undefined;
+		}
+		liveActivity.toolCounts[event.toolName] = (liveActivity.toolCounts[event.toolName] || 0) + 1;
+		invalidateIfActive();
+	});
+
+	pi.on("turn_end", async (event) => {
+		const m: any = event.message;
+		if (m && m.role === "assistant" && m.usage) {
+			liveActivity.totals.input      += m.usage.input      || 0;
+			liveActivity.totals.output     += m.usage.output     || 0;
+			liveActivity.totals.cacheRead  += m.usage.cacheRead  || 0;
+			liveActivity.totals.cacheWrite += m.usage.cacheWrite || 0;
+			liveActivity.totals.cost       += m.usage.cost?.total || 0;
+		}
+		liveActivity.lastTurnEndAt = Date.now();
+		invalidateIfActive();
+	});
+
+	// Layer 2: agent_end is the cleanest "run is done" signal we can get from
+	// Pi. Independent of whether the agent wrote any protocol files. Sets
+	// liveActivity.agentEndedAt; detectStop() in the watcher honors it.
+	pi.on("agent_end", async (_event, ctx) => {
+		liveActivity.agentEndedAt = Date.now();
+		liveActivity.currentTool = undefined;
+		if (!liveActivity.agentEndNotified && ctx) {
+			liveActivity.agentEndNotified = true;
+			try { process.stdout.write("\x07"); } catch {}
+			try {
+				const expCount = liveActivity.experiments.length;
+				const summary = expCount > 0
+					? `Agent finished — ${expCount} experiments observed, $${liveActivity.totals.cost.toFixed(3)} spent.`
+					: `Agent finished — ${liveActivity.turn} turns, $${liveActivity.totals.cost.toFixed(3)} spent.`;
+				ctx.ui.notify(summary, "info");
+			} catch {}
+		}
+		invalidateIfActive();
+	});
+
+	// Re-render the widget if it's currently registered. Used by event handlers.
+	function invalidateIfActive(): void {
+		if (!widgetCtx) return;
+		// The widget reads `progressSnapshot` and `liveActivity` from closure on
+		// every render; re-registering with the same factory triggers Pi to
+		// invalidate and redraw without resetting any other state.
+		registerIdleWidget();
+	}
 
 	pi.on("session_shutdown", async () => {
 		stopProgressWatcher();
