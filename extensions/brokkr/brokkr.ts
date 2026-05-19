@@ -264,11 +264,16 @@ export default function (pi: ExtensionAPI) {
 		// True after we observe an edit on *SKILL.md; reset after a
 		// commit/reset closes the cycle. Bridges edit→evals→commit-or-reset.
 		skillEditedSinceLastBoundary: boolean;
-		// Set when agent_end fires, the cleanest run-complete signal.
-		agentEndedAt?: number;
-		agentEndNotified?: boolean;
-		// Last turn_end timestamp — for "no turns for N seconds" stop fallback.
-		lastTurnEndAt?: number;
+		// Wall-clock of the most recent agent event (turn_start, tool_call,
+		// tool_execution_end, turn_end, agent_end). Used by detectStop() to
+		// derive "agent idle for >= STOPPED_THRESHOLD_MS" — a much more reliable
+		// completion signal than agent_end alone, which fires after EVERY agent
+		// loop (every time the agent yields to the user).
+		lastActivityAt: number;
+		// Set when sustained-idle stop is detected. Cleared on turn_start so a
+		// resumed conversation un-marks the widget.
+		stoppedAt?: number;
+		stopNotified?: boolean;
 	}
 
 	const liveActivity: LiveActivity = {
@@ -277,6 +282,7 @@ export default function (pi: ExtensionAPI) {
 		totals: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
 		experiments: [],
 		skillEditedSinceLastBoundary: false,
+		lastActivityAt: 0,
 	};
 
 	// Blended token rate — sonnet-ish ballpark. Users with different model mixes
@@ -780,7 +786,10 @@ export default function (pi: ExtensionAPI) {
 		progressSnapshot  = undefined;
 
 		const startEpochMs = Date.now();
-		let stoppedAnnounced = false;
+		// Notification-fired state lives on liveActivity so turn_start can
+		// re-arm it (a resumed conversation should get a fresh notification
+		// when it stops again).
+		liveActivity.stopNotified = false;
 		// When the run is detected as stopped, this captures the wall-clock
 		// instant of stop. Freezing elapsedSec at (stoppedAtMs - startEpochMs)
 		// stops the widget timer from ticking after the pipeline has actually
@@ -791,17 +800,25 @@ export default function (pi: ExtensionAPI) {
 
 		// Returns the wall-clock mtime to freeze at when the run is detected
 		// as stopped, or undefined while still running. Three paths, first wins:
-		//   1. Pi fired `agent_end` (most authoritative; from liveActivity).
+		//   1. Sustained-idle from Pi events: agent has had zero activity for
+		//      STOPPED_THRESHOLD_MS. This is the primary signal — works even
+		//      when the agent writes no files. Re-armed automatically when
+		//      turn_start fires (so a continued conversation un-stops).
 		//   2. A *-report.md file appeared post-start AND nothing in the tree
 		//      is newer (defends against placeholder reports).
-		//   3. All file indicators quiet for STOPPED_THRESHOLD_MS, OR no turn_end
-		//      for the same threshold (event-based fallback when the agent
-		//      never writes any files).
+		//   3. All file indicators quiet for STOPPED_THRESHOLD_MS — file-based
+		//      fallback for the rare case where Pi events aren't reaching us.
 		const detectStop = (): number | undefined => {
 			if (stoppedAtMs !== undefined) return stoppedAtMs;
-			// Path 1 — event-based: agent_end is the cleanest signal.
-			if (liveActivity.agentEndedAt && liveActivity.agentEndedAt >= startEpochMs) {
-				return liveActivity.agentEndedAt;
+			// Path 1 — sustained idle. Honor previously-detected stoppedAt
+			// from liveActivity (re-armed by turn_start when needed).
+			if (liveActivity.stoppedAt && liveActivity.stoppedAt >= startEpochMs) {
+				return liveActivity.stoppedAt;
+			}
+			if (liveActivity.lastActivityAt && liveActivity.lastActivityAt >= startEpochMs
+				&& (Date.now() - liveActivity.lastActivityAt) >= STOPPED_THRESHOLD_MS) {
+				liveActivity.stoppedAt = liveActivity.lastActivityAt;
+				return liveActivity.stoppedAt;
 			}
 			const activity = lastActivityMtimeMs(repoRoot, skillName);
 			const report = findLatestReport(repoRoot, skillName);
@@ -809,16 +826,9 @@ export default function (pi: ExtensionAPI) {
 			if (report && report.mtimeMs >= startEpochMs && report.mtimeMs >= activity - 1) {
 				return report.mtimeMs;
 			}
-			// Path 3a — files have gone quiet.
+			// Path 3 — files have gone quiet (rare fallback).
 			if (activity >= startEpochMs && (Date.now() - activity) >= STOPPED_THRESHOLD_MS) {
 				return activity;
-			}
-			// Path 3b — turns have gone quiet (Pi event-based fallback). Only
-			// trip when we've seen at least one turn; otherwise an idle session
-			// with no activity yet would falsely register stopped.
-			if (liveActivity.lastTurnEndAt && liveActivity.turn > 0
-				&& (Date.now() - liveActivity.lastTurnEndAt) >= STOPPED_THRESHOLD_MS) {
-				return liveActivity.lastTurnEndAt;
 			}
 			return undefined;
 		};
@@ -867,8 +877,8 @@ export default function (pi: ExtensionAPI) {
 					live: readLiveProgress(repoRoot, skillName),
 				};
 				renderWidget();
-				if (stopped && !stoppedAnnounced) {
-					stoppedAnnounced = true;
+				if (stopped && !liveActivity.stopNotified) {
+					liveActivity.stopNotified = true;
 					try { process.stdout.write("\x07"); } catch {}
 					try {
 						ctx.ui.notify(
@@ -996,8 +1006,8 @@ export default function (pi: ExtensionAPI) {
 			// Completion notification — fire bell + chat notify once when we detect
 			// the pipeline has wrapped up (report file appeared, or all indicators
 			// went quiet for STOPPED_THRESHOLD_MS).
-			if (shouldMarkStopped && !stoppedAnnounced) {
-				stoppedAnnounced = true;
+			if (shouldMarkStopped && !liveActivity.stopNotified) {
+				liveActivity.stopNotified = true;
 				try { process.stdout.write("\x07"); } catch {}
 				try {
 					ctx.ui.notify(
@@ -1055,11 +1065,17 @@ export default function (pi: ExtensionAPI) {
 	pi.on("turn_start", async (event) => {
 		liveActivity.turn = event.turnIndex;
 		liveActivity.currentTool = undefined;
+		liveActivity.lastActivityAt = Date.now();
+		// Re-arm: if a previous idle period tripped the stop banner, clear
+		// it now that the agent has resumed working.
+		liveActivity.stoppedAt = undefined;
+		liveActivity.stopNotified = false;
 		invalidateIfActive();
 	});
 
 	pi.on("tool_call", async (event) => {
 		const input = (event as any).input;
+		liveActivity.lastActivityAt = Date.now();
 		liveActivity.currentTool = {
 			name: event.toolName,
 			summary: formatToolCall(event.toolName, input),
@@ -1101,6 +1117,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("tool_execution_end", async (event) => {
+		liveActivity.lastActivityAt = Date.now();
 		if (liveActivity.currentTool && liveActivity.currentTool.toolCallId === event.toolCallId) {
 			liveActivity.lastTool = {
 				name: liveActivity.currentTool.name,
@@ -1122,27 +1139,18 @@ export default function (pi: ExtensionAPI) {
 			liveActivity.totals.cacheWrite += m.usage.cacheWrite || 0;
 			liveActivity.totals.cost       += m.usage.cost?.total || 0;
 		}
-		liveActivity.lastTurnEndAt = Date.now();
+		liveActivity.lastActivityAt = Date.now();
 		invalidateIfActive();
 	});
 
-	// Layer 2: agent_end is the cleanest "run is done" signal we can get from
-	// Pi. Independent of whether the agent wrote any protocol files. Sets
-	// liveActivity.agentEndedAt; detectStop() in the watcher honors it.
-	pi.on("agent_end", async (_event, ctx) => {
-		liveActivity.agentEndedAt = Date.now();
+	// agent_end fires at the END of every agent loop — including when the
+	// agent yields to the user mid-pipeline (e.g., preflight aborted, asking
+	// to commit). It is NOT a "pipeline finished" signal. We use it as an
+	// activity timestamp only; sustained-idle in detectStop() decides when
+	// to actually mark the run stopped.
+	pi.on("agent_end", async () => {
+		liveActivity.lastActivityAt = Date.now();
 		liveActivity.currentTool = undefined;
-		if (!liveActivity.agentEndNotified && ctx) {
-			liveActivity.agentEndNotified = true;
-			try { process.stdout.write("\x07"); } catch {}
-			try {
-				const expCount = liveActivity.experiments.length;
-				const summary = expCount > 0
-					? `Agent finished — ${expCount} experiments observed, $${liveActivity.totals.cost.toFixed(3)} spent.`
-					: `Agent finished — ${liveActivity.turn} turns, $${liveActivity.totals.cost.toFixed(3)} spent.`;
-				ctx.ui.notify(summary, "info");
-			} catch {}
-		}
 		invalidateIfActive();
 	});
 
