@@ -98,12 +98,14 @@ None of the above work?
 
 ### Step 6 — Write the eval file
 
-Output `evals/evals.json` following this schema:
+**The eval-file schema is fixed. Do NOT invent your own.** `/autoresearch-pipeline` and the optimization agents (`autoresearch-skill`, `autoresearch-skill-gepa`) read this exact shape. Files with different top-level keys (`schema`, `cases`, `checks`, `version`, etc.) are rejected at preflight and the user has to throw the work away. There is no auto-migration.
+
+#### Canonical schema — exactly this shape
 
 ```json
 {
   "skill_name": "<name>",
-  "eval_hash": "<will be set by autoresearch-skill>",
+  "eval_hash": "",
   "evals": [
     {
       "id": 1,
@@ -132,7 +134,22 @@ Output `evals/evals.json` following this schema:
 }
 ```
 
-The `visual` example is shown for completeness; only use it for artifact-producing skills after reading the extended workflow below.
+Top-level keys, exactly: `skill_name`, `eval_hash` (empty string — the optimizer fills it), `evals`. No `schema`, no `version`, no `purpose`, no `cases`. The `visual` example is included for completeness; only use it for artifact-producing skills after reading the extended workflow below.
+
+Per-eval keys, exactly: `id`, `prompt`, `files`, `assertions`, `split`. Use `files: []` when no fixtures are needed (still required). Use `split: "train"` or `split: "holdout"` — never any other value.
+
+Per-assertion keys: `check` (string) and `type` (one of `deterministic`, `semantic`, `visual`). `reason` required when `type` is `semantic`. `selector` and `render` permitted only when `type` is `visual`.
+
+#### Self-validation before reporting done
+
+Before you finish Step 6 and move to Step 7, do this check explicitly:
+
+1. Read the file you just wrote.
+2. Parse it as JSON. If parsing fails, fix and re-write.
+3. Verify the top-level keys are exactly `skill_name`, `eval_hash`, `evals`. If you have `schema`, `cases`, `version`, or anything else as top-level keys, **the file is wrong** — rewrite it in the canonical shape. Do not proceed to Step 7 with a non-canonical file.
+4. Verify every eval has `id`, `prompt`, `files`, `assertions`, `split`. Verify every assertion has `type` and `check`.
+
+This guard exists because past agents have invented their own schemas (`pi.skill-evals.v1`, `argon-skill-evals/v1`, `{ cases: [...] }`) that look reasonable but break the pipeline. The optimizer can't adapt — fix it here.
 
 ### Step 7 — Report and review
 

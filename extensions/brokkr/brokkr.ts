@@ -285,6 +285,21 @@ export default function (pi: ExtensionAPI) {
 		lastActivityAt: 0,
 	};
 
+	// Armed by /optimize when it dispatches /gen-evals. When agent_end fires
+	// next and the eval file went from absent->present during this dispatch's
+	// lifetime, Brokkr auto-commits it on the user's behalf — eliminating the
+	// manual `git add && git commit` between /gen-evals and
+	// /autoresearch-pipeline. Safety: only commits the specific evalFile path,
+	// never `git add -A`. Disarmed after a commit attempt (success or fail) or
+	// when the user runs another /optimize action.
+	let pendingGenEvalsCommit: {
+		evalFile: string;
+		skillName: string;
+		fileExistedAtDispatch: boolean;
+		armedAt: number;
+		repoRoot: string;
+	} | undefined;
+
 	// Blended token rate — sonnet-ish ballpark. Users with different model mixes
 	// can override via env. Single rate is intentional: results.tsv has one
 	// `tokens` column (combined), not separated input/output.
@@ -1148,9 +1163,55 @@ export default function (pi: ExtensionAPI) {
 	// to commit). It is NOT a "pipeline finished" signal. We use it as an
 	// activity timestamp only; sustained-idle in detectStop() decides when
 	// to actually mark the run stopped.
-	pi.on("agent_end", async () => {
+	//
+	// agent_end is also the right moment to check whether a pending
+	// /gen-evals commit should fire: the agent yielded, the file may be on
+	// disk now, ready to lock in.
+	pi.on("agent_end", async (_event, ctx) => {
 		liveActivity.lastActivityAt = Date.now();
 		liveActivity.currentTool = undefined;
+
+		// Check pending /gen-evals auto-commit. Conditions for firing:
+		//   1. We armed pendingGenEvalsCommit on the most recent /optimize.
+		//   2. The eval file now exists (it was just written by /gen-evals).
+		//   3. The file didn't already exist at dispatch (don't auto-commit
+		//      a pre-existing file the user might be editing).
+		//   4. The arm is < 30min old (sanity bound).
+		if (pendingGenEvalsCommit && ctx) {
+			const pc = pendingGenEvalsCommit;
+			const aged = Date.now() - pc.armedAt > 30 * 60 * 1000;
+			if (aged) {
+				pendingGenEvalsCommit = undefined;
+			} else if (existsSync(pc.evalFile) && !pc.fileExistedAtDispatch) {
+				// Disarm BEFORE attempting commit so a failure doesn't loop.
+				pendingGenEvalsCommit = undefined;
+				try {
+					// Only stage the specific file — never `git add -A`.
+					execSync(`git -C "${pc.repoRoot}" add "${pc.evalFile}"`, { stdio: "pipe" });
+					execSync(
+						`git -C "${pc.repoRoot}" commit -m "Add ${pc.skillName} eval suite via /gen-evals"`,
+						{ stdio: "pipe" },
+					);
+					try {
+						ctx.ui.notify(
+							`Auto-committed ${pc.evalFile.replace(pc.repoRoot + "/", "")} — ready for /autoresearch-pipeline.`,
+							"info",
+						);
+					} catch { /* notify-only failure is non-fatal */ }
+				} catch (err: any) {
+					// Most common: pre-commit hook failure, signing config, or
+					// nothing-to-commit. Surface clearly so the user can fix
+					// and commit manually.
+					try {
+						ctx.ui.notify(
+							`Auto-commit of ${pc.evalFile} failed: ${(err?.message ?? err).toString().slice(0, 200)}. Commit manually before /autoresearch-pipeline.`,
+							"warning",
+						);
+					} catch {}
+				}
+			}
+		}
+
 		invalidateIfActive();
 	});
 
@@ -1578,6 +1639,17 @@ export default function (pi: ExtensionAPI) {
 					ctx.ui.notify("Agent is busy — wait for the current turn to finish, then re-run /optimize", "warning");
 					return;
 				}
+				// Arm the post-gen-evals auto-commit. We snapshot whether the
+				// eval file exists pre-dispatch so we only commit a freshly-
+				// generated file, never a pre-existing one the user may have
+				// edited locally.
+				pendingGenEvalsCommit = {
+					evalFile,
+					skillName: skill.name,
+					fileExistedAtDispatch: existsSync(evalFile),
+					armedAt: Date.now(),
+					repoRoot,
+				};
 				pi.sendUserMessage(`/gen-evals\n  SKILL_PATH=${skillPath}\n  EVAL_OUTPUT=${evalFile}`);
 				return;
 			}
