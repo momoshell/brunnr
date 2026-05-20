@@ -815,20 +815,27 @@ export default function (pi: ExtensionAPI) {
 			return out;
 		};
 
-		// Walk candidate roots, sort experiment dirs by mtime, extract a series.
+		// Walk candidate roots. Within each root, sort matching opt-*-style
+		// dirs by mtime descending — most recent run wins. This matters when
+		// multiple historical runs share the results/ root: without the sort
+		// readdirSync's alphabetical order would surface an old single-point
+		// run before a newer multi-experiment run.
 		for (const root of candidates) {
 			if (!existsSync(root)) continue;
 			let entries: string[];
 			try { entries = readdirSync(root); } catch { continue; }
-			// Look for opt-*/ subdir first (autoresearch agent's preferred layout).
 			const optDirs = entries
-				.map(e => join(root, e))
-				.filter(p => { try { return statSync(p).isDirectory(); } catch { return false; } })
-				.filter(p => /(opt|run|stage)-/.test(p) || /\b(autoresearch|stage)/.test(p));
-			const dirsToScan = optDirs.length > 0 ? optDirs : [root];
+				.map(e => ({ name: e, path: join(root, e) }))
+				.filter(x => { try { return statSync(x.path).isDirectory(); } catch { return false; } })
+				.filter(x => /(opt|run|stage)-/.test(x.name) || /\b(autoresearch|stage)/.test(x.name))
+				.sort((a, b) => {
+					try { return statSync(b.path).mtimeMs - statSync(a.path).mtimeMs; } catch { return 0; }
+				});
+			const dirsToScan = optDirs.length > 0 ? optDirs.map(x => x.path) : [root];
 
 			for (const dir of dirsToScan) {
-				// Inside each opt-* dir, look for exp*/ or baseline*/ subdirs.
+				// Inside each opt-* dir, look for exp*/ or baseline*/ subdirs
+				// sorted by exp number (then mtime as tiebreaker).
 				let subs: string[];
 				try { subs = readdirSync(dir); } catch { continue; }
 				const expDirs = subs
@@ -836,7 +843,6 @@ export default function (pi: ExtensionAPI) {
 					.filter(x => { try { return statSync(x.path).isDirectory(); } catch { return false; } })
 					.filter(x => /^(exp|baseline)/i.test(x.name))
 					.sort((a, b) => {
-						// Try numeric sort by exp number; fall back to mtime.
 						const na = parseInt((a.name.match(/\d+/) || ["0"])[0], 10);
 						const nb = parseInt((b.name.match(/\d+/) || ["0"])[0], 10);
 						if (na !== nb) return na - nb;
@@ -853,15 +859,21 @@ export default function (pi: ExtensionAPI) {
 					}
 				}
 
-				// Also try a top-level summary.json one level down (the agent
-				// sometimes puts the final summary at <opt>/full/summary.json).
-				const fullSummary = join(dir, "full", "summary.json");
-				if (existsSync(fullSummary)) {
-					try {
-						const j = JSON.parse(readFileSync(fullSummary, "utf-8"));
-						const r = extractRate(j);
-						if (r !== undefined) collected.push({ train: r });
-					} catch { /* skip */ }
+				// Final-only fallback: when no per-experiment dirs supplied
+				// data, accept the run-level summary at <opt>/full/summary.json
+				// or <opt>/summary.json. Skipped when per-exp data exists, so
+				// we don't double-count the same numbers.
+				if (collected.length === 0) {
+					for (const sub of ["full/summary.json", "summary.json"]) {
+						const p = join(dir, sub);
+						if (!existsSync(p)) continue;
+						try {
+							const j = JSON.parse(readFileSync(p, "utf-8"));
+							const r = extractRate(j);
+							if (r !== undefined) collected.push({ train: r });
+							break;
+						} catch { /* skip */ }
+					}
 				}
 
 				if (collected.length > 0) {
@@ -873,7 +885,7 @@ export default function (pi: ExtensionAPI) {
 						|| collected[collected.length - 1].holdout !== undefined) {
 						result.latestStatus = "agent-output";
 					}
-					return result;  // first source with data wins
+					return result;  // first opt-dir (most recent by mtime) with data wins
 				}
 			}
 		}
