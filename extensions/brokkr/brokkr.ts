@@ -754,18 +754,22 @@ export default function (pi: ExtensionAPI) {
 	//
 	// Defensive by design: tries multiple JSON schemas, falls back
 	// gracefully, returns empty arrays if nothing parseable is found.
-	function readAgentResults(repoRoot: string, skillName: string): {
+	function readAgentResults(repoRoot: string, skillName: string, sinceMs: number = 0): {
 		trainSeries: number[];
 		holdoutSeries: number[];
 		latestStatus?: string;
 	} {
 		const result = { trainSeries: [] as number[], holdoutSeries: [] as number[], latestStatus: undefined as string | undefined };
 
-		// Candidate root dirs to scan for per-experiment output.
+		// Candidate root dirs to scan for per-experiment output. The
+		// .pi/autoresearch/ root is included WITHOUT a skill subdir because
+		// the current autoresearch agents write to .pi/autoresearch/opt-*/
+		// (skill-less) — keep the skill-prefixed path too for older variants.
 		const candidates = [
 			join(repoRoot, "evals", "results"),
 			join(repoRoot, "results"),
 			join(repoRoot, ".pi", "autoresearch", skillName),
+			join(repoRoot, ".pi", "autoresearch"),
 		];
 
 		// Extract a numeric pass rate (0..100) from a JSON value, trying
@@ -816,10 +820,12 @@ export default function (pi: ExtensionAPI) {
 		};
 
 		// Walk candidate roots. Within each root, sort matching opt-*-style
-		// dirs by mtime descending — most recent run wins. This matters when
-		// multiple historical runs share the results/ root: without the sort
-		// readdirSync's alphabetical order would surface an old single-point
-		// run before a newer multi-experiment run.
+		// dirs by mtime descending — most recent run wins.
+		//
+		// sinceMs filter: only consider opt-dirs and exp-dirs modified after
+		// the current run's startEpochMs. Stops stale data from a previous
+		// optimization session leaking into the current widget when the new
+		// run hasn't written any experiments yet.
 		for (const root of candidates) {
 			if (!existsSync(root)) continue;
 			let entries: string[];
@@ -828,6 +834,10 @@ export default function (pi: ExtensionAPI) {
 				.map(e => ({ name: e, path: join(root, e) }))
 				.filter(x => { try { return statSync(x.path).isDirectory(); } catch { return false; } })
 				.filter(x => /(opt|run|stage)-/.test(x.name) || /\b(autoresearch|stage)/.test(x.name))
+				.filter(x => {
+					if (sinceMs <= 0) return true;
+					try { return statSync(x.path).mtimeMs >= sinceMs; } catch { return false; }
+				})
 				.sort((a, b) => {
 					try { return statSync(b.path).mtimeMs - statSync(a.path).mtimeMs; } catch { return 0; }
 				});
@@ -835,13 +845,19 @@ export default function (pi: ExtensionAPI) {
 
 			for (const dir of dirsToScan) {
 				// Inside each opt-* dir, look for exp*/ or baseline*/ subdirs
-				// sorted by exp number (then mtime as tiebreaker).
+				// sorted by exp number (then mtime as tiebreaker). Exp dirs
+				// are also mtime-filtered so a resumed run doesn't show
+				// data from the prior session.
 				let subs: string[];
 				try { subs = readdirSync(dir); } catch { continue; }
 				const expDirs = subs
 					.map(s => ({ name: s, path: join(dir, s) }))
 					.filter(x => { try { return statSync(x.path).isDirectory(); } catch { return false; } })
 					.filter(x => /^(exp|baseline)/i.test(x.name))
+					.filter(x => {
+						if (sinceMs <= 0) return true;
+						try { return statSync(x.path).mtimeMs >= sinceMs; } catch { return false; }
+					})
 					.sort((a, b) => {
 						const na = parseInt((a.name.match(/\d+/) || ["0"])[0], 10);
 						const nb = parseInt((b.name.match(/\d+/) || ["0"])[0], 10);
@@ -1069,7 +1085,9 @@ export default function (pi: ExtensionAPI) {
 				// When the agent skips results.tsv but writes its own
 				// per-experiment output (evals/results/<skill>-opt-*/exp*/...
 				// etc.), pick those up so the train/holdout sparklines render.
-				const adapter = readAgentResults(repoRoot, skillName);
+				// Pass startEpochMs as sinceMs so the adapter ignores stale data
+				// from previous optimization runs sharing the results/ root.
+				const adapter = readAgentResults(repoRoot, skillName, startEpochMs);
 				progressSnapshot = {
 					skillName,
 					stage: "",
