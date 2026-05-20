@@ -258,6 +258,14 @@ export default function (pi: ExtensionAPI) {
 			cacheWrite: number;
 			cost: number;        // dollars, summed from AssistantMessage.usage.cost.total
 		};
+		// Cost per turn for the spend sparkline. Each entry is the dollar cost
+		// of one turn (Usage.cost.total). Bounded so memory stays predictable
+		// across long sessions.
+		costPerTurn: number[];
+		// First turn_start timestamp during this brunnr brokkr session. Used
+		// for burn-rate calculations ($/hour, $/turn). Distinct from any
+		// per-pipeline startEpochMs in the watcher.
+		runStartAt?: number;
 		// Layer 2: synthetic experiment tracking derived from tool-call patterns.
 		// Used as a fallback display when results.tsv has no rows.
 		experiments: ("keep" | "discard")[];
@@ -283,6 +291,7 @@ export default function (pi: ExtensionAPI) {
 		experiments: [],
 		skillEditedSinceLastBoundary: false,
 		lastActivityAt: 0,
+		costPerTurn: [],
 	};
 
 	// Armed by /optimize when it dispatches /gen-evals. When agent_end fires
@@ -336,13 +345,15 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	// Build the live-activity rows from the LiveActivity closure state.
-	// Returns 0 rows when nothing has happened yet, 1-3 rows when active.
-	// Caller is responsible for padding/border.
-	function renderLiveActivity(theme: any, _inner: number): string[] {
+	// Returns 0 rows when nothing has happened yet. Original visualizations
+	// only — token totals (which Pi's footer already shows) are intentionally
+	// not duplicated here.
+	function renderLiveActivity(theme: any, inner: number): string[] {
 		if (liveActivity.turn === 0) return [];
-		const dim = (s: string) => theme.fg("dim", s);
-		const text = (s: string) => theme.fg("text", s);
+		const dim    = (s: string) => theme.fg("dim", s);
+		const text   = (s: string) => theme.fg("text", s);
 		const accent = (s: string) => theme.fg("accent", s);
+		const success = (s: string) => theme.fg("success", s);
 		const out: string[] = [];
 
 		// Row 1: Turn N · Now: <current-tool>  OR  Last: <last-tool>
@@ -356,25 +367,41 @@ export default function (pi: ExtensionAPI) {
 		}
 		out.push(turnPart + nowPart);
 
-		// Row 2: usage totals — ↑input ↓output R/W cache · $cost
+		// Row 2: spend-over-time sparkline + total + burn rate.
+		// The sparkline visualizes per-turn cost (Usage.cost.total). The rate
+		// numbers ($/hour, $/turn) help the user gauge whether the run is
+		// burning predictably or accelerating.
 		const t = liveActivity.totals;
-		if (t.input > 0 || t.output > 0 || t.cost > 0) {
-			const parts: string[] = [];
-			if (t.input > 0)      parts.push(`↑${formatTokens(t.input)}`);
-			if (t.output > 0)     parts.push(`↓${formatTokens(t.output)}`);
-			if (t.cacheRead > 0)  parts.push(`R${formatTokens(t.cacheRead)}`);
-			if (t.cacheWrite > 0) parts.push(`W${formatTokens(t.cacheWrite)}`);
-			if (t.cost > 0)       parts.push(`$${t.cost.toFixed(3)}`);
-			out.push(dim(parts.join("  ")));
+		if (t.cost > 0 && liveActivity.costPerTurn.length > 0) {
+			const elapsedMs = liveActivity.runStartAt
+				? Math.max(1, Date.now() - liveActivity.runStartAt)
+				: 1;
+			const dollarsPerHour = (t.cost / elapsedMs) * 3_600_000;
+			const dollarsPerTurn = t.cost / Math.max(1, liveActivity.costPerTurn.length);
+			const sparkWidth = Math.max(8, Math.min(32, inner - 32));
+			const spark = sparkline(liveActivity.costPerTurn, sparkWidth);
+			const sparkPart = `${dim("Spend ")}${accent(spark)}`;
+			const totalPart = `${success("$" + t.cost.toFixed(3))}`;
+			const ratePart  = dim(` ($${dollarsPerHour.toFixed(2)}/hr · $${dollarsPerTurn.toFixed(3)}/turn)`);
+			out.push(`${sparkPart}  ${totalPart}${ratePart}`);
 		}
 
-		// Row 3: tool-call tally
+		// Row 3+: tool-usage horizontal bar chart. Each tool gets a bar
+		// sized proportional to its share of total calls. Maximum bar width
+		// adapts to widget width but stays visually compact.
 		const counts = Object.entries(liveActivity.toolCounts)
 			.filter(([, n]) => n > 0)
 			.sort((a, b) => b[1] - a[1]);
 		if (counts.length > 0) {
-			const tally = counts.map(([name, n]) => `${name} ${n}`).join(" · ");
-			out.push(`${dim("Tools: ")}${text(tally)}`);
+			const maxCount = counts[0][1];
+			const maxName  = Math.min(8, Math.max(...counts.map(([n]) => n.length)));
+			const maxBarChars = Math.max(6, Math.min(24, inner - maxName - 12));
+			for (const [name, n] of counts) {
+				const barLen = Math.max(1, Math.round((n / maxCount) * maxBarChars));
+				const bar    = "█".repeat(barLen);
+				const namePad = name.padEnd(maxName);
+				out.push(`${dim(namePad)} ${accent(bar)} ${text(String(n))}`);
+			}
 		}
 
 		return out;
@@ -539,23 +566,23 @@ export default function (pi: ExtensionAPI) {
 		}
 		lines.push(pad(""));
 
-		// Stage row
-		const stageLabel: Record<string, string> = {
-			stage1:  "Stage 1 · hill-climb",
-			gepa:    "Stage 2 · GEPA reflection",
-			compact: "Stage 3 · compaction",
-		};
-		const stageText = stageLabel[snap.stage] || (snap.stage || "Stage —");
-		// Prefer file-based experiment count when available; fall back to the
-		// event-derived synthetic count (Layer 2). The synthetic count is a
-		// best-effort pattern match on git commit / git reset --hard following
-		// a SKILL.md edit — labeled with "~" to flag the approximation.
-		const expDisplay = snap.expCount > 0
-			? `experiments: ${snap.expCount}`
-			: liveActivity.experiments.length > 0
-				? `experiments: ~${liveActivity.experiments.length}`
-				: `experiments: 0`;
-		lines.push(pad(theme.fg("warning", stageText) + theme.fg("dim", `   ${expDisplay}`)));
+		// Stage row — only when results.tsv has real data. The agents we've
+		// observed in practice (custom Python eval runners) skip writing
+		// results.tsv entirely, so this whole file-based dashboard block stays
+		// hidden and the event-driven rows above carry the run.
+		const hasFileData = snap.expCount > 0;
+		if (hasFileData) {
+			const stageLabel: Record<string, string> = {
+				stage1:  "Stage 1 · hill-climb",
+				gepa:    "Stage 2 · GEPA reflection",
+				compact: "Stage 3 · compaction",
+			};
+			const stageText = stageLabel[snap.stage] || (snap.stage || "Stage —");
+			lines.push(pad(theme.fg("warning", stageText) + theme.fg("dim", `   experiments: ${snap.expCount}`)));
+		} else if (liveActivity.experiments.length > 0) {
+			// Synthetic experiment count from observed git commit/reset patterns.
+			lines.push(pad(theme.fg("dim", "~experiments: ") + theme.fg("text", String(liveActivity.experiments.length))));
+		}
 
 		// Live mid-experiment activity row (from progress.json). Hidden when the
 		// agent hasn't written one yet — keeps the widget compact for skills that
@@ -585,67 +612,71 @@ export default function (pi: ExtensionAPI) {
 			}
 		}
 
-		// Latest row
+		// Latest / Best / sparklines / Cost+ETA — all require real results.tsv
+		// data. Hidden when results.tsv is empty (which is most of the time
+		// with the current autoresearch agents) so the widget doesn't show
+		// stale "—%" rows.
 		const statusColor: Record<string, string> = {
 			keep:     "success",
 			baseline: "muted",
 			discard:  "muted",
 			crash:    "error",
 		};
-		const sColor = statusColor[snap.latestStatus] || "text";
-		const latestStatus = theme.fg(sColor, snap.latestStatus.padEnd(8));
-		const latestLine = `Latest: ${latestStatus}  train ${theme.fg("accent", snap.latestTrain + "%")}  holdout ${theme.fg("accent", snap.latestHoldout + "%")}`;
-		lines.push(pad(latestLine));
+		if (hasFileData) {
+			const sColor = statusColor[snap.latestStatus] || "text";
+			const latestStatus = theme.fg(sColor, snap.latestStatus.padEnd(8));
+			const latestLine = `Latest: ${latestStatus}  train ${theme.fg("accent", snap.latestTrain + "%")}  holdout ${theme.fg("accent", snap.latestHoldout + "%")}`;
+			lines.push(pad(latestLine));
 
-		// Best row + delta
-		if (snap.bestTrain !== undefined && snap.bestHoldout !== undefined) {
-			const bestLine = `Best:             train ${theme.fg("success", snap.bestTrain.toFixed(1) + "%")}  holdout ${theme.fg("success", snap.bestHoldout.toFixed(1) + "%")}`;
-			lines.push(pad(bestLine));
-			if (snap.baselineTrain !== undefined && snap.baselineHoldout !== undefined) {
-				const dt = snap.bestTrain - snap.baselineTrain;
-				const dh = snap.bestHoldout - snap.baselineHoldout;
-				const fmt = (n: number) => {
-					const sign = n >= 0 ? "+" : "";
-					const color = n > 0 ? "success" : n < 0 ? "error" : "muted";
-					return theme.fg(color, `${sign}${n.toFixed(1)} pts`);
-				};
-				lines.push(pad(theme.fg("dim", "Δ vs baseline: ") + `train ${fmt(dt)}  ·  holdout ${fmt(dh)}`));
+			// Best row + delta
+			if (snap.bestTrain !== undefined && snap.bestHoldout !== undefined) {
+				const bestLine = `Best:             train ${theme.fg("success", snap.bestTrain.toFixed(1) + "%")}  holdout ${theme.fg("success", snap.bestHoldout.toFixed(1) + "%")}`;
+				lines.push(pad(bestLine));
+				if (snap.baselineTrain !== undefined && snap.baselineHoldout !== undefined) {
+					const dt = snap.bestTrain - snap.baselineTrain;
+					const dh = snap.bestHoldout - snap.baselineHoldout;
+					const fmt = (n: number) => {
+						const sign = n >= 0 ? "+" : "";
+						const color = n > 0 ? "success" : n < 0 ? "error" : "muted";
+						return theme.fg(color, `${sign}${n.toFixed(1)} pts`);
+					};
+					lines.push(pad(theme.fg("dim", "Δ vs baseline: ") + `train ${fmt(dt)}  ·  holdout ${fmt(dh)}`));
+				}
 			}
-		}
 
-		// Sparklines — train and holdout pass-rate trajectory with trend arrow.
-		// Each block character = one experiment. Normalized to [0, 100].
-		if (snap.trainSeries.length >= 2 || snap.holdoutSeries.length >= 2) {
-			lines.push(pad(""));
-			const renderSpark = (label: string, series: number[]) => {
-				if (series.length === 0) return null;
-				const sl = sparkline(series, 28);
-				const last = series[series.length - 1];
-				const lastStr = isFinite(last) ? `${last.toFixed(1)}%` : "—";
-				const arrow = trendArrow(series);
-				const labelPart = theme.fg("dim", `${label.padEnd(8)}`);
-				const sparkPart = theme.fg("accent", sl);
-				const valuePart = theme.fg("text", `  ${lastStr.padStart(6)}`);
-				const arrowPart = `  ${theme.bold(theme.fg(arrow.color, arrow.glyph))}`;
-				return labelPart + sparkPart + valuePart + arrowPart;
-			};
-			const trainLine   = renderSpark("Train",   snap.trainSeries);
-			const holdoutLine = renderSpark("Holdout", snap.holdoutSeries);
-			if (trainLine)   lines.push(pad(trainLine));
-			if (holdoutLine) lines.push(pad(holdoutLine));
-		}
+			// Sparklines — train and holdout pass-rate trajectory with trend arrow.
+			if (snap.trainSeries.length >= 2 || snap.holdoutSeries.length >= 2) {
+				lines.push(pad(""));
+				const renderSpark = (label: string, series: number[]) => {
+					if (series.length === 0) return null;
+					const sl = sparkline(series, 28);
+					const last = series[series.length - 1];
+					const lastStr = isFinite(last) ? `${last.toFixed(1)}%` : "—";
+					const arrow = trendArrow(series);
+					const labelPart = theme.fg("dim", `${label.padEnd(8)}`);
+					const sparkPart = theme.fg("accent", sl);
+					const valuePart = theme.fg("text", `  ${lastStr.padStart(6)}`);
+					const arrowPart = `  ${theme.bold(theme.fg(arrow.color, arrow.glyph))}`;
+					return labelPart + sparkPart + valuePart + arrowPart;
+				};
+				const trainLine   = renderSpark("Train",   snap.trainSeries);
+				const holdoutLine = renderSpark("Holdout", snap.holdoutSeries);
+				if (trainLine)   lines.push(pad(trainLine));
+				if (holdoutLine) lines.push(pad(holdoutLine));
+			}
 
-		// Cost + ETA row
-		if (snap.totalTokens > 0 || snap.elapsedSec > 0) {
-			lines.push(pad(""));
-			const tokensStr = formatTokens(snap.totalTokens);
-			const costStr   = `$${snap.costEstimate.toFixed(2)}`;
-			const elapsedStr = formatDuration(snap.elapsedSec);
-			const etaPart = snap.etaSec !== undefined
-				? `   ETA ${theme.fg("warning", formatDuration(snap.etaSec))}${snap.maxExperiments ? theme.fg("dim", `  (${snap.expCount}/${snap.maxExperiments} exp)`) : ""}`
-				: "";
-			const costLine = `${theme.fg("dim", "Cost ")}${theme.fg("text", tokensStr.padStart(6) + " tokens · ")}${theme.fg("accent", costStr)}${theme.fg("dim", "    Elapsed ")}${theme.fg("text", elapsedStr)}${etaPart}`;
-			lines.push(pad(costLine));
+			// Token+cost+ETA row — only meaningful with file-based data.
+			if (snap.totalTokens > 0 || snap.elapsedSec > 0) {
+				lines.push(pad(""));
+				const tokensStr = formatTokens(snap.totalTokens);
+				const costStr   = `$${snap.costEstimate.toFixed(2)}`;
+				const elapsedStr = formatDuration(snap.elapsedSec);
+				const etaPart = snap.etaSec !== undefined
+					? `   ETA ${theme.fg("warning", formatDuration(snap.etaSec))}${snap.maxExperiments ? theme.fg("dim", `  (${snap.expCount}/${snap.maxExperiments} exp)`) : ""}`
+					: "";
+				const costLine = `${theme.fg("dim", "Cost ")}${theme.fg("text", tokensStr.padStart(6) + " tokens · ")}${theme.fg("accent", costStr)}${theme.fg("dim", "    Elapsed ")}${theme.fg("text", elapsedStr)}${etaPart}`;
+				lines.push(pad(costLine));
+			}
 		}
 
 		// Plateau watch — only shows if we're climbing the discard streak
@@ -1081,6 +1112,7 @@ export default function (pi: ExtensionAPI) {
 		liveActivity.turn = event.turnIndex;
 		liveActivity.currentTool = undefined;
 		liveActivity.lastActivityAt = Date.now();
+		if (!liveActivity.runStartAt) liveActivity.runStartAt = Date.now();
 		// Re-arm: if a previous idle period tripped the stop banner, clear
 		// it now that the agent has resumed working.
 		liveActivity.stoppedAt = undefined;
@@ -1152,7 +1184,13 @@ export default function (pi: ExtensionAPI) {
 			liveActivity.totals.output     += m.usage.output     || 0;
 			liveActivity.totals.cacheRead  += m.usage.cacheRead  || 0;
 			liveActivity.totals.cacheWrite += m.usage.cacheWrite || 0;
-			liveActivity.totals.cost       += m.usage.cost?.total || 0;
+			const turnCost = m.usage.cost?.total || 0;
+			liveActivity.totals.cost += turnCost;
+			liveActivity.costPerTurn.push(turnCost);
+			// Bound history so very long sessions don't grow unbounded.
+			if (liveActivity.costPerTurn.length > 512) {
+				liveActivity.costPerTurn.splice(0, liveActivity.costPerTurn.length - 512);
+			}
 		}
 		liveActivity.lastActivityAt = Date.now();
 		invalidateIfActive();
