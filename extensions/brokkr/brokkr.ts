@@ -386,24 +386,18 @@ export default function (pi: ExtensionAPI) {
 			out.push(`${sparkPart}  ${totalPart}${ratePart}`);
 		}
 
-		// Row 3+: tool-usage horizontal bar chart. Each tool gets a bar
-		// sized proportional to its share of total calls. Maximum bar width
-		// adapts to widget width but stays visually compact.
+		// Row 3: tool-call tally on a single line. Compact — earlier versions
+		// rendered a horizontal bar chart per tool but the user found it noisy.
 		const counts = Object.entries(liveActivity.toolCounts)
 			.filter(([, n]) => n > 0)
 			.sort((a, b) => b[1] - a[1]);
 		if (counts.length > 0) {
-			const maxCount = counts[0][1];
-			const maxName  = Math.min(8, Math.max(...counts.map(([n]) => n.length)));
-			const maxBarChars = Math.max(6, Math.min(24, inner - maxName - 12));
-			for (const [name, n] of counts) {
-				const barLen = Math.max(1, Math.round((n / maxCount) * maxBarChars));
-				const bar    = "█".repeat(barLen);
-				const namePad = name.padEnd(maxName);
-				out.push(`${dim(namePad)} ${accent(bar)} ${text(String(n))}`);
-			}
+			const tally = counts.map(([name, n]) => `${name} ${accent(String(n))}`).join(dim(" · "));
+			out.push(`${dim("Tools: ")}${tally}`);
 		}
 
+		// Mark `inner` as used (the bar chart path consumed it).
+		void inner;
 		return out;
 	}
 
@@ -644,27 +638,6 @@ export default function (pi: ExtensionAPI) {
 				}
 			}
 
-			// Sparklines — train and holdout pass-rate trajectory with trend arrow.
-			if (snap.trainSeries.length >= 2 || snap.holdoutSeries.length >= 2) {
-				lines.push(pad(""));
-				const renderSpark = (label: string, series: number[]) => {
-					if (series.length === 0) return null;
-					const sl = sparkline(series, 28);
-					const last = series[series.length - 1];
-					const lastStr = isFinite(last) ? `${last.toFixed(1)}%` : "—";
-					const arrow = trendArrow(series);
-					const labelPart = theme.fg("dim", `${label.padEnd(8)}`);
-					const sparkPart = theme.fg("accent", sl);
-					const valuePart = theme.fg("text", `  ${lastStr.padStart(6)}`);
-					const arrowPart = `  ${theme.bold(theme.fg(arrow.color, arrow.glyph))}`;
-					return labelPart + sparkPart + valuePart + arrowPart;
-				};
-				const trainLine   = renderSpark("Train",   snap.trainSeries);
-				const holdoutLine = renderSpark("Holdout", snap.holdoutSeries);
-				if (trainLine)   lines.push(pad(trainLine));
-				if (holdoutLine) lines.push(pad(holdoutLine));
-			}
-
 			// Token+cost+ETA row — only meaningful with file-based data.
 			if (snap.totalTokens > 0 || snap.elapsedSec > 0) {
 				lines.push(pad(""));
@@ -677,6 +650,30 @@ export default function (pi: ExtensionAPI) {
 				const costLine = `${theme.fg("dim", "Cost ")}${theme.fg("text", tokensStr.padStart(6) + " tokens · ")}${theme.fg("accent", costStr)}${theme.fg("dim", "    Elapsed ")}${theme.fg("text", elapsedStr)}${etaPart}`;
 				lines.push(pad(costLine));
 			}
+		}
+
+		// Train/holdout sparklines — render whenever we have series data,
+		// regardless of whether it came from results.tsv (hasFileData) or
+		// from the agent-output adapter (readAgentResults). This is the
+		// "training effect" curve: pass rate per experiment over the run.
+		if (snap.trainSeries.length >= 2 || snap.holdoutSeries.length >= 2 || snap.trainSeries.length === 1 || snap.holdoutSeries.length === 1) {
+			lines.push(pad(""));
+			const renderSpark = (label: string, series: number[]) => {
+				if (series.length === 0) return null;
+				const sl = sparkline(series, 28);
+				const last = series[series.length - 1];
+				const lastStr = isFinite(last) ? `${last.toFixed(1)}%` : "—";
+				const arrow = trendArrow(series);
+				const labelPart = theme.fg("dim", `${label.padEnd(8)}`);
+				const sparkPart = theme.fg("accent", sl);
+				const valuePart = theme.fg("text", `  ${lastStr.padStart(6)}`);
+				const arrowPart = `  ${theme.bold(theme.fg(arrow.color, arrow.glyph))}`;
+				return labelPart + sparkPart + valuePart + arrowPart;
+			};
+			const trainLine   = renderSpark("Train",   snap.trainSeries);
+			const holdoutLine = renderSpark("Holdout", snap.holdoutSeries);
+			if (trainLine)   lines.push(pad(trainLine));
+			if (holdoutLine) lines.push(pad(holdoutLine));
 		}
 
 		// Plateau watch — only shows if we're climbing the discard streak
@@ -739,6 +736,142 @@ export default function (pi: ExtensionAPI) {
 				ts:           typeof j.ts           === "string" ? j.ts           : undefined,
 			};
 		} catch { return undefined; }
+	}
+
+	// Best-effort adapter for agent-written eval results in non-canonical
+	// locations. The autoresearch-skill agent is supposed to write
+	// results.tsv at the repo root, but in practice it invents its own
+	// output layouts: evals/results/<skill>-opt-*/exp*/...,
+	// .pi/autoresearch/<skill>/<run-tag>/..., etc. This adapter scans a
+	// handful of likely paths and tries to extract per-experiment pass
+	// rates so the existing train/holdout sparkline can render.
+	//
+	// Defensive by design: tries multiple JSON schemas, falls back
+	// gracefully, returns empty arrays if nothing parseable is found.
+	function readAgentResults(repoRoot: string, skillName: string): {
+		trainSeries: number[];
+		holdoutSeries: number[];
+		latestStatus?: string;
+	} {
+		const result = { trainSeries: [] as number[], holdoutSeries: [] as number[], latestStatus: undefined as string | undefined };
+
+		// Candidate root dirs to scan for per-experiment output.
+		const candidates = [
+			join(repoRoot, "evals", "results"),
+			join(repoRoot, "results"),
+			join(repoRoot, ".pi", "autoresearch", skillName),
+		];
+
+		// Extract a numeric pass rate (0..100) from a JSON value, trying
+		// several common field names.
+		const extractRate = (j: any): number | undefined => {
+			if (!j || typeof j !== "object") return undefined;
+			const keys = ["pass_rate", "passRate", "rate", "score", "pct"];
+			for (const k of keys) {
+				const v = j[k];
+				if (typeof v === "number" && isFinite(v)) {
+					return v <= 1 ? v * 100 : v;  // accept 0..1 or 0..100
+				}
+			}
+			if (typeof j.passed === "number" && typeof j.total === "number" && j.total > 0) {
+				return (j.passed / j.total) * 100;
+			}
+			if (typeof j.pass === "number" && typeof j.total === "number" && j.total > 0) {
+				return (j.pass / j.total) * 100;
+			}
+			return undefined;
+		};
+
+		// Try to read a single experiment's pass rate from a directory by
+		// inspecting any *.json file inside.
+		const rateFromDir = (dir: string): { train?: number; holdout?: number } => {
+			const out: { train?: number; holdout?: number } = {};
+			try {
+				for (const entry of readdirSync(dir)) {
+					if (!entry.endsWith(".json")) continue;
+					const p = join(dir, entry);
+					try {
+						const j = JSON.parse(readFileSync(p, "utf-8"));
+						// Look for explicit train/holdout fields first.
+						if (typeof j.train === "number" && isFinite(j.train)) out.train = j.train <= 1 ? j.train * 100 : j.train;
+						if (typeof j.holdout === "number" && isFinite(j.holdout)) out.holdout = j.holdout <= 1 ? j.holdout * 100 : j.holdout;
+						if (out.train !== undefined || out.holdout !== undefined) continue;
+						// Otherwise infer split from filename or dir name and use rate.
+						const r = extractRate(j);
+						if (r !== undefined) {
+							const lower = (entry + " " + dir).toLowerCase();
+							if (lower.includes("holdout")) out.holdout = r;
+							else                            out.train = r;
+						}
+					} catch { /* skip unparseable */ }
+				}
+			} catch { /* skip unreadable dir */ }
+			return out;
+		};
+
+		// Walk candidate roots, sort experiment dirs by mtime, extract a series.
+		for (const root of candidates) {
+			if (!existsSync(root)) continue;
+			let entries: string[];
+			try { entries = readdirSync(root); } catch { continue; }
+			// Look for opt-*/ subdir first (autoresearch agent's preferred layout).
+			const optDirs = entries
+				.map(e => join(root, e))
+				.filter(p => { try { return statSync(p).isDirectory(); } catch { return false; } })
+				.filter(p => /(opt|run|stage)-/.test(p) || /\b(autoresearch|stage)/.test(p));
+			const dirsToScan = optDirs.length > 0 ? optDirs : [root];
+
+			for (const dir of dirsToScan) {
+				// Inside each opt-* dir, look for exp*/ or baseline*/ subdirs.
+				let subs: string[];
+				try { subs = readdirSync(dir); } catch { continue; }
+				const expDirs = subs
+					.map(s => ({ name: s, path: join(dir, s) }))
+					.filter(x => { try { return statSync(x.path).isDirectory(); } catch { return false; } })
+					.filter(x => /^(exp|baseline)/i.test(x.name))
+					.sort((a, b) => {
+						// Try numeric sort by exp number; fall back to mtime.
+						const na = parseInt((a.name.match(/\d+/) || ["0"])[0], 10);
+						const nb = parseInt((b.name.match(/\d+/) || ["0"])[0], 10);
+						if (na !== nb) return na - nb;
+						try {
+							return statSync(a.path).mtimeMs - statSync(b.path).mtimeMs;
+						} catch { return 0; }
+					});
+
+				const collected: { train?: number; holdout?: number }[] = [];
+				for (const ed of expDirs) {
+					const rates = rateFromDir(ed.path);
+					if (rates.train !== undefined || rates.holdout !== undefined) {
+						collected.push(rates);
+					}
+				}
+
+				// Also try a top-level summary.json one level down (the agent
+				// sometimes puts the final summary at <opt>/full/summary.json).
+				const fullSummary = join(dir, "full", "summary.json");
+				if (existsSync(fullSummary)) {
+					try {
+						const j = JSON.parse(readFileSync(fullSummary, "utf-8"));
+						const r = extractRate(j);
+						if (r !== undefined) collected.push({ train: r });
+					} catch { /* skip */ }
+				}
+
+				if (collected.length > 0) {
+					for (const c of collected) {
+						if (c.train !== undefined)   result.trainSeries.push(c.train);
+						if (c.holdout !== undefined) result.holdoutSeries.push(c.holdout);
+					}
+					if (collected[collected.length - 1].train !== undefined
+						|| collected[collected.length - 1].holdout !== undefined) {
+						result.latestStatus = "agent-output";
+					}
+					return result;  // first source with data wins
+				}
+			}
+		}
+		return result;
 	}
 
 	// Find the most recent *-report.md file in .pi/autoresearch/<skill>/.
@@ -903,6 +1036,10 @@ export default function (pi: ExtensionAPI) {
 					? (stoppedAtMs - startEpochMs) / 1000
 					: (Date.now() - startEpochMs) / 1000;
 				const stopped = stoppedAtMs !== undefined;
+				// When the agent skips results.tsv but writes its own
+				// per-experiment output (evals/results/<skill>-opt-*/exp*/...
+				// etc.), pick those up so the train/holdout sparklines render.
+				const adapter = readAgentResults(repoRoot, skillName);
 				progressSnapshot = {
 					skillName,
 					stage: "",
@@ -912,8 +1049,8 @@ export default function (pi: ExtensionAPI) {
 					latestHoldout: "—",
 					latestStatus: stopped ? "done" : "waiting",
 					history: [],
-					trainSeries: [],
-					holdoutSeries: [],
+					trainSeries: adapter.trainSeries,
+					holdoutSeries: adapter.holdoutSeries,
 					totalTokens: 0,
 					costEstimate: 0,
 					elapsedSec,
