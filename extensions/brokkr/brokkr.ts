@@ -481,6 +481,91 @@ export default function (pi: ExtensionAPI) {
 		} catch { /* widget API may be unavailable in some modes */ }
 	}
 
+	// Detect an in-progress autoresearch run via filesystem + git signals.
+	// Brokkr's progress watcher is normally activated by the /optimize action
+	// picker, but users who fire /autoresearch-pipeline directly (or paste a
+	// command) bypass it. We sniff three independent signals so we don't miss
+	// a run regardless of how it was started:
+	//
+	//   1. Current git branch matches autoresearch-skill/<tag> (or -gepa, or
+	//      -pipeline). The autoresearch agents check out this branch as their
+	//      first setup step.
+	//   2. .pi/autoresearch/<skill>/progress.json exists. The 3.0.3 protocol
+	//      tells the agent to write it after each eval+run; we use the skill
+	//      name as embedded in the path.
+	//   3. results.tsv at repo root with the canonical header — the
+	//      authoritative experiment ledger.
+	//
+	// Returns the skill name when found, otherwise undefined. Skill name is
+	// preferred from the .pi/autoresearch/<skill>/ path (most reliable); we
+	// fall back to other inferences when only branch or results.tsv is seen.
+	function detectActiveAutoresearch(repoRoot: string): { skillName: string } | undefined {
+		// Path 1: progress.json gives us the skill name explicitly.
+		const arDir = join(repoRoot, ".pi", "autoresearch");
+		if (existsSync(arDir)) {
+			try {
+				for (const entry of readdirSync(arDir)) {
+					const skillProgress = join(arDir, entry, "progress.json");
+					if (existsSync(skillProgress)) {
+						return { skillName: entry };
+					}
+				}
+			} catch { /* fall through */ }
+		}
+
+		// Path 2: branch name. We can't recover the skill name from the branch
+		// alone (it only carries the RUN_TAG), so we try to derive it from the
+		// most recently modified SKILL.md in the project.
+		try {
+			const branch = execSync(`git -C "${repoRoot}" branch --show-current`, { stdio: ["pipe", "pipe", "ignore"] })
+				.toString().trim();
+			if (/^autoresearch-(skill|skill-gepa|pipeline|agent)\//.test(branch)) {
+				const skillName = guessSkillNameFromWorkingTree(repoRoot);
+				if (skillName) return { skillName };
+			}
+		} catch { /* not a git repo or git failed */ }
+
+		// Path 3: results.tsv presence at repo root. Same skill-name caveat.
+		const tsv = join(repoRoot, "results.tsv");
+		if (existsSync(tsv)) {
+			const skillName = guessSkillNameFromWorkingTree(repoRoot);
+			if (skillName) return { skillName };
+		}
+
+		return undefined;
+	}
+
+	// Find the most recently modified SKILL.md under .pi/skills/ — used as a
+	// best-effort guess at "which skill is being optimized" when the agent's
+	// output paths don't include the skill name.
+	function guessSkillNameFromWorkingTree(repoRoot: string): string | undefined {
+		const dir = join(repoRoot, ".pi", "skills");
+		if (!existsSync(dir)) return undefined;
+		try {
+			let best: { name: string; mtimeMs: number } | undefined;
+			for (const entry of readdirSync(dir)) {
+				const skillFile = join(dir, entry, "SKILL.md");
+				if (!existsSync(skillFile)) continue;
+				try {
+					const m = statSync(skillFile).mtimeMs;
+					if (!best || m > best.mtimeMs) best = { name: entry, mtimeMs: m };
+				} catch { /* skip */ }
+			}
+			return best?.name;
+		} catch { return undefined; }
+	}
+
+	// Start a watcher if (a) one isn't already running, AND (b) we can detect
+	// an active autoresearch run via filesystem signals. Cheap to call on
+	// session_start and turn_start: bails immediately when no run is active.
+	function maybeAutoStartWatcher(ctx: ExtensionContext): void {
+		if (progressTimer) return; // already running
+		const repoRoot = gitRepoRoot(ctx.cwd) ?? ctx.cwd;
+		const detected = detectActiveAutoresearch(repoRoot);
+		if (!detected) return;
+		startProgressWatcher(ctx, repoRoot, detected.skillName);
+	}
+
 	function stopProgressWatcher(): void {
 		if (progressTimer) { clearInterval(progressTimer); progressTimer = undefined; }
 		progressSnapshot = undefined;
@@ -1286,6 +1371,13 @@ export default function (pi: ExtensionAPI) {
 		// "no run in progress". Replaced by the active dashboard when a run
 		// starts; refreshed back to idle when the run ends.
 		registerIdleWidget();
+
+		// If the user launched Brokkr in a project that already has an
+		// autoresearch run in progress (e.g., a previous session was
+		// terminated mid-run, or /autoresearch-pipeline was fired directly
+		// without going through the /optimize action picker), auto-start the
+		// watcher so the widget shows the in-flight progress immediately.
+		maybeAutoStartWatcher(_ctx);
 	});
 
 	// ── Live-activity event hooks (Layer 1 event-driven monitoring) ─────────
@@ -1293,7 +1385,7 @@ export default function (pi: ExtensionAPI) {
 	// autoresearch agent writes results.tsv / progress.json. The widget pulls
 	// from `liveActivity` on every render — see renderProgressDashboard.
 
-	pi.on("turn_start", async (event) => {
+	pi.on("turn_start", async (event, ctx) => {
 		liveActivity.turn = event.turnIndex;
 		liveActivity.currentTool = undefined;
 		liveActivity.lastActivityAt = Date.now();
@@ -1302,6 +1394,10 @@ export default function (pi: ExtensionAPI) {
 		// it now that the agent has resumed working.
 		liveActivity.stoppedAt = undefined;
 		liveActivity.stopNotified = false;
+		// If autoresearch was started mid-Brokkr-session (without going
+		// through the /optimize action picker), pick it up on the next turn.
+		// Cheap when no run is active.
+		if (ctx) maybeAutoStartWatcher(ctx);
 		invalidateIfActive();
 	});
 
