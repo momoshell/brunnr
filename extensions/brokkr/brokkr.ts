@@ -278,6 +278,12 @@ export default function (pi: ExtensionAPI) {
 		// completion signal than agent_end alone, which fires after EVERY agent
 		// loop (every time the agent yields to the user).
 		lastActivityAt: number;
+		// Set when tool_execution_start fires; cleared when tool_execution_end
+		// fires for the matching toolCallId. Long-running tools (a 15-minute
+		// bash, an interactive editor) wouldn't fire any events in between, so
+		// without this guard the idle detector would falsely mark the run
+		// stopped while the tool is still running.
+		currentlyExecutingToolCallId?: string;
 		// Set when sustained-idle stop is detected. Cleared on turn_start so a
 		// resumed conversation un-marks the widget.
 		stoppedAt?: number;
@@ -989,6 +995,18 @@ export default function (pi: ExtensionAPI) {
 		//      fallback for the rare case where Pi events aren't reaching us.
 		const detectStop = (): number | undefined => {
 			if (stoppedAtMs !== undefined) return stoppedAtMs;
+			// Hard veto #1: a tool is actively executing right now. Long bash
+			// commands (multi-minute eval scripts) wouldn't fire any events in
+			// between start and end, so the idle-threshold path below would
+			// false-trigger without this guard.
+			if (liveActivity.currentlyExecutingToolCallId) return undefined;
+			// Hard veto #2: Pi reports the agent is still streaming. Pi's
+			// own authoritative "is the agent working right now" signal —
+			// only available via the ExtensionContext API. Refuse to mark
+			// stopped when Pi disagrees.
+			try {
+				if (widgetCtx?.isIdle && widgetCtx.isIdle() === false) return undefined;
+			} catch { /* isIdle unavailable — fall through */ }
 			// Path 1 — sustained idle. Honor previously-detected stoppedAt
 			// from liveActivity (re-armed by turn_start when needed).
 			if (liveActivity.stoppedAt && liveActivity.stoppedAt >= startEpochMs) {
@@ -1300,8 +1318,23 @@ export default function (pi: ExtensionAPI) {
 		invalidateIfActive();
 	});
 
+	pi.on("tool_execution_start", async (event) => {
+		liveActivity.lastActivityAt = Date.now();
+		liveActivity.currentlyExecutingToolCallId = event.toolCallId;
+		invalidateIfActive();
+	});
+
+	pi.on("tool_execution_update", async () => {
+		// Long-running tools (multi-minute bash) stream output through this
+		// event. Use it as a heartbeat so the idle detector doesn't false-stop.
+		liveActivity.lastActivityAt = Date.now();
+	});
+
 	pi.on("tool_execution_end", async (event) => {
 		liveActivity.lastActivityAt = Date.now();
+		if (liveActivity.currentlyExecutingToolCallId === event.toolCallId) {
+			liveActivity.currentlyExecutingToolCallId = undefined;
+		}
 		if (liveActivity.currentTool && liveActivity.currentTool.toolCallId === event.toolCallId) {
 			liveActivity.lastTool = {
 				name: liveActivity.currentTool.name,
