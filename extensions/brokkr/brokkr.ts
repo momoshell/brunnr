@@ -713,20 +713,30 @@ export default function (pi: ExtensionAPI) {
 			const latestLine = `Latest: ${latestStatus}  train ${theme.fg("accent", snap.latestTrain + "%")}  holdout ${theme.fg("accent", snap.latestHoldout + "%")}`;
 			lines.push(pad(latestLine));
 
-			// Best row + delta
-			if (snap.bestTrain !== undefined && snap.bestHoldout !== undefined) {
-				const bestLine = `Best:             train ${theme.fg("success", snap.bestTrain.toFixed(1) + "%")}  holdout ${theme.fg("success", snap.bestHoldout.toFixed(1) + "%")}`;
-				lines.push(pad(bestLine));
-				if (snap.baselineTrain !== undefined && snap.baselineHoldout !== undefined) {
-					const dt = snap.bestTrain - snap.baselineTrain;
-					const dh = snap.bestHoldout - snap.baselineHoldout;
-					const fmt = (n: number) => {
-						const sign = n >= 0 ? "+" : "";
-						const color = n > 0 ? "success" : n < 0 ? "error" : "muted";
-						return theme.fg(color, `${sign}${n.toFixed(1)} pts`);
-					};
-					lines.push(pad(theme.fg("dim", "Δ vs baseline: ") + `train ${fmt(dt)}  ·  holdout ${fmt(dh)}`));
-				}
+			// Best row + delta — render whatever is parseable. Hides cleanly
+			// when neither axis has data, shows partial when only train (or
+			// only holdout) data exists. Earlier versions hid the whole row
+			// unless both axes were defined, which dropped good train info.
+			const fmtPct = (n: number | undefined) =>
+				n !== undefined && isFinite(n) ? `${n.toFixed(1)}%` : "—";
+			if (snap.bestTrain !== undefined || snap.bestHoldout !== undefined) {
+				const trainStr   = snap.bestTrain   !== undefined ? theme.fg("success", fmtPct(snap.bestTrain))   : theme.fg("dim", "—");
+				const holdoutStr = snap.bestHoldout !== undefined ? theme.fg("success", fmtPct(snap.bestHoldout)) : theme.fg("dim", "—");
+				lines.push(pad(`Best:             train ${trainStr}  holdout ${holdoutStr}`));
+
+				// Δ vs baseline — per-axis, only when both axis baseline AND best are real.
+				const fmtDelta = (best?: number, base?: number) => {
+					if (best === undefined || base === undefined || !isFinite(best) || !isFinite(base)) {
+						return theme.fg("dim", "—");
+					}
+					const d = best - base;
+					const sign  = d >= 0 ? "+" : "";
+					const color = d > 0 ? "success" : d < 0 ? "error" : "muted";
+					return theme.fg(color, `${sign}${d.toFixed(1)} pts`);
+				};
+				const dt = fmtDelta(snap.bestTrain, snap.baselineTrain);
+				const dh = fmtDelta(snap.bestHoldout, snap.baselineHoldout);
+				lines.push(pad(theme.fg("dim", "Δ vs baseline: ") + `train ${dt}  ·  holdout ${dh}`));
 			}
 
 			// Token+cost+ETA row — only meaningful with file-based data.
@@ -777,7 +787,17 @@ export default function (pi: ExtensionAPI) {
 		// has rows, use those (full per-experiment status). Otherwise fall back
 		// to the Layer-2 synthetic history derived from observed git commits /
 		// resets — labeled "~History" to flag the approximation.
-		const glyph: Record<string, string> = { keep: "K", baseline: "B", discard: "D", crash: "X" };
+		// Status → single-char glyph for the history strip. The autoresearch
+		// protocol uses "baseline" (skill loaded) and "baseline-no-skill" (the
+		// no-skill floor); both render as "B" so the strip stays compact.
+		// Unknown statuses fall through to "?" — surfaces protocol divergence.
+		const glyph: Record<string, string> = {
+			keep:                 "K",
+			baseline:             "B",
+			"baseline-no-skill":  "B",
+			discard:              "D",
+			crash:                "X",
+		};
 		if (snap.history.length > 0) {
 			lines.push(pad(""));
 			const colored = snap.history.slice(-24).map(s => {
@@ -993,6 +1013,34 @@ export default function (pi: ExtensionAPI) {
 		return result;
 	}
 
+	// Find the canonical results.tsv for the active run. Older agents wrote
+	// to ./results.tsv at the repo root; newer ones nest under
+	// results/<run-tag>/results.tsv or evals/results/<run-tag>/results.tsv.
+	// We return whichever is freshest with mtime >= sinceMs — that's the
+	// active run's ledger. A stale ./results.tsv from a prior run gets
+	// ignored when sinceMs is the watcher's startEpochMs.
+	function findResultsTsv(repoRoot: string, sinceMs: number = 0): string | undefined {
+		const candidates: string[] = [join(repoRoot, "results.tsv")];
+		for (const root of [join(repoRoot, "results"), join(repoRoot, "evals", "results")]) {
+			if (!existsSync(root)) continue;
+			try {
+				for (const entry of readdirSync(root)) {
+					const p = join(root, entry, "results.tsv");
+					if (existsSync(p)) candidates.push(p);
+				}
+			} catch { /* skip */ }
+		}
+		let best: { path: string; mtimeMs: number } | undefined;
+		for (const p of candidates) {
+			try {
+				const m = statSync(p).mtimeMs;
+				if (m < sinceMs) continue;
+				if (!best || m > best.mtimeMs) best = { path: p, mtimeMs: m };
+			} catch { /* skip */ }
+		}
+		return best?.path;
+	}
+
 	// Find the most recent *-report.md file in .pi/autoresearch/<skill>/.
 	// The autoresearch agent writes the report as the *last* step of its wrap-up
 	// loop — so a report file appearing post-start is a "pipeline done" signal,
@@ -1094,7 +1142,11 @@ export default function (pi: ExtensionAPI) {
 		// finished. Unset while the run is still active.
 		let stoppedAtMs: number | undefined;
 
-		const tsvPath = join(repoRoot, "results.tsv");
+		// Resolve the canonical results.tsv dynamically each update tick. Agents
+		// may write to ./results.tsv (legacy) OR results/<run-tag>/results.tsv
+		// (newer convention) — and may switch between runs. sinceMs anchors to
+		// startEpochMs so a stale prior-run file at the repo root gets skipped.
+		const resolveTsvPath = (): string | undefined => findResultsTsv(repoRoot, startEpochMs);
 
 		// Returns the wall-clock mtime to freeze at when the run is detected
 		// as stopped, or undefined while still running. Three paths, first wins:
@@ -1157,7 +1209,8 @@ export default function (pi: ExtensionAPI) {
 		};
 
 		const update = () => {
-			if (!existsSync(tsvPath)) {
+			const tsvPath = resolveTsvPath();
+			if (!tsvPath || !existsSync(tsvPath)) {
 				// No results.tsv yet — but the agent may have already finished
 				// via a custom batch runner that wrote a report without ever
 				// populating results.tsv. detectStop() catches that.
@@ -1250,18 +1303,33 @@ export default function (pi: ExtensionAPI) {
 				else if (branch.startsWith("autoresearch-")) stage = branch.split("/")[0].replace("autoresearch-", "");
 			} catch { /* fine */ }
 
+			// Coerce a TSV cell to a finite number or undefined. The TSV uses
+			// "-" or empty string for "no data" in optional columns (e.g.
+			// pass_rate_holdout when only train evals ran); parseFloat returns
+			// NaN for those, which then propagates through Math.max into the
+			// rendered widget as "NaN%". This helper short-circuits.
+			const toNum = (s: string): number | undefined => {
+				const n = parseFloat(s);
+				return isFinite(n) ? n : undefined;
+			};
+			// Safe max of optional numbers — returns undefined when no values.
+			const safeMax = (xs: (number | undefined)[]): number | undefined => {
+				const fin = xs.filter((n): n is number => typeof n === "number" && isFinite(n));
+				return fin.length > 0 ? Math.max(...fin) : undefined;
+			};
+
 			// Baseline = first row(s) with status="baseline"; take the first one.
 			const baseline = rows.find(r => r.status === "baseline");
-			const baselineTrain   = baseline ? parseFloat(baseline.trainRate)   : undefined;
-			const baselineHoldout = baseline ? parseFloat(baseline.holdoutRate) : undefined;
+			const baselineTrain   = baseline ? toNum(baseline.trainRate)   : undefined;
+			const baselineHoldout = baseline ? toNum(baseline.holdoutRate) : undefined;
 
 			// Best = max train + holdout across kept experiments (latest kept usually = best).
 			const kepts = rows.filter(r => r.status === "keep");
 			const bestTrain = kepts.length > 0
-				? Math.max(...kepts.map(r => parseFloat(r.trainRate)).filter(n => !isNaN(n)))
+				? safeMax(kepts.map(r => toNum(r.trainRate))) ?? baselineTrain
 				: baselineTrain;
 			const bestHoldout = kepts.length > 0
-				? Math.max(...kepts.map(r => parseFloat(r.holdoutRate)).filter(n => !isNaN(n)))
+				? safeMax(kepts.map(r => toNum(r.holdoutRate))) ?? baselineHoldout
 				: baselineHoldout;
 
 			const latest = rows[rows.length - 1];
