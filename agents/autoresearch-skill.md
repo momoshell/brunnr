@@ -265,6 +265,11 @@ Propose one focused change to `SKILL_PATH`. Alternate between these experiment t
 
 Each experiment should be motivated by a hypothesis tied to specific eval failures. Read recent failures to decide what to try.
 
+**Before proposing, consult two artifacts from prior experiments** (see "Per-experiment artifacts" below). These persist across turns so the optimizer's working memory isn't lost when the context compacts:
+
+1. `results/exp-<N>/trace.md` for the **last 3 experiments** — structured failure summaries written by the previous design steps. They tell you exactly which assertions failed, in what pattern, and with what error text. Use these to scope the hypothesis instead of re-deriving failure analysis from scratch each turn.
+2. `results/rejected-edits.jsonl` — every edit that was discarded by past experiments, recorded as a JSON line with `{exp, description, diff_summary, reason}`. Skim it before proposing. **Do not re-propose an edit whose `diff_summary` matches a rejected entry.** If your only viable hypothesis is one that's already been rejected, document explicitly in the description why this attempt is different (different context, different combination, different parameter).
+
 **Delete-only mode.** When the user (or an orchestrator like `/autoresearch-pipeline`) starts you with the explicit instruction *"run in delete-only mode"*, restrict every experiment to a `Delete` or `Simplify` action only. No `Add` or `Tweak`. This mode is used for compaction passes after another optimizer has grown the skill. Stop the loop when no deletion or simplification has been kept in the last 5 experiments — there is no further compaction available.
 
 **Resume mode.** When the kickoff message contains the literal substring `Resume.` (case-insensitive), you are continuing a previously-interrupted run on an existing branch. The setup protocol forks at step 5 (see above). The experiment loop itself is unchanged — same proposal/run/decide/log cycle — but you start from `last_experiment + 1` instead of from the baseline. Stopping conditions count from the *resumed* point onward (e.g. a 10-consecutive-discard plateau check looks at the last 10 experiments in `results.tsv`, regardless of whether they were run in this session or a previous one — that's deliberate, since plateau is a property of the *skill+evals*, not the session). Resume mode composes with delete-only mode: if the kickoff says both "Resume." and "run in delete-only mode," continue the existing branch in delete-only.
@@ -297,16 +302,76 @@ Run the holdout split. Compare to the last holdout score.
 
 This prevents overfitting to train evals.
 
-### 6. Log
+### 6. Log + record artifacts
 
 Append one row to `results.tsv`:
 ```
 <exp_number>	<commit>	<train_rate>	<holdout_rate_or_dash>	<semantic_count>	<tokens>	<keep|discard|crash>	<description>
 ```
 
+Then write three per-experiment artifacts so the next experiment (and the next session, after compaction) inherits useful working memory:
+
+**a. `results/exp-<N>/trace.md`** — structured failure analysis. Required for every experiment regardless of outcome. Format:
+
+```md
+# Experiment <N> · <keep|discard|crash> · train <rate>%
+Description: <one-liner>
+
+## Failed assertions
+- <case_id> · <assertion_check> — <observed vs expected, 1 line>
+- ...
+
+## Failure patterns (3-5 bullets)
+- <recurring theme across the failures — e.g. "model adds extra commentary before <svg> when prompt is artifact-only">
+- ...
+
+## Hypothesis for next experiment
+<one paragraph proposing what to try next, grounded in the patterns above>
+```
+
+Keep it tight — bullets, not prose paragraphs. The next experiment's design step reads the last 3 of these to anchor its hypothesis.
+
+**b. `results/exp-<N>/skill.md`** — a verbatim copy of `SKILL_PATH` at the moment of decision. Kept regardless of outcome, so the file always reflects the candidate that was evaluated. Browse with `cat`/`grep`/`diff` without invoking git.
+
+**c. `results/rejected-edits.jsonl`** — append one line on **discard** outcomes (not on keep):
+```json
+{"exp": <N>, "description": "<one-liner>", "diff_summary": "<3-5 word fingerprint of the change>", "reason": "<train regressed | gratuitous complexity | crash | ...>"}
+```
+
+The `diff_summary` should be a short canonical-form fingerprint, e.g. `"added 'visible labels' rule"`, `"reworded When to Use first bullet"`, `"deleted Quality Checklist"`. Future design steps use this to avoid proposing the same dead-end edit twice. Append-only — never rewrite.
+
+These artifacts live alongside the canonical `results/per-eval/` JSONs and `results.tsv`; add `results/` to `.gitignore` (the setup step already does this — verify).
+
 ### 7. Loop
 
 Immediately start the next experiment.
+
+## Per-experiment artifacts (contract reference)
+
+Three artifact families live under `results/` at the repo root. The
+experiment loop writes them; future experiments (and future sessions
+after compaction) read them. Treat these paths as a stable interface;
+external tooling (Brokkr widgets, the autoresearch-skill-gepa Pareto
+diagnostics, the pipeline orchestrator's stage transitions) depends
+on the schemas being followed.
+
+| Path | Written by | When | Schema |
+|---|---|---|---|
+| `results.tsv` | Setup + every Log step | After each experiment | Tab-separated row per experiment |
+| `results/per-eval/exp-<N>.json` | Run train evals (existing step) | After each experiment | Per-eval, per-run, per-assertion pass/fail |
+| `results/exp-<N>/trace.md` | Log step (new) | After each experiment | Markdown failure summary + next-experiment hypothesis |
+| `results/exp-<N>/skill.md` | Log step (new) | After each experiment | Verbatim copy of `SKILL_PATH` at evaluation time |
+| `results/rejected-edits.jsonl` | Log step (new) | After **discard** outcomes only | Append-only JSONL of dead-end edit fingerprints |
+
+**Why these artifacts beat letting the optimizer rederive failure analysis from raw eval output each turn:**
+
+- `trace.md` is structured, compact, and survives context compaction. Re-reading 3 short trace files is far cheaper than re-deriving from the raw per-eval JSONs.
+- `rejected-edits.jsonl` prevents the optimizer from cycling through the same dead-end proposals. This is the single highest-leverage improvement when the optimizer hits a plateau — it stops re-trying things that already failed.
+- `skill.md` snapshots make it trivial to diff "what changed between experiment 7 and experiment 12" without invoking git.
+
+These artifacts live under `results/` which is gitignored — they are
+runtime state, not catalog content. The git branch + per-experiment
+commits remain the canonical history; these are working memory.
 
 ## Safety rules
 
