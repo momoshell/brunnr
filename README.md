@@ -182,6 +182,8 @@ Bordered TUI overlays walk you through:
 
 **Refreshing the optimizer stack.** `brunnr sync` updates the catalog at `~/.config/brunnr/`, but Pi loads agents from `~/.pi/agent/agents/` — a separate install path that `brunnr setup-optimizer` populates and refuses to overwrite. After a `sync` that bumps an agent or prompt file, run `brunnr update-optimizer` to copy the fresher catalog versions into Pi's load path. Idempotent — it diffs each file and only copies the ones that drifted.
 
+**SkillOpt as a sibling optimizer.** `brunnr skillopt <skill>` runs Microsoft's [SkillOpt](https://github.com/microsoft/SkillOpt) against the named skill in the current project, parallel to `autoresearch-skill`. Converts the brunnr eval suite into SkillOpt's `items.json` format, drives `python scripts/train.py`, and writes the optimized skill back as `.pi/skills/<skill>/SKILL.md.skillopt-candidate` — does not auto-overwrite. Useful for A/B-ing SkillOpt's method against the autoresearch pipeline on the same eval set. One-time setup: clone microsoft/SkillOpt and pip install with Python 3.10+. Full setup steps and decision rule in `scripts/README.md`.
+
 **Per-skill eval files (multi-skill projects).** Brokkr resolves the eval file for the picked skill in this order, first hit wins:
 
 1. `evals/<skill-name>.json` — full skill directory name (e.g., `evals/argon-stance-map.json`)

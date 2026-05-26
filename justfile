@@ -6,7 +6,7 @@
 # Tool version — bump when changing justfile / install.sh in a way that catalog
 # entries may depend on. `brunnr sync` compares this against library.yaml's
 # `min_tool_version` and refuses if the local tool is older.
-export TOOL_VERSION := "3.0.18"
+export TOOL_VERSION := "3.0.19"
 
 # Default path to brunnr repository
 export BRUNNR_HOME := env_var_or_default("BRUNNR_HOME", env_var('HOME') / ".config/brunnr")
@@ -167,6 +167,27 @@ brokkr *args:
     # previous theme on session_shutdown).
     [ -f "{{BRUNNR_HOME}}/themes/forge.json" ] && PI_ARGS+=(--theme "{{BRUNNR_HOME}}/themes/forge.json")
     exec pi "${PI_ARGS[@]}" -e "$BROKKR_PATH" {{args}}
+
+# Run microsoft/SkillOpt as a sibling optimizer to autoresearch-skill against
+# one of the current project's skills. Converts the skill's brunnr eval suite
+# into SkillOpt's items.json format, drives SkillOpt's train.py, and writes
+# the optimized SKILL.md back as a .skillopt-candidate alongside the live one
+# (does not auto-overwrite). One-time setup: clone microsoft/SkillOpt at
+# ~/Development/SkillOpt and pip install with Python 3.10+. See scripts/README.md.
+skillopt *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{invocation_directory()}}"
+
+    SCRIPT="{{BRUNNR_HOME}}/scripts/run-skillopt.sh"
+    if [ ! -f "$SCRIPT" ]; then
+        echo "Error: run-skillopt.sh not found at $SCRIPT"
+        echo "  Check that BRUNNR_HOME points at your brunnr clone (currently: {{BRUNNR_HOME}})"
+        exit 1
+    fi
+
+    # Run from the user's invocation directory so PROJECT_ROOT defaults to it.
+    PROJECT_ROOT="{{invocation_directory()}}" exec "$SCRIPT" {{args}}
 
 # Add an item from brunnr to the current project (default) or globally with -g
 add *args:
