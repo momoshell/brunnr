@@ -1143,7 +1143,7 @@ sync:
     }
 
     # Catalog paths — sync ONLY these. Tool files (justfile, install.sh, lore/,
-    # README.md, SKILL.md, CLAUDE.md) are updated via `brunnr upgrade`.
+    # README.md, SKILL.md, AGENTS.md, CLAUDE.md) are updated via `brunnr upgrade`.
     CATALOG_PATHS=(library.yaml skills agents prompts extensions themes)
 
     [ -d "$BRUNNR_HOME/.git" ] || die "$BRUNNR_HOME is not a git repository"
@@ -1225,7 +1225,7 @@ upgrade:
 
     # Tool paths — upgrade ONLY these. Catalog (library.yaml, skills/, agents/,
     # prompts/, extensions/, themes/) is updated via `brunnr sync`.
-    TOOL_PATHS=(justfile install.sh README.md SKILL.md CLAUDE.md lore)
+    TOOL_PATHS=(justfile install.sh README.md SKILL.md AGENTS.md CLAUDE.md lore)
 
     [ -d "$BRUNNR_HOME/.git" ] || die "$BRUNNR_HOME is not a git repository"
     cd "$BRUNNR_HOME"

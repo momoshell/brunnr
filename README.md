@@ -396,7 +396,8 @@ All optimizer prompts and the pipeline support the `Resume.` kickoff.
 brunnr/
 ├── library.yaml          # Catalog index — the authority (+ min_tool_version)
 ├── SKILL.md              # Catalog format spec
-├── CLAUDE.md             # Conventions for AI sessions working on brunnr
+├── AGENTS.md             # Conventions for AI sessions working on brunnr (vendor-neutral; read by Pi, Codex, Cursor, …)
+├── CLAUDE.md             # Pointer to AGENTS.md (imports it so Claude Code loads the same conventions)
 ├── install.sh            # Installer — prereq checks + shell alias setup
 ├── justfile              # `brunnr` commands
 ├── agents/
@@ -436,7 +437,7 @@ brunnr/
 ## See also
 
 - `SKILL.md` — catalog format spec (frontmatter, source types, dependencies)
-- `CLAUDE.md` — conventions for AI sessions modifying brunnr
+- `AGENTS.md` — conventions for AI sessions modifying brunnr (`CLAUDE.md` is a thin pointer that imports it)
 - [`lore/`](lore/) — per-command guides
 
 ## Contributing
