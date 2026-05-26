@@ -1110,7 +1110,13 @@ export default function (pi: ExtensionAPI) {
 			});
 			throw err;
 		}
-		const success = (result.exitCode ?? 0) === 0 && !result.errorMessage;
+		// Mirror buildRunResult's isError logic exactly (exitCode + stopReason),
+		// so what we cache as "success" is precisely what the orchestrator sees
+		// as status:"done". A divergence here would let an aborted/errored run
+		// get cached and replayed later as a success.
+		const success = (result.exitCode ?? 0) === 0
+			&& result.stopReason !== "error"
+			&& result.stopReason !== "aborted";
 		logExpertCall({
 			expert: expertName,
 			mode,
