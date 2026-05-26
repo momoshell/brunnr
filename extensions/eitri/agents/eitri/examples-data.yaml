@@ -1,0 +1,44 @@
+---
+# Curated registry of Pi reference repos and example codebases.
+#
+# Maintained via:
+#   brunnr examples-add <github-url> [category]   — add a vetted entry
+#   brunnr examples-discover                      — surface candidates via gh search
+#   brunnr examples-check                         — link-rot + archived/stale checks
+#
+# Read by the eitri examples-expert and surfaced to users when they ask for
+# real working code that demonstrates a Pi pattern.
+#
+# Schema (per entry):
+#   name            short kebab-case slug, unique
+#   repo            "<owner>/<repo>" — drives `gh api` validation
+#   path            optional subdir within the repo (used when the repo isn't entirely a Pi example)
+#   url             canonical URL to cite to users (repo root or subdir)
+#   category        extension | skill | agent | prompt | theme | mixed
+#   description     one-line summary of what patterns this demonstrates
+#   added           YYYY-MM-DD (set by examples-add)
+#   last_validated  YYYY-MM-DD (set by examples-check on successful ping)
+
+examples:
+- name: pi-mono-examples
+  repo: earendil-works/pi
+  path: packages/coding-agent/examples
+  url: https://github.com/earendil-works/pi/tree/main/packages/coding-agent/examples
+  category: extension
+  description: Official Pi extension examples — tool registration, custom rendering, event handlers, MCP integration
+  added: '2026-05-26'
+  last_validated: '2026-05-26'
+- name: pi-review
+  repo: earendil-works/pi-review
+  url: https://github.com/earendil-works/pi-review
+  category: agent
+  description: Multi-agent PR-review system built on Pi — orchestrator + specialist reviewers, HITL approval gate
+  added: '2026-05-26'
+  last_validated: '2026-05-26'
+- name: badlogic-pi-skills
+  repo: badlogic/pi-skills
+  url: https://github.com/badlogic/pi-skills
+  category: skill
+  description: Community Pi skills collection — reference for SKILL.md structure, eval-driven authoring, dependency patterns
+  added: '2026-05-26'
+  last_validated: '2026-05-26'

@@ -46,9 +46,10 @@ import { Type } from "@sinclair/typebox";
 import type { Component } from "@mariozechner/pi-tui";
 import { Text, truncateToWidth, visibleWidth, SelectList } from "@mariozechner/pi-tui";
 import { spawn } from "child_process";
-import { readdirSync, readFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, unlinkSync, rmdirSync } from "fs";
+import { createHash } from "crypto";
+import { readdirSync, readFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, unlinkSync, rmdirSync, appendFileSync, statSync, renameSync } from "fs";
 import { join, resolve, dirname, basename } from "path";
-import { tmpdir } from "os";
+import { tmpdir, homedir } from "os";
 import { fileURLToPath } from "url";
 
 // ── Types ────────────────────────────────────────
@@ -122,6 +123,99 @@ function addUsage(a: ExpertUsage, b: ExpertUsage): ExpertUsage {
 		cacheWrite: a.cacheWrite + b.cacheWrite,
 		cost: a.cost + b.cost,
 	};
+}
+
+// ── Expert dispatch cache + telemetry ────────────
+//
+// Session-scoped in-memory cache of expert results keyed by (expert, question).
+// Module-level on purpose: the eitri extension is loaded once per `pi -e` session
+// so the Map lives for exactly the session lifetime, then dies with the process.
+// We do NOT persist across sessions — upstream docs change and a stale cache hit
+// could mask that.
+//
+// Bounded LRU via insertion-order semantics on Map. On read, we delete+re-set
+// to mark as most-recently-used. On insert past the cap, we evict the oldest
+// (first-inserted) entry. 100 entries × ~50KB output = ~5MB worst case.
+//
+// Both knobs are overridable from the environment. Setting EITRI_CACHE_MAX_ENTRIES=0
+// disables the cache entirely (useful for testing or when iterating against
+// changing upstream docs). EITRI_LOG_MAX_BYTES=0 falls back to the default —
+// disabling rotation by setting a very large number is the intended way to
+// keep an uncapped log.
+function envInt(name: string, fallback: number, min = 0): number {
+	const raw = process.env[name];
+	if (raw === undefined || raw === "") return fallback;
+	const n = Number(raw);
+	if (Number.isNaN(n) || n < min) return fallback;
+	return Math.floor(n);
+}
+
+const EXPERT_CACHE_MAX_ENTRIES = envInt("EITRI_CACHE_MAX_ENTRIES", 100);
+const EXPERT_LOG_MAX_BYTES = envInt("EITRI_LOG_MAX_BYTES", 5 * 1024 * 1024, 1024);
+const expertCallCache = new Map<string, any>();
+
+function cacheGet(key: string): any | undefined {
+	if (EXPERT_CACHE_MAX_ENTRIES <= 0) return undefined;
+	const v = expertCallCache.get(key);
+	if (v !== undefined) {
+		// Refresh recency on read so frequently-used entries survive eviction.
+		expertCallCache.delete(key);
+		expertCallCache.set(key, v);
+	}
+	return v;
+}
+
+function cacheSet(key: string, value: any): void {
+	if (EXPERT_CACHE_MAX_ENTRIES <= 0) return;
+	if (expertCallCache.has(key)) {
+		expertCallCache.delete(key);
+	} else if (expertCallCache.size >= EXPERT_CACHE_MAX_ENTRIES) {
+		// Map.keys() iterates in insertion order — first key is the oldest.
+		const oldest = expertCallCache.keys().next().value;
+		if (oldest !== undefined) expertCallCache.delete(oldest);
+	}
+	expertCallCache.set(key, value);
+}
+
+function hashQuery(expert: string, question: string): string {
+	return createHash("sha256").update(`${expert}\0${question}`).digest("hex").slice(0, 16);
+}
+
+// Append-only JSONL log of expert dispatches. One line per call: timestamp,
+// expert, mode, question hash, duration, success/error, output size, cache hit.
+// We don't log the question text — hashing is enough to spot repeats, and the
+// question can contain sensitive project content. Fail-open: telemetry must
+// never block or break an expert call.
+function logExpertCall(entry: {
+	expert: string;
+	mode: "parallel" | "chain";
+	question_hash: string;
+	duration_ms: number;
+	success: boolean;
+	output_bytes: number;
+	cache_hit?: boolean;
+	error?: string;
+}): void {
+	try {
+		const dir = join(homedir(), ".pi", "agent");
+		mkdirSync(dir, { recursive: true });
+		const path = join(dir, "eitri.log.jsonl");
+		// Rotate when oversized: rename current → .1 (overwriting any prior .1)
+		// and let appendFileSync create a fresh file. Keeps at most ~10MB total
+		// (one active + one archived). Stat is cheap; doing it every call is fine.
+		try {
+			const st = statSync(path);
+			if (st.size > EXPERT_LOG_MAX_BYTES) {
+				renameSync(path, `${path}.1`);
+			}
+		} catch {
+			// File doesn't exist or stat failed — first write will create it.
+		}
+		const line = JSON.stringify({ ts: new Date().toISOString(), ...entry }) + "\n";
+		appendFileSync(path, line);
+	} catch {
+		// Swallow — telemetry must never break the dispatch path.
+	}
 }
 
 // ── Helpers ──────────────────────────────────────
@@ -975,6 +1069,62 @@ export default function (pi: ExtensionAPI) {
 		});
 	}
 
+	// Wraps queryExpert with the session cache and the telemetry log. Cache key
+	// is (expert, sha256(question)); we cache only successful, non-aborted runs.
+	// Errors propagate but still get logged with `success: false`.
+	async function queryExpertCached(
+		expertName: string,
+		question: string,
+		ctx: any,
+		signal: AbortSignal | undefined,
+		mode: "parallel" | "chain",
+	): Promise<QueryResult> {
+		const hash = hashQuery(expertName, question);
+		const cacheKey = `${expertName.toLowerCase()}:${hash}`;
+		const cached = cacheGet(cacheKey) as QueryResult | undefined;
+		if (cached) {
+			logExpertCall({
+				expert: expertName,
+				mode,
+				question_hash: hash,
+				duration_ms: 0,
+				success: true,
+				output_bytes: cached.output.length,
+				cache_hit: true,
+			});
+			return cached;
+		}
+		const t0 = Date.now();
+		let result: QueryResult;
+		try {
+			result = await queryExpert(expertName, question, ctx, signal);
+		} catch (err) {
+			logExpertCall({
+				expert: expertName,
+				mode,
+				question_hash: hash,
+				duration_ms: Date.now() - t0,
+				success: false,
+				output_bytes: 0,
+				error: (err as Error).message?.slice(0, 200),
+			});
+			throw err;
+		}
+		const success = (result.exitCode ?? 0) === 0 && !result.errorMessage;
+		logExpertCall({
+			expert: expertName,
+			mode,
+			question_hash: hash,
+			duration_ms: Date.now() - t0,
+			success,
+			output_bytes: result.output.length,
+		});
+		if (success && !signal?.aborted) {
+			cacheSet(cacheKey, result);
+		}
+		return result;
+	}
+
 	// ── query_experts Tool (parallel) ───────────
 
 	pi.registerTool({
@@ -1004,7 +1154,7 @@ Each query specifies an expert name and a specific question. Ask about WHAT to b
 			queries: Type.Array(
 				Type.Object({
 					expert: Type.String({
-						description: "Expert name. Typical Eitri roster: ext-expert, theme-expert, skill-expert, config-expert, tui-expert, prompt-expert, agent-expert, keybinding-expert, cli-expert.",
+						description: "Expert name. Eitri roster: ext-expert, theme-expert, skill-expert, config-expert, tui-expert, prompt-expert, agent-expert, pattern-expert, keybinding-expert, cli-expert, examples-expert.",
 					}),
 					question: Type.String({
 						description: "Specific question. In chain mode, may include {previous} which is replaced with the prior expert's full output.",
@@ -1107,7 +1257,9 @@ Each query specifies an expert name and a specific question. Ask about WHAT to b
 
 			if (runMode === "chain") {
 				// Sequential: each query may reference {previous} to inject the
-				// prior expert's full (untruncated) output. Halt on first failure.
+				// accumulated history of all prior experts' outputs (not just the
+				// most recent). Each prior section is headed with `## <expert>` so
+				// the receiving expert can attribute claims. Halt on first failure.
 				let previous = "";
 				let halted = false;
 				for (const q of queries) {
@@ -1119,11 +1271,14 @@ Each query specifies an expert name and a specific question. Ask about WHAT to b
 					}
 					const question = q.question.replace(/\{previous\}/g, previous);
 					try {
-						const raw = await queryExpert(q.expert, question, ctx, signal);
+						const raw = await queryExpertCached(q.expert, question, ctx, signal, "chain");
 						const r = buildRunResult({ expert: q.expert, question }, raw);
 						results.push(r);
 						if (r.status !== "done") halted = true;
-						else previous = raw.output;
+						else {
+							const section = `## ${q.expert}\n\n${raw.output}`;
+							previous = previous ? `${previous}\n\n---\n\n${section}` : section;
+						}
 					} catch (err) {
 						results.push(errorResult({ expert: q.expert, question }, `Error: ${(err as Error).message}`));
 						halted = true;
@@ -1146,7 +1301,7 @@ Each query specifies an expert name and a specific question. Ask about WHAT to b
 							continue;
 						}
 						try {
-							const raw = await queryExpert(q.expert, q.question, ctx, signal);
+							const raw = await queryExpertCached(q.expert, q.question, ctx, signal, "parallel");
 							out[i] = buildRunResult(q, raw);
 						} catch (err) {
 							out[i] = errorResult(q, `Error: ${(err as Error).message}`);
@@ -1484,11 +1639,18 @@ Use this for any build path — extensions, themes, skills, prompts, agents — 
 	});
 
 	pi.registerCommand("experts-reset", {
-		description: "Clear all expert model/thinking overrides for this project",
+		description: "Clear expert overrides AND the session result cache (forces fresh queries)",
 		handler: async (_args, _ctx) => {
 			overrides = {};
 			saveOverrides(_ctx);
-			_ctx.ui.notify("All eitri expert overrides cleared", "info");
+			const cleared = expertCallCache.size;
+			expertCallCache.clear();
+			_ctx.ui.notify(
+				cleared > 0
+					? `Eitri expert overrides cleared and result cache flushed (${cleared} cached entries dropped)`
+					: "All eitri expert overrides cleared",
+				"info",
+			);
 		},
 	});
 

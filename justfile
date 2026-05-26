@@ -56,6 +56,9 @@ THEMES_SRC := BRUNNR_HOME / "themes"
     echo "  status               Show open PRs in brunnr (skills awaiting review)"
     echo "  search <query>       Search the catalog"
     echo "  check                Validate library.yaml integrity (run before commit)"
+    echo "  examples-add <url> [cat]  Add a Pi reference repo to the examples-expert registry"
+    echo "  examples-discover         List candidate Pi repos via gh search (curate manually)"
+    echo "  examples-check            Validate the examples registry (link rot, archived, stale)"
     echo "  help                 Show this help message"
     echo ""
     echo "Environment variables (Pi defaults — Pi reads these natively):"
@@ -1801,3 +1804,335 @@ check:
         exit 1
       end
     RUBY
+
+    # Examples registry: structural validation only (no network). Run
+    # `brunnr examples-check` separately for link-rot detection.
+    EXAMPLES_DATA="extensions/eitri/agents/eitri/examples-data.yaml"
+    if [ -f "$EXAMPLES_DATA" ]; then
+        ruby -ryaml -e '
+            f = ARGV[0]
+            data = YAML.safe_load(File.read(f), permitted_classes: [], permitted_symbols: [], aliases: false) || {}
+            entries = data["examples"] || []
+            required = %w[name repo url category description]
+            errors = []
+            seen = {}
+            entries.each_with_index do |e, i|
+                label = "examples[#{i}] '\''#{e["name"] || "<unnamed>"}'\''"
+                required.each { |k| errors << "#{label}: missing `#{k}`" if e[k].nil? || e[k].to_s.empty? }
+                if e["name"] && seen[e["name"]]
+                    errors << "examples: duplicate name `#{e["name"]}`"
+                end
+                seen[e["name"]] = true if e["name"]
+            end
+            if errors.any?
+                puts ""
+                puts "EXAMPLES REGISTRY ERRORS (#{errors.length}):"
+                errors.each { |e| puts "  - #{e}" }
+                exit 1
+            else
+                puts ""
+                puts "examples registry: #{entries.length} entries OK"
+            end
+        ' "$EXAMPLES_DATA"
+    fi
+
+# Add a Pi reference repo to the examples-expert registry. Validates the URL
+# via `gh api`, captures repo description, refuses duplicates.
+# Usage: brunnr examples-add <github-url> [category]
+examples-add *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    BRUNNR_HOME="{{BRUNNR_HOME}}"
+    DATA="$BRUNNR_HOME/extensions/eitri/agents/eitri/examples-data.yaml"
+
+    POSITIONAL=()
+    for arg in {{args}}; do POSITIONAL+=("$arg"); done
+    if [ "${#POSITIONAL[@]}" -lt 1 ] || [ "${#POSITIONAL[@]}" -gt 2 ]; then
+        echo "Usage: brunnr examples-add <github-url> [category]"
+        echo "  <github-url>  https://github.com/<owner>/<repo>[/tree/<branch>/<path>]"
+        echo "  [category]    extension | skill | agent | prompt | theme | mixed (default: mixed)"
+        exit 1
+    fi
+    URL="${POSITIONAL[0]}"
+    CATEGORY="${POSITIONAL[1]:-mixed}"
+
+    command -v gh >/dev/null 2>&1 || { echo "Error: 'gh' CLI not found. brew install gh"; exit 1; }
+    gh auth status >/dev/null 2>&1 || { echo "Error: 'gh' not authenticated — run 'gh auth login'"; exit 1; }
+
+    # Parse owner/repo/path via Ruby URI — more reliable than bash regex on edge cases.
+    PARSED=$(ruby -ruri -e '
+        u = URI.parse(ARGV[0])
+        if u.host != "github.com"
+            STDERR.puts "Error: not a github.com URL: #{ARGV[0]}"; exit 1
+        end
+        parts = u.path.sub(%r{\A/}, "").chomp("/").split("/")
+        if parts.length < 2
+            STDERR.puts "Error: URL must include /<owner>/<repo>"; exit 1
+        end
+        owner = parts[0]
+        repo  = parts[1].sub(/\.git\z/, "")
+        path  = ""
+        if parts.length > 2 && parts[2] == "tree" && parts.length > 4
+            path = parts[4..].join("/")
+        end
+        puts "#{owner}\t#{repo}\t#{path}"
+    ' "$URL")
+    IFS=$'\t' read -r OWNER REPO SUBPATH <<<"$PARSED"
+
+    # Validate the repo is reachable
+    META=$(gh api "repos/$OWNER/$REPO" 2>&1) || {
+        echo "Error: gh api repos/$OWNER/$REPO failed:"
+        printf '%s\n' "$META" | sed 's/^/  /'
+        exit 1
+    }
+    DESC=$(printf '%s' "$META" | ruby -rjson -e 'puts (JSON.parse(STDIN.read)["description"] || "").strip')
+    ARCH=$(printf '%s' "$META" | ruby -rjson -e 'puts JSON.parse(STDIN.read)["archived"]')
+    if [ "$ARCH" = "true" ]; then
+        echo "Warning: $OWNER/$REPO is archived."
+        if [ -t 0 ]; then
+            read -r -p "Add anyway? [y/N] " ans
+            [[ "$ans" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 1; }
+        else
+            echo "Refusing to add archived repo in non-interactive mode."
+            exit 1
+        fi
+    fi
+
+    # Slug = owner-repo, lowercased + sanitized
+    SLUG=$(printf '%s-%s' "$OWNER" "$REPO" | tr '[:upper:]' '[:lower:]' \
+        | tr -c 'a-z0-9-' '-' | sed 's/-\+/-/g;s/^-//;s/-$//')
+    TODAY=$(date +%Y-%m-%d)
+
+    ruby -ryaml -e '
+        data_path = ARGV[0]
+        entry = {
+            "name"           => ARGV[1],
+            "repo"           => "#{ARGV[2]}/#{ARGV[3]}",
+            "url"            => ARGV[4],
+            "category"       => ARGV[5],
+            "description"    => ARGV[6],
+            "added"          => ARGV[7],
+            "last_validated" => ARGV[7],
+        }
+        entry["path"] = ARGV[8] unless ARGV[8].empty?
+
+        data = if File.exist?(data_path)
+            YAML.safe_load(File.read(data_path), permitted_classes: [], permitted_symbols: [], aliases: false) || {}
+        else
+            {}
+        end
+        data["examples"] ||= []
+        if data["examples"].any? { |e| e["name"] == entry["name"] || e["url"] == entry["url"] || e["repo"] == entry["repo"] }
+            STDERR.puts "Error: example already in registry (slug=#{entry["name"]}, repo=#{entry["repo"]})"
+            exit 1
+        end
+        data["examples"] << entry
+
+        # Preserve the header comment block if present
+        existing = File.exist?(data_path) ? File.read(data_path) : ""
+        header = ""
+        if existing =~ /\A(---\s*\n(?:#[^\n]*\n)+\n?)/
+            header = $1
+        end
+        body = data.to_yaml(line_width: 120).sub(/\A---\s*\n/, "")
+        File.write(data_path, header.empty? ? "---\n" + body : header + body)
+    ' "$DATA" "$SLUG" "$OWNER" "$REPO" "$URL" "$CATEGORY" "$DESC" "$TODAY" "$SUBPATH"
+
+    echo "Added: $SLUG"
+    echo "  repo:        $OWNER/$REPO"
+    echo "  url:         $URL"
+    echo "  category:    $CATEGORY"
+    echo "  description: $DESC"
+
+# Surface candidate Pi example repos via GitHub code search. Prints repos that
+# match common Pi patterns and are NOT already in the registry. You decide
+# which to keep — use `brunnr examples-add <url>` per candidate.
+examples-discover:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    BRUNNR_HOME="{{BRUNNR_HOME}}"
+    DATA="$BRUNNR_HOME/extensions/eitri/agents/eitri/examples-data.yaml"
+
+    command -v gh >/dev/null 2>&1 || { echo "Error: 'gh' CLI not found"; exit 1; }
+    gh auth status >/dev/null 2>&1 || { echo "Error: 'gh' not authenticated — run 'gh auth login'"; exit 1; }
+
+    # Known repos in the registry — skip these in discovery output
+    KNOWN_TMP=$(mktemp)
+    if [ -f "$DATA" ]; then
+        ruby -ryaml -e '
+            data = YAML.safe_load(File.read(ARGV[0]), permitted_classes: [], permitted_symbols: [], aliases: false) || {}
+            (data["examples"] || []).each { |e| puts e["repo"] if e["repo"] }
+        ' "$DATA" > "$KNOWN_TMP"
+    fi
+
+    declare -A SEEN
+    while IFS= read -r r; do [ -n "$r" ] && SEEN["$r"]=1; done < "$KNOWN_TMP"
+    rm -f "$KNOWN_TMP"
+
+    QUERIES=(
+        "pi.registerCommand path:.pi extension:ts|Pi extensions (registerCommand)"
+        "pi.registerTool path:.pi extension:ts|Pi extensions (registerTool)"
+        "path:.pi/skills/SKILL.md|Pi skills (SKILL.md)"
+        "path:.pi/agents extension:md|Pi agents (.pi/agents)"
+        "topic:pi-mono|Repos tagged pi-mono"
+    )
+
+    echo "Scanning GitHub for Pi-related repos not in the registry..."
+    echo ""
+    FOUND_ANY=0
+    for entry in "${QUERIES[@]}"; do
+        Q="${entry%%|*}"
+        LABEL="${entry##*|}"
+        # Branch on search endpoint: topic:* uses search/repositories, the rest use search/code
+        if [[ "$Q" == topic:* ]]; then
+            RESULT=$(gh api -X GET search/repositories -f q="$Q" \
+                --jq '.items[] | "\(.full_name)\t\(.stargazers_count)\t\(.description // "")\t\(.archived)"' 2>/dev/null || true)
+        else
+            RESULT=$(gh api -X GET search/code -f q="$Q" \
+                --jq '.items[] | "\(.repository.full_name)\t\(.path)"' 2>/dev/null || true)
+        fi
+        [ -z "$RESULT" ] && continue
+
+        PRINTED_HEADER=0
+        while IFS=$'\t' read -r f1 f2 f3 f4; do
+            [ -z "$f1" ] && continue
+            REPO="$f1"
+            [ -n "${SEEN[$REPO]:-}" ] && continue
+            SEEN["$REPO"]=1
+
+            # If from search/code, fetch repo meta to get stars / archived / description
+            if [[ "$Q" != topic:* ]]; then
+                META=$(gh api "repos/$REPO" 2>/dev/null) || continue
+                STARS=$(printf '%s' "$META" | ruby -rjson -e 'puts JSON.parse(STDIN.read)["stargazers_count"]' 2>/dev/null || echo "?")
+                DESC=$(printf '%s' "$META" | ruby -rjson -e 'puts (JSON.parse(STDIN.read)["description"] || "").strip[0,100]' 2>/dev/null || echo "")
+                ARCH=$(printf '%s' "$META" | ruby -rjson -e 'puts JSON.parse(STDIN.read)["archived"]' 2>/dev/null || echo "")
+                EXAMPLE_PATH="$f2"
+            else
+                STARS="$f2"
+                DESC="$f3"
+                ARCH="$f4"
+                EXAMPLE_PATH=""
+            fi
+            [ "$ARCH" = "true" ] && continue
+
+            if [ "$PRINTED_HEADER" = "0" ]; then
+                echo "  --- $LABEL ---"
+                PRINTED_HEADER=1
+            fi
+            echo "  https://github.com/$REPO"
+            echo "      ${STARS}★ — ${DESC:-(no description)}"
+            [ -n "$EXAMPLE_PATH" ] && echo "      e.g. $EXAMPLE_PATH"
+            echo ""
+            FOUND_ANY=1
+        done <<<"$RESULT"
+    done
+
+    if [ "$FOUND_ANY" = "0" ]; then
+        echo "No new candidates found (registry covers all current results, or you're rate-limited)."
+    else
+        echo "To add: brunnr examples-add <url> [category]"
+    fi
+
+# Validate the examples registry — `gh api` ping each entry. Flags 404, archived,
+# stale (>6 months since last commit). Updates `last_validated` on success.
+examples-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    BRUNNR_HOME="{{BRUNNR_HOME}}"
+    DATA="$BRUNNR_HOME/extensions/eitri/agents/eitri/examples-data.yaml"
+
+    if [ ! -f "$DATA" ]; then
+        echo "examples registry not found: $DATA"
+        exit 0
+    fi
+    command -v gh >/dev/null 2>&1 || { echo "Error: 'gh' CLI not found"; exit 1; }
+    gh auth status >/dev/null 2>&1 || { echo "Error: 'gh' not authenticated — run 'gh auth login'"; exit 1; }
+
+    [ -t 1 ] && C=$'\033[1;36m' G=$'\033[1;32m' Y=$'\033[1;33m' R=$'\033[1;31m' X=$'\033[0m' || C= G= Y= R= X=
+
+    TODAY=$(date +%Y-%m-%d)
+    # Stale cutoff: 6 months ago in YYYY-MM-DD. macOS and Linux date diverge; do it in Ruby.
+    CUTOFF=$(ruby -rdate -e 'puts (Date.today << 6).to_s')
+
+    # Per-entry validation; emit a status line for each.
+    OUT=$(ruby -ryaml -rjson -e '
+        require "yaml"
+        require "json"
+        data_path = ARGV[0]
+        today = ARGV[1]
+        cutoff = ARGV[2]
+        data = YAML.safe_load(File.read(data_path), permitted_classes: [], permitted_symbols: [], aliases: false) || {}
+        entries = data["examples"] || []
+
+        results = []
+        entries.each do |e|
+            name = e["name"]
+            repo = e["repo"]
+            status = { ok: false, msg: "", warn: nil }
+            if !repo
+                status[:msg] = "no repo field"
+                results << [name, status]
+                next
+            end
+            meta_json = `gh api repos/#{repo} 2>/dev/null`
+            if !$?.success? || meta_json.strip.empty?
+                status[:msg] = "unreachable (gh api repos/#{repo} failed)"
+                results << [name, status]
+                next
+            end
+            begin
+                meta = JSON.parse(meta_json)
+            rescue
+                status[:msg] = "invalid JSON from gh api"
+                results << [name, status]
+                next
+            end
+            if meta["archived"]
+                status[:msg] = "archived"
+                results << [name, status]
+                next
+            end
+            pushed = meta["pushed_at"]
+            if pushed && pushed[0,10] < cutoff
+                status[:warn] = "stale — last push #{pushed[0,10]}"
+            end
+            status[:ok] = true
+            status[:msg] = "ok"
+            results << [name, status]
+            e["last_validated"] = today
+        end
+
+        # Preserve header comments on rewrite
+        existing = File.read(data_path)
+        header = ""
+        if existing =~ /\A(---\s*\n(?:#[^\n]*\n)+\n?)/
+            header = $1
+        end
+        body = data.to_yaml(line_width: 120).sub(/\A---\s*\n/, "")
+        File.write(data_path, header.empty? ? "---\n" + body : header + body)
+
+        results.each do |name, s|
+            STDOUT.puts "#{s[:ok] ? "OK" : "FAIL"}\t#{name}\t#{s[:msg]}\t#{s[:warn] || ""}"
+        end
+    ' "$DATA" "$TODAY" "$CUTOFF")
+
+    OK_COUNT=0; FAIL_COUNT=0; WARN_COUNT=0
+    while IFS=$'\t' read -r status name msg warn; do
+        [ -z "$status" ] && continue
+        if [ "$status" = "OK" ]; then
+            OK_COUNT=$((OK_COUNT+1))
+            if [ -n "$warn" ]; then
+                printf "%s  ⚠%s %s — %s\n" "$Y" "$X" "$name" "$warn"
+                WARN_COUNT=$((WARN_COUNT+1))
+            else
+                printf "%s  ✓%s %s\n" "$G" "$X" "$name"
+            fi
+        else
+            printf "%s  ✗%s %s — %s\n" "$R" "$X" "$name" "$msg"
+            FAIL_COUNT=$((FAIL_COUNT+1))
+        fi
+    done <<<"$OUT"
+
+    echo ""
+    echo "$OK_COUNT ok, $WARN_COUNT stale, $FAIL_COUNT failed"
+    [ "$FAIL_COUNT" = "0" ] || exit 1

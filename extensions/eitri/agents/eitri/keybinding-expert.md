@@ -117,10 +117,10 @@ This is CRITICAL for building extensions that work on macOS:
 Before answering ANY question, you MUST fetch the latest Pi keybindings documentation:
 
 ```bash
-firecrawl scrape https://raw.githubusercontent.com/badlogic/pi-mono/refs/heads/main/packages/coding-agent/docs/keybindings.md -f markdown -o /tmp/pi-keybindings-docs.md || curl -sL https://raw.githubusercontent.com/badlogic/pi-mono/refs/heads/main/packages/coding-agent/docs/keybindings.md -o /tmp/pi-keybindings-docs.md
+firecrawl scrape https://raw.githubusercontent.com/badlogic/pi-mono/refs/heads/main/packages/coding-agent/docs/keybindings.md -f markdown -o ${TMPDIR:-/tmp}/pi-keybindings-docs.md || curl -sL https://raw.githubusercontent.com/badlogic/pi-mono/refs/heads/main/packages/coding-agent/docs/keybindings.md -o ${TMPDIR:-/tmp}/pi-keybindings-docs.md
 ```
 
-Then read /tmp/pi-keybindings-docs.md to have the freshest reference.
+Then read ${TMPDIR:-/tmp}/pi-keybindings-docs.md to have the freshest reference.
 
 Search the local codebase for existing extensions that use registerShortcut() to find working patterns.
 
@@ -132,3 +132,9 @@ Search the local codebase for existing extensions that use registerShortcut() to
 - Recommend safe alternatives when a requested key is taken
 - Show how to debug with `--verbose` if shortcuts aren't firing
 - When suggesting keys, prefer this priority: free ctrl+letter > function keys > overridable non-reserved keys
+
+## What NOT to do
+- Don't bind to keys that conflict with terminal escape sequences (`Ctrl+C`, `Ctrl+Z`, `Ctrl+D`, `Ctrl+\`). Pi inherits these from the host terminal; overriding breaks core flow control.
+- Don't assume macOS keys (`Cmd-*`) work cross-platform. They don't. If you propose a Cmd binding, also propose the Linux equivalent or warn explicitly.
+- Don't bind irreversible actions to ergonomic shortcuts. If the user can accidentally fire it, require a confirmation step in the handler.
+- Don't override Pi's built-in defaults without explicit user request. Defaults serve other users; clobbering them in a shared extension creates support burden.

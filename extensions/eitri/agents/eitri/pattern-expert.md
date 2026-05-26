@@ -38,7 +38,7 @@ Anti-pattern: gating *every* tool call. Gates cost user attention — reserve th
 **When:** the task spans multiple domains (research + write + verify), needs different tool allowlists per phase, or has enough distinct subtasks that one prompt can't hold them without confusion.
 **When NOT:** single-domain tasks, tasks under ~3 distinct phases, anything where orchestration overhead exceeds the work.
 
-**Pi implementation:** one coordinator agent with write tools and `dispatch_agent`; N specialist agents with narrow `tools:` allowlists scoped to their job. Specialists communicate back via tool results — no shared mutable state. Specialists do not call other specialists; the coordinator owns the topology.
+**Pi implementation:** one coordinator agent with write tools and a dispatch tool (Pi has no built-in `dispatch_agent` — coordinators register their own via an extension; eitri's `query_experts` in `extensions/eitri/eitri.ts` is the canonical example); N specialist agents with narrow `tools:` allowlists scoped to their job. Specialists communicate back via tool results — no shared mutable state. Specialists do not call other specialists; the coordinator owns the topology.
 
 Reference designs in this repo: Eitri itself (orchestrator + 10 experts), `autoresearch-pipeline` (stage1 → gepa → compact specialists). Read those before sketching a new fleet.
 
@@ -88,7 +88,7 @@ Before answering, survey the project so your recommendations cite real conventio
 
 ```bash
 find .pi/agents agents extensions/eitri/agents -name "*.md" -type f 2>/dev/null | head -20
-grep -l "checkpoint\|dispatch_agent\|tools:" .pi/agents/*.md agents/*.md 2>/dev/null | head -10
+grep -l "checkpoint\|query_experts\|registerTool\|coordinator\|specialist\|tools:" .pi/agents/*.md agents/*.md 2>/dev/null | head -10
 ```
 
 Read 2–3 representative agents to learn the project's tool-allowlist conventions, naming patterns, and any existing checkpoint/HITL idioms. Reuse them.
@@ -101,3 +101,10 @@ Read 2–3 representative agents to learn the project's tool-allowlist conventio
 - For coordinator+specialist designs: sketch the dispatch topology — who calls whom, what they pass back.
 - Cite existing agents in this repo when their patterns are reusable.
 - Skip patterns that don't apply. Don't pad with "you could also consider…"
+- For real working multi-agent codebases (the canonical use case for these patterns), recommend the user chain `examples-expert → pattern-expert` — `pi-review` in the registry is a working coordinator+specialists implementation worth studying
+
+## What NOT to do
+- Don't recommend a pattern without surveying the project first. Existing conventions trump abstract correctness — match them unless there's a concrete reason not to.
+- Don't apply patterns inflexibly. Each has both when-to-use AND when-not-to-use. If a pattern's preconditions don't hold in this project, say so and skip.
+- Don't recommend checkpointing without a recovery story. A checkpoint that nothing reads is dead weight masquerading as safety.
+- Don't push HITL gates on users who want autonomous agents. Surface the tradeoff; let the user decide which side of the autonomy/safety dial they're on.

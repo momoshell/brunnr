@@ -124,7 +124,9 @@ Eitri picks the relevant experts (here: `ext` + `tui` + maybe `keybinding`), run
 To use: pi -e extensions/replay-trigger.ts
 ```
 
-Eitri has 10 experts (`ext`, `theme`, `skill`, `config`, `tui`, `prompt`, `agent`, `pattern`, `keybinding`, `cli`). For sequential dependencies between experts, ask for `mode: chain` (each query can reference `{previous}`). Details: `extensions/eitri/`.
+Eitri has 11 experts (`ext`, `theme`, `skill`, `config`, `tui`, `prompt`, `agent`, `pattern`, `keybinding`, `cli`, `examples`). For sequential dependencies between experts, ask for `mode: chain` (each query can reference `{previous}`). Details: `extensions/eitri/`.
+
+The `examples` expert is a discovery + citation specialist: instead of explaining APIs, it points at real working repos (curated list + on-demand `gh api` search). Chain it before a domain expert (`examples → ext-expert`) so the domain answer is grounded in concrete code references rather than synthesized from API knowledge alone.
 
 ### …have Eitri apply production-grade patterns
 
@@ -147,6 +149,49 @@ ambiguous responses as "no."
 ```
 
 The six patterns: **checkpoint-and-resume**, **HITL gates**, **coordinator+specialists**, **read-only research vs. write-capable execution split**, **idempotency**, **tool-allowlist minimization**. Each documented with when-to-use, when-not-to-use, and Pi-specific stanzas in `extensions/eitri/agents/eitri/pattern-expert.md`.
+
+### …maintain the examples-expert registry
+
+The `examples-expert` consults a curated YAML registry of vetted Pi reference repos (`extensions/eitri/agents/eitri/examples-data.yaml`) and falls back to live `gh api` search when the registry doesn't cover a request. Three commands manage the registry:
+
+```bash
+brunnr examples-add <github-url> [category]   # add a vetted entry (validates via gh api)
+brunnr examples-discover                       # surface candidates via GitHub code search
+brunnr examples-check                          # ping each entry, flag 404 / archived / stale
+```
+
+`examples-add` parses the URL, calls `gh api repos/<owner>/<repo>` to confirm reachability and pull the repo description, refuses duplicates, and appends to `examples-data.yaml`. Category is one of `extension`, `skill`, `agent`, `prompt`, `theme`, `mixed` (default).
+
+`examples-discover` runs a handful of GitHub code-search queries (`pi.registerCommand`, `path:.pi/skills/SKILL.md`, `topic:pi-mono`, …), filters out repos already in the registry and archived ones, and prints stars + description for each candidate. Treat it as a weekly habit — you skim, run `examples-add` on the ones worth keeping.
+
+`examples-check` is the rot detector. Run it before a release or on a schedule. It updates `last_validated: <today>` on every entry that pings successfully, and exits non-zero if any entry is unreachable or archived.
+
+Structural validation (required fields, duplicates) also runs as part of `brunnr check` — no network calls there, so it's safe in CI.
+
+### …inspect, tune, or reset Eitri's expert dispatches
+
+Eitri spawns each expert as its own subprocess `pi` invocation (one per query, in parallel by default — capped at four concurrent). Three runtime affordances let you observe and steer this:
+
+**Telemetry log** — every dispatch writes one JSON line to `~/.pi/agent/eitri.log.jsonl`:
+
+```json
+{"ts":"2026-05-26T17:46:30Z","expert":"ext-expert","mode":"parallel","question_hash":"418bd90de0d34f75","duration_ms":1234,"success":true,"output_bytes":5000}
+```
+
+Cache hits add `"cache_hit":true` and report `duration_ms: 0`. Errors add `"success":false` and a truncated `error` string. The question text itself is **not** logged — only a 16-char hash, so you can spot repeats without leaking project content. The log auto-rotates to `eitri.log.jsonl.1` when it crosses 5 MiB; total disk usage is capped at ~10 MiB.
+
+**Session result cache** — within an Eitri session, identical `(expert, question)` pairs hit an in-memory LRU cache instead of re-spawning Pi. Up to 100 entries by default, with most-recently-used semantics. The cache lives only in the Pi process — it dies with the session, so stale upstream docs can never haunt a future session.
+
+**Reset** — `/experts-reset` clears the cache alongside any model/thinking overrides you've set. Use this mid-session when upstream docs change or when you want fresh queries (e.g., after `brunnr sync`).
+
+**Tunables** — both knobs are env-var overridable on the shell that launches `brunnr eitri`:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `EITRI_CACHE_MAX_ENTRIES` | `100` | Max cached expert results. `0` disables caching entirely (forces every dispatch fresh). |
+| `EITRI_LOG_MAX_BYTES` | `5242880` (5 MiB) | Log file size at which rotation kicks in. Minimum `1024`; values below are ignored (falls back to default). Set to a very large number to effectively disable rotation. |
+
+Both are read at session start. Changing them mid-session has no effect — restart eitri.
 
 ### …optimize a skill
 
@@ -182,7 +227,7 @@ Bordered TUI overlays walk you through:
 
 **Refreshing the optimizer stack.** `brunnr sync` updates the catalog at `~/.config/brunnr/`, but Pi loads agents from `~/.pi/agent/agents/` — a separate install path that `brunnr setup-optimizer` populates and refuses to overwrite. After a `sync` that bumps an agent or prompt file, run `brunnr update-optimizer` to copy the fresher catalog versions into Pi's load path. Idempotent — it diffs each file and only copies the ones that drifted.
 
-**SkillOpt as a sibling optimizer.** `brunnr skillopt <skill>` runs Microsoft's [SkillOpt](https://github.com/microsoft/SkillOpt) against the named skill in the current project, parallel to `autoresearch-skill`. Converts the brunnr eval suite into SkillOpt's `items.json` format, drives `python scripts/train.py`, and writes the optimized skill back as `.pi/skills/<skill>/SKILL.md.skillopt-candidate` — does not auto-overwrite. Useful for A/B-ing SkillOpt's method against the autoresearch pipeline on the same eval set. One-time setup: clone microsoft/SkillOpt and pip install with Python 3.10+. Full setup steps and decision rule in `scripts/README.md`.
+**SkillOpt as a sibling optimizer.** `brunnr skillopt <skill>` runs Microsoft's [SkillOpt](https://github.com/microsoft/SkillOpt) against the named skill in the current project, parallel to `autoresearch-skill`. The wrapper auto-clones microsoft/SkillOpt to `~/Development/SkillOpt` on first invocation, provisions a `uv`-managed venv, and `git pull`s on subsequent runs — only one-time prereq is `brew install uv` (or the `astral.sh` installer). It converts the brunnr eval suite into SkillOpt's `items.json` format, drives `python scripts/train.py`, then re-grades SkillOpt's top-N snapshots against brunnr's **full** eval schema (deterministic + semantic + visual) so the winning candidate is chosen by *our* metric — not by SkillOpt's substring-only evaluator. Winner lands at `.pi/skills/<skill>/SKILL.md.skillopt-candidate`; the leaderboard at `outputs/skillopt-<short>/regrade/leaderboard.tsv`. Does not auto-overwrite the live skill. Useful for A/B-ing SkillOpt's proposer against autoresearch on the same eval set, with the asymmetry bounded to the proposer rather than the judge. Full setup steps, env overrides (`REGRADE_TOP_N`, `REGRADE_RUNS`, `UV_PYTHON`, …), and decision rule in `scripts/README.md`.
 
 **Per-skill eval files (multi-skill projects).** Brokkr resolves the eval file for the picked skill in this order, first hit wins:
 
@@ -377,7 +422,8 @@ brunnr/
 │   ├── eitri.ts
 │   └── agents/eitri/
 │       ├── eitri-orchestrator.md
-│       └── {ext,theme,skill,config,tui,prompt,agent,pattern,keybinding,cli}-expert.md
+│       ├── examples-data.yaml     # Curated Pi reference repos for examples-expert
+│       └── {ext,theme,skill,config,tui,prompt,agent,pattern,keybinding,cli,examples}-expert.md
 ├── extensions/brokkr/
 │   └── brokkr.ts         # TUI shell for /autoresearch-pipeline (Phase 1)
 ├── themes/
