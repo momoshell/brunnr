@@ -10,14 +10,20 @@
 #
 # Prereqs (one-time):
 #   - Python 3.10+ available (macOS: brew install python@3.12)
-#   - git clone https://github.com/microsoft/SkillOpt.git ~/Development/SkillOpt
-#   - (cd ~/Development/SkillOpt && pip install -e .)
-#   - .env with OPENAI / AZURE / ANTHROPIC creds in ~/Development/SkillOpt/
+#   - .env with OPENAI / AZURE / ANTHROPIC creds — created automatically
+#     at $SKILLOPT_DIR/.env on first run if missing (with placeholder values)
+#
+# The script clones microsoft/SkillOpt to $SKILLOPT_DIR on first run, pulls
+# the latest commit on subsequent runs, and pip-installs into a sibling
+# venv at $SKILLOPT_DIR/.venv. No manual setup required.
 #
 # Env overrides:
 #   PROJECT_ROOT      project root (default: $PWD — the user's project)
 #   SKILLOPT_DIR      path to cloned SkillOpt repo (default: ~/Development/SkillOpt)
-#   SKILLOPT_PY       python interpreter (default: python3)
+#   SYSTEM_PY         python used to bootstrap the venv (default: python3)
+#   SKILLOPT_PY       python interpreter SkillOpt runs under
+#                     (default: $SKILLOPT_DIR/.venv/bin/python)
+#   SKIP_UPDATE       set to skip the `git pull` step on existing checkout
 #   OPTIMIZER_MODEL   SkillOpt --optimizer_model (default: gpt-5.5)
 #   TARGET_MODEL      SkillOpt --target_model   (default: gpt-5.5)
 #   SKILLOPT_CONFIG   SkillOpt config path relative to its repo
@@ -43,17 +49,13 @@ out_root="$PROJECT_ROOT/outputs/skillopt-$short"
 
 # ── prechecks ──────────────────────────────────────────────────────────
 SKILLOPT_DIR="${SKILLOPT_DIR:-$HOME/Development/SkillOpt}"
-SKILLOPT_PY="${SKILLOPT_PY:-python3}"
+SYSTEM_PY="${SYSTEM_PY:-python3}"
 OPTIMIZER_MODEL="${OPTIMIZER_MODEL:-gpt-5.5}"
 TARGET_MODEL="${TARGET_MODEL:-gpt-5.5}"
 SKILLOPT_CONFIG="${SKILLOPT_CONFIG:-configs/searchqa/default.yaml}"
 BRIDGE_SCRIPT="${BRIDGE_SCRIPT:-$(cd "$(dirname "$0")" && pwd)/skillopt-bridge.py}"
+SKILLOPT_REPO_URL="https://github.com/microsoft/SkillOpt.git"
 
-if [ ! -d "$SKILLOPT_DIR" ]; then
-    echo "error: SkillOpt not cloned at $SKILLOPT_DIR" >&2
-    echo "       git clone https://github.com/microsoft/SkillOpt.git $SKILLOPT_DIR" >&2
-    exit 70
-fi
 if [ ! -f "$BRIDGE_SCRIPT" ]; then
     echo "error: bridge script not found: $BRIDGE_SCRIPT" >&2
     exit 70
@@ -69,14 +71,48 @@ if [ ! -f "$skill_md" ]; then
     exit 66
 fi
 
-# Python 3.10+ check — SkillOpt requires it.
-pyver=$("$SKILLOPT_PY" --version 2>&1 | awk '{print $2}' | cut -d. -f1,2)
-pymajor=$(echo "$pyver" | cut -d. -f1)
-pyminor=$(echo "$pyver" | cut -d. -f2)
-if [ "$pymajor" -lt 3 ] || { [ "$pymajor" -eq 3 ] && [ "$pyminor" -lt 10 ]; }; then
-    echo "error: SkillOpt needs Python 3.10+; $SKILLOPT_PY is $pyver" >&2
-    echo "       try SKILLOPT_PY=python3.12 $0 $skill" >&2
-    exit 70
+# ── step 0: clone / update SkillOpt, bootstrap venv ────────────────────
+if [ ! -d "$SKILLOPT_DIR" ]; then
+    echo "→ cloning microsoft/SkillOpt → $SKILLOPT_DIR"
+    mkdir -p "$(dirname "$SKILLOPT_DIR")"
+    git clone --quiet "$SKILLOPT_REPO_URL" "$SKILLOPT_DIR"
+elif [ -z "${SKIP_UPDATE:-}" ]; then
+    echo "→ updating SkillOpt ($SKILLOPT_DIR)"
+    if ! git -C "$SKILLOPT_DIR" pull --ff-only --quiet 2>/dev/null; then
+        echo "  warning: git pull failed (dirty checkout or no network?); continuing with current commit" >&2
+    fi
+fi
+
+venv="$SKILLOPT_DIR/.venv"
+if [ ! -x "$venv/bin/python" ]; then
+    # Validate the bootstrap python before spending time on the venv.
+    pyver=$("$SYSTEM_PY" --version 2>&1 | awk '{print $2}' | cut -d. -f1,2)
+    pymajor=$(echo "$pyver" | cut -d. -f1)
+    pyminor=$(echo "$pyver" | cut -d. -f2)
+    if [ "$pymajor" -lt 3 ] || { [ "$pymajor" -eq 3 ] && [ "$pyminor" -lt 10 ]; }; then
+        echo "error: SkillOpt needs Python 3.10+; $SYSTEM_PY is $pyver" >&2
+        echo "       brew install python@3.12 and re-run with SYSTEM_PY=python3.12" >&2
+        exit 70
+    fi
+    echo "→ creating venv + installing SkillOpt (one-time, ~1 min)"
+    "$SYSTEM_PY" -m venv "$venv"
+    "$venv/bin/pip" install --quiet --upgrade pip
+    "$venv/bin/pip" install --quiet -e "$SKILLOPT_DIR"
+fi
+
+SKILLOPT_PY="${SKILLOPT_PY:-$venv/bin/python}"
+
+# Drop a placeholder .env if absent so the user knows where to put creds.
+if [ ! -f "$SKILLOPT_DIR/.env" ]; then
+    cat > "$SKILLOPT_DIR/.env" <<'ENV'
+# SkillOpt provider credentials. Fill in whichever provider you use.
+# OPENAI_API_KEY=
+# AZURE_OPENAI_API_KEY=
+# AZURE_OPENAI_ENDPOINT=
+# ANTHROPIC_API_KEY=
+ENV
+    echo "→ wrote placeholder $SKILLOPT_DIR/.env — fill in provider creds before re-running" >&2
+    exit 78  # EX_CONFIG
 fi
 
 # ── step 1: convert evals to SkillOpt items.json ────────────────────────

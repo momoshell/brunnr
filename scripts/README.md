@@ -21,21 +21,17 @@ skills + evals without giving up the existing flow.
 
 ### One-time setup
 
-```bash
-# 1. Need Python 3.10+
-brew install python@3.12
+Just have Python 3.10+ on `$PATH` (`brew install python@3.12` on macOS).
+The wrapper handles the rest:
 
-# 2. Clone SkillOpt as a sibling repo
-cd ~/Development
-git clone https://github.com/microsoft/SkillOpt.git
-cd SkillOpt
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install -e .
-
-# 3. Configure provider creds in ~/Development/SkillOpt/.env
-#    (whichever provider you use — Azure OpenAI, OpenAI, Anthropic)
-```
+1. First `brunnr skillopt` clones `microsoft/SkillOpt` to
+   `~/Development/SkillOpt` and creates a sibling venv at `.venv/` with
+   `pip install -e .`.
+2. Subsequent runs `git pull --ff-only` to keep current. Set
+   `SKIP_UPDATE=1` to pin to the working copy you have.
+3. On first run it drops a placeholder `~/Development/SkillOpt/.env`
+   and exits with a hint. Fill in whichever provider you use
+   (Azure OpenAI / OpenAI / Anthropic) and re-run.
 
 ### Run against a skill in your project
 
@@ -62,10 +58,12 @@ The recipe:
 ### Env overrides
 
 ```bash
-SKILLOPT_DIR=/custom/path  brunnr skillopt argon-stance-chart
-SKILLOPT_PY=python3.12      brunnr skillopt argon-stance-chart
+SKILLOPT_DIR=/custom/path                             brunnr skillopt argon-stance-chart
+SYSTEM_PY=python3.12                                  brunnr skillopt argon-stance-chart  # bootstrap interpreter
+SKILLOPT_PY=/path/to/python                           brunnr skillopt argon-stance-chart  # override venv interpreter
+SKIP_UPDATE=1                                         brunnr skillopt argon-stance-chart  # don't git-pull
 OPTIMIZER_MODEL=gpt-5.5 TARGET_MODEL=claude-sonnet-4-6 brunnr skillopt argon-stance-chart
-SKILLOPT_CONFIG=configs/livemath/default.yaml          brunnr skillopt argon-stance-chart
+SKILLOPT_CONFIG=configs/livemath/default.yaml         brunnr skillopt argon-stance-chart
 ```
 
 ### What gets lost in translation
