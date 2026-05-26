@@ -28,6 +28,14 @@
 #   SKIP_UPDATE       set to skip the `git pull` step on existing checkout
 #   RESET_VENV=1      wipe $SKILLOPT_DIR/.venv before installing
 #                     (use when an older or broken venv needs replacing)
+#   REGRADE=0         skip the post-hoc brunnr re-grading step; promote
+#                     SkillOpt's best_skill.md verbatim
+#   REGRADE_TOP_N     how many of SkillOpt's most-recent snapshots to
+#                     re-grade (default: 5; plus best_skill.md is always
+#                     included)
+#   REGRADE_RUNS      how many times to repeat each eval case during
+#                     re-grading (default: 1; bump to 2 to catch flaky
+#                     semantic/visual judges on the final pick)
 #   OPTIMIZER_MODEL   SkillOpt --optimizer_model (default: gpt-5.5)
 #   TARGET_MODEL      SkillOpt --target_model   (default: gpt-5.5)
 #   SKILLOPT_CONFIG   SkillOpt config path relative to its repo
@@ -143,24 +151,99 @@ cd "$SKILLOPT_DIR"
     --target_model "$TARGET_MODEL" \
     --out_root "$out_root"
 
-# ── step 3: capture result as a .candidate file ────────────────────────
+# ── step 3: re-grade snapshots against the full brunnr eval schema ──────
+# SkillOpt's internal evaluator only sees the deterministic-substring slice
+# of our evals (the bridge had to drop semantic + visual). Post-train, we
+# re-grade SkillOpt's accepted snapshots using the full schema so the
+# winning candidate is chosen by *our* metric, not SkillOpt's.
+#
+# Set REGRADE=0 to skip and just take SkillOpt's best_skill.md as-is.
 echo ""
 candidate="$skill_md.skillopt-candidate"
-if [ -f "$out_root/best_skill.md" ]; then
-    cp "$out_root/best_skill.md" "$candidate"
-    echo "✓ SkillOpt finished — candidate at:"
-    echo "  $candidate"
-    echo ""
-    echo "Diff against current skill:"
-    echo "  diff -u $skill_md $candidate"
-    echo ""
-    echo "Promote if you like it:"
-    echo "  cp $candidate $skill_md && git add $skill_md && git commit -m \"adopt SkillOpt-optimized SKILL.md\""
-    echo ""
-    echo "Compare side-by-side with autoresearch:"
-    echo "  SkillOpt run output: $out_root"
-    echo "  autoresearch output: $PROJECT_ROOT/results/<run-tag>/results.tsv"
-else
+
+if [ ! -f "$out_root/best_skill.md" ]; then
     echo "error: SkillOpt did not produce best_skill.md at $out_root" >&2
     exit 1
 fi
+
+if [ "${REGRADE:-1}" = "0" ]; then
+    cp "$out_root/best_skill.md" "$candidate"
+    echo "→ REGRADE=0 — using SkillOpt's best_skill.md without brunnr re-grading"
+else
+    echo "→ re-grading snapshots with brunnr's full eval schema"
+    echo "  (deterministic + semantic + visual; SkillOpt only saw substring signal)"
+
+    REGRADE_TOP_N="${REGRADE_TOP_N:-5}"
+    REGRADE_RUNS="${REGRADE_RUNS:-1}"
+    GRADER="$(cd "$(dirname "$0")" && pwd)/grade-skill.py"
+
+    if [ ! -f "$GRADER" ]; then
+        echo "  warning: $GRADER missing — falling back to SkillOpt's best_skill.md" >&2
+        cp "$out_root/best_skill.md" "$candidate"
+    else
+        regrade_dir="$out_root/regrade"
+        mkdir -p "$regrade_dir"
+
+        # Collect candidates: best_skill.md + the most recent N versioned snapshots.
+        # The most recent snapshots are SkillOpt's strongest by *its* metric;
+        # we only need to re-rank within that top-N, not the entire history.
+        snapshots=("$out_root/best_skill.md")
+        if [ -d "$out_root/skills" ]; then
+            while IFS= read -r snap; do
+                [ -f "$snap" ] && snapshots+=("$snap")
+            done < <(ls -1 "$out_root"/skills/skill_v*.md 2>/dev/null | sort -V | tail -n "$REGRADE_TOP_N")
+        fi
+
+        best_train="-1"
+        best_snap=""
+        leaderboard="$regrade_dir/leaderboard.tsv"
+        : > "$leaderboard"
+
+        for snap in "${snapshots[@]}"; do
+            label="$(basename "$snap")"
+            report="$regrade_dir/${label%.md}.brunnr.json"
+            echo "  · grading $label"
+            if "$venv/bin/python" "$GRADER" \
+                --skill "$snap" \
+                --evals "$eval_file" \
+                --repo-root "$PROJECT_ROOT" \
+                --runs "$REGRADE_RUNS" \
+                --out "$report"; then
+                train=$(python3 -c "import json,sys; d=json.load(open('$report')); print(d['train_pass_rate'])" 2>/dev/null || echo "0")
+                holdout=$(python3 -c "import json,sys; d=json.load(open('$report')); print(d['holdout_pass_rate'])" 2>/dev/null || echo "0")
+                printf "%s\t%s\t%s\n" "$label" "$train" "$holdout" >> "$leaderboard"
+                echo "      train=$train  holdout=$holdout"
+                # Pick by train rate; tie-broken by holdout via float comparison.
+                if python3 -c "import sys; sys.exit(0 if float('$train') > float('$best_train') else 1)" 2>/dev/null; then
+                    best_train="$train"
+                    best_snap="$snap"
+                fi
+            else
+                echo "      warning: grader failed on $label" >&2
+            fi
+        done
+
+        if [ -n "$best_snap" ]; then
+            cp "$best_snap" "$candidate"
+            echo ""
+            echo "  brunnr-best snapshot: $(basename "$best_snap")  (train=$best_train)"
+            echo "  leaderboard: $leaderboard"
+        else
+            echo "  warning: re-grading produced no valid scores; using SkillOpt's best_skill.md" >&2
+            cp "$out_root/best_skill.md" "$candidate"
+        fi
+    fi
+fi
+
+echo ""
+echo "✓ candidate ready: $candidate"
+echo ""
+echo "Diff against current skill:"
+echo "  diff -u $skill_md $candidate"
+echo ""
+echo "Promote if you like it:"
+echo "  cp $candidate $skill_md && git add $skill_md && git commit -m \"adopt SkillOpt-optimized SKILL.md\""
+echo ""
+echo "Compare side-by-side with autoresearch:"
+echo "  SkillOpt run output: $out_root"
+echo "  autoresearch output: $PROJECT_ROOT/results/<run-tag>/results.tsv"

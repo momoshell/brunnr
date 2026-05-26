@@ -16,8 +16,9 @@ skills + evals without giving up the existing flow.
 
 | File | Role |
 |---|---|
-| `run-skillopt.sh` | end-to-end wrapper: converts evals, drives SkillOpt's train, captures result |
+| `run-skillopt.sh` | end-to-end wrapper: converts evals, drives SkillOpt's train, re-grades snapshots, captures winner |
 | `skillopt-bridge.py` | standalone eval-format converter (brunnr canonical → SkillOpt items.json) |
+| `grade-skill.py`    | re-grader: runs the full brunnr eval schema (deterministic + semantic + visual) against any SKILL.md |
 
 ### One-time setup
 
@@ -71,11 +72,14 @@ UV_PYTHON=3.11                                        brunnr skillopt argon-stan
 SKILLOPT_PY=/path/to/python                           brunnr skillopt argon-stance-chart  # override venv interpreter
 SKIP_UPDATE=1                                         brunnr skillopt argon-stance-chart  # don't git-pull
 RESET_VENV=1                                          brunnr skillopt argon-stance-chart  # rebuild .venv from scratch
+REGRADE=0                                             brunnr skillopt argon-stance-chart  # skip the brunnr post-hoc re-grade
+REGRADE_TOP_N=10                                      brunnr skillopt argon-stance-chart  # how many snapshots to re-grade (default 5)
+REGRADE_RUNS=2                                        brunnr skillopt argon-stance-chart  # repeat each eval N times (catches LLM flakiness)
 OPTIMIZER_MODEL=gpt-5.5 TARGET_MODEL=claude-sonnet-4-6 brunnr skillopt argon-stance-chart
 SKILLOPT_CONFIG=configs/livemath/default.yaml         brunnr skillopt argon-stance-chart
 ```
 
-### What gets lost in translation
+### What gets lost in translation (and how we get it back)
 
 SkillOpt's evaluator only does substring positive-match against expected
 `answers`. Brunnr's eval schema has three assertion types:
@@ -83,13 +87,11 @@ SkillOpt's evaluator only does substring positive-match against expected
 | Brunnr `type` | Translates? |
 |---|---|
 | `deterministic` with `output contains 'X'` | yes — `'X'` becomes an expected substring |
-| `deterministic` with `does not contain` or `matches /regex/` | no — dropped |
-| `semantic` (LLM judge) | no — dropped |
-| `visual` (vision judge on rendered SVG) | no — dropped |
+| `deterministic` with `does not contain` or `matches /regex/` | no — dropped at bridge time |
+| `semantic` (LLM judge) | no — dropped at bridge time |
+| `visual` (vision judge on rendered SVG) | no — dropped at bridge time |
 
-For SVG-rendering skills, the deterministic structural assertions
-usually carry ~80% of the signal. The bridge logs counts so you know
-exactly what's been dropped:
+The bridge logs counts so you know exactly what's been dropped:
 
 ```
 Converted stance-chart.json → outputs/skillopt-stance-chart/data
@@ -98,6 +100,17 @@ Converted stance-chart.json → outputs/skillopt-stance-chart/data
   Dropped evals (no deterministic signal): 0
   Skipped assertions: semantic=2 visual=2 other=3
 ```
+
+**Post-hoc re-grading recovers the dropped signal.** After SkillOpt's
+training loop finishes, the wrapper invokes `grade-skill.py` on
+SkillOpt's `best_skill.md` plus its `REGRADE_TOP_N` most recent
+versioned snapshots, runs them through brunnr's **full** eval schema
+(including the semantic + visual assertions the bridge had to drop),
+and writes the highest-scoring snapshot as the `.skillopt-candidate`.
+Effectively: *SkillOpt proposes (with degraded signal), brunnr judges
+(with full signal)*. A leaderboard lands at
+`outputs/skillopt-<short>/regrade/leaderboard.tsv`. Set `REGRADE=0` to
+skip and promote SkillOpt's pick verbatim.
 
 ### Side-by-side comparison
 
