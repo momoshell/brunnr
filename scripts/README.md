@@ -70,6 +70,7 @@ SKILLOPT_DIR=/custom/path                             brunnr skillopt argon-stan
 UV_PYTHON=3.11                                        brunnr skillopt argon-stance-chart  # python version for the venv
 SKILLOPT_PY=/path/to/python                           brunnr skillopt argon-stance-chart  # override venv interpreter
 SKIP_UPDATE=1                                         brunnr skillopt argon-stance-chart  # don't git-pull
+RESET_VENV=1                                          brunnr skillopt argon-stance-chart  # rebuild .venv from scratch
 OPTIMIZER_MODEL=gpt-5.5 TARGET_MODEL=claude-sonnet-4-6 brunnr skillopt argon-stance-chart
 SKILLOPT_CONFIG=configs/livemath/default.yaml         brunnr skillopt argon-stance-chart
 ```

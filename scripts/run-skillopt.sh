@@ -26,6 +26,8 @@
 #   SKILLOPT_PY       python interpreter SkillOpt runs under
 #                     (default: $SKILLOPT_DIR/.venv/bin/python)
 #   SKIP_UPDATE       set to skip the `git pull` step on existing checkout
+#   RESET_VENV=1      wipe $SKILLOPT_DIR/.venv before installing
+#                     (use when an older or broken venv needs replacing)
 #   OPTIMIZER_MODEL   SkillOpt --optimizer_model (default: gpt-5.5)
 #   TARGET_MODEL      SkillOpt --target_model   (default: gpt-5.5)
 #   SKILLOPT_CONFIG   SkillOpt config path relative to its repo
@@ -92,16 +94,8 @@ elif [ -z "${SKIP_UPDATE:-}" ]; then
     fi
 fi
 
-venv="$SKILLOPT_DIR/.venv"
-if [ ! -x "$venv/bin/python" ]; then
-    echo "→ creating venv (Python $UV_PYTHON) + installing SkillOpt via uv (one-time)"
-    uv venv --python "$UV_PYTHON" "$venv"
-    VIRTUAL_ENV="$venv" uv pip install --quiet -e "$SKILLOPT_DIR"
-fi
-
-SKILLOPT_PY="${SKILLOPT_PY:-$venv/bin/python}"
-
-# Drop a placeholder .env if absent so the user knows where to put creds.
+# Bail early if creds aren't configured — saves the ~30s install cost on
+# first run when the user still has to fill in .env anyway.
 if [ ! -f "$SKILLOPT_DIR/.env" ]; then
     cat > "$SKILLOPT_DIR/.env" <<'ENV'
 # SkillOpt provider credentials. Fill in whichever provider you use.
@@ -113,6 +107,19 @@ ENV
     echo "→ wrote placeholder $SKILLOPT_DIR/.env — fill in provider creds before re-running" >&2
     exit 78  # EX_CONFIG
 fi
+
+venv="$SKILLOPT_DIR/.venv"
+if [ "${RESET_VENV:-}" = "1" ] && [ -d "$venv" ]; then
+    echo "→ RESET_VENV=1 → removing $venv"
+    rm -rf "$venv"
+fi
+if [ ! -x "$venv/bin/python" ]; then
+    echo "→ creating venv (Python $UV_PYTHON) + installing SkillOpt via uv (one-time)"
+    uv venv --python "$UV_PYTHON" "$venv"
+    VIRTUAL_ENV="$venv" uv pip install --quiet -e "$SKILLOPT_DIR"
+fi
+
+SKILLOPT_PY="${SKILLOPT_PY:-$venv/bin/python}"
 
 # ── step 1: convert evals to SkillOpt items.json ────────────────────────
 echo "→ converting evals → SkillOpt items.json"
