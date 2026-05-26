@@ -9,18 +9,20 @@
 #   PROJECT_ROOT=/path/to/project run-skillopt.sh <skill-name>
 #
 # Prereqs (one-time):
-#   - Python 3.10+ available (macOS: brew install python@3.12)
+#   - uv installed (macOS: brew install uv;
+#                   or: curl -LsSf https://astral.sh/uv/install.sh | sh)
 #   - .env with OPENAI / AZURE / ANTHROPIC creds — created automatically
 #     at $SKILLOPT_DIR/.env on first run if missing (with placeholder values)
 #
 # The script clones microsoft/SkillOpt to $SKILLOPT_DIR on first run, pulls
-# the latest commit on subsequent runs, and pip-installs into a sibling
-# venv at $SKILLOPT_DIR/.venv. No manual setup required.
+# the latest commit on subsequent runs, and provisions a uv-managed venv
+# at $SKILLOPT_DIR/.venv with `uv pip install -e .`. uv fetches the right
+# Python version on its own — no system python required.
 #
 # Env overrides:
 #   PROJECT_ROOT      project root (default: $PWD — the user's project)
 #   SKILLOPT_DIR      path to cloned SkillOpt repo (default: ~/Development/SkillOpt)
-#   SYSTEM_PY         python used to bootstrap the venv (default: python3)
+#   UV_PYTHON         python version uv installs into the venv (default: 3.12)
 #   SKILLOPT_PY       python interpreter SkillOpt runs under
 #                     (default: $SKILLOPT_DIR/.venv/bin/python)
 #   SKIP_UPDATE       set to skip the `git pull` step on existing checkout
@@ -49,7 +51,7 @@ out_root="$PROJECT_ROOT/outputs/skillopt-$short"
 
 # ── prechecks ──────────────────────────────────────────────────────────
 SKILLOPT_DIR="${SKILLOPT_DIR:-$HOME/Development/SkillOpt}"
-SYSTEM_PY="${SYSTEM_PY:-python3}"
+UV_PYTHON="${UV_PYTHON:-3.12}"
 OPTIMIZER_MODEL="${OPTIMIZER_MODEL:-gpt-5.5}"
 TARGET_MODEL="${TARGET_MODEL:-gpt-5.5}"
 SKILLOPT_CONFIG="${SKILLOPT_CONFIG:-configs/searchqa/default.yaml}"
@@ -71,7 +73,14 @@ if [ ! -f "$skill_md" ]; then
     exit 66
 fi
 
-# ── step 0: clone / update SkillOpt, bootstrap venv ────────────────────
+# ── step 0: clone / update SkillOpt, bootstrap venv via uv ─────────────
+if ! command -v uv >/dev/null 2>&1; then
+    echo "error: uv not installed" >&2
+    echo "       brew install uv                                          # macOS" >&2
+    echo "       curl -LsSf https://astral.sh/uv/install.sh | sh          # any unix" >&2
+    exit 70
+fi
+
 if [ ! -d "$SKILLOPT_DIR" ]; then
     echo "→ cloning microsoft/SkillOpt → $SKILLOPT_DIR"
     mkdir -p "$(dirname "$SKILLOPT_DIR")"
@@ -85,19 +94,9 @@ fi
 
 venv="$SKILLOPT_DIR/.venv"
 if [ ! -x "$venv/bin/python" ]; then
-    # Validate the bootstrap python before spending time on the venv.
-    pyver=$("$SYSTEM_PY" --version 2>&1 | awk '{print $2}' | cut -d. -f1,2)
-    pymajor=$(echo "$pyver" | cut -d. -f1)
-    pyminor=$(echo "$pyver" | cut -d. -f2)
-    if [ "$pymajor" -lt 3 ] || { [ "$pymajor" -eq 3 ] && [ "$pyminor" -lt 10 ]; }; then
-        echo "error: SkillOpt needs Python 3.10+; $SYSTEM_PY is $pyver" >&2
-        echo "       brew install python@3.12 and re-run with SYSTEM_PY=python3.12" >&2
-        exit 70
-    fi
-    echo "→ creating venv + installing SkillOpt (one-time, ~1 min)"
-    "$SYSTEM_PY" -m venv "$venv"
-    "$venv/bin/pip" install --quiet --upgrade pip
-    "$venv/bin/pip" install --quiet -e "$SKILLOPT_DIR"
+    echo "→ creating venv (Python $UV_PYTHON) + installing SkillOpt via uv (one-time)"
+    uv venv --python "$UV_PYTHON" "$venv"
+    VIRTUAL_ENV="$venv" uv pip install --quiet -e "$SKILLOPT_DIR"
 fi
 
 SKILLOPT_PY="${SKILLOPT_PY:-$venv/bin/python}"

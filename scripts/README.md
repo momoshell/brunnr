@@ -21,12 +21,20 @@ skills + evals without giving up the existing flow.
 
 ### One-time setup
 
-Just have Python 3.10+ on `$PATH` (`brew install python@3.12` on macOS).
-The wrapper handles the rest:
+Install [uv](https://docs.astral.sh/uv/) — the wrapper handles the rest:
+
+```bash
+brew install uv                                       # macOS
+# or
+curl -LsSf https://astral.sh/uv/install.sh | sh       # any unix
+```
+
+The wrapper:
 
 1. First `brunnr skillopt` clones `microsoft/SkillOpt` to
-   `~/Development/SkillOpt` and creates a sibling venv at `.venv/` with
-   `pip install -e .`.
+   `~/Development/SkillOpt`, then provisions a sibling
+   `.venv/` with `uv venv --python 3.12` + `uv pip install -e .`. uv
+   fetches the right Python on its own — no system Python required.
 2. Subsequent runs `git pull --ff-only` to keep current. Set
    `SKIP_UPDATE=1` to pin to the working copy you have.
 3. On first run it drops a placeholder `~/Development/SkillOpt/.env`
@@ -59,7 +67,7 @@ The recipe:
 
 ```bash
 SKILLOPT_DIR=/custom/path                             brunnr skillopt argon-stance-chart
-SYSTEM_PY=python3.12                                  brunnr skillopt argon-stance-chart  # bootstrap interpreter
+UV_PYTHON=3.11                                        brunnr skillopt argon-stance-chart  # python version for the venv
 SKILLOPT_PY=/path/to/python                           brunnr skillopt argon-stance-chart  # override venv interpreter
 SKIP_UPDATE=1                                         brunnr skillopt argon-stance-chart  # don't git-pull
 OPTIMIZER_MODEL=gpt-5.5 TARGET_MODEL=claude-sonnet-4-6 brunnr skillopt argon-stance-chart
