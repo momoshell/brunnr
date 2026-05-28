@@ -227,7 +227,35 @@ Bordered TUI overlays walk you through:
 
 **Refreshing the optimizer stack.** `brunnr sync` updates the catalog at `~/.config/brunnr/`, but Pi loads agents from `~/.pi/agent/agents/` — a separate install path that `brunnr setup-optimizer` populates and refuses to overwrite. After a `sync` that bumps an agent or prompt file, run `brunnr update-optimizer` to copy the fresher catalog versions into Pi's load path. Idempotent — it diffs each file and only copies the ones that drifted.
 
-**SkillOpt as a sibling optimizer.** `brunnr skillopt <skill>` runs Microsoft's [SkillOpt](https://github.com/microsoft/SkillOpt) against the named skill in the current project, parallel to `autoresearch-skill`. The wrapper auto-clones microsoft/SkillOpt to `~/Development/SkillOpt` on first invocation, provisions a `uv`-managed venv, and `git pull`s on subsequent runs — only one-time prereq is `brew install uv` (or the `astral.sh` installer). It converts the brunnr eval suite into SkillOpt's `items.json` format, drives `python scripts/train.py`, then re-grades SkillOpt's top-N snapshots against brunnr's **full** eval schema (deterministic + semantic + visual) so the winning candidate is chosen by *our* metric — not by SkillOpt's substring-only evaluator. Winner lands at `.pi/skills/<skill>/SKILL.md.skillopt-candidate`; the leaderboard at `outputs/skillopt-<short>/regrade/leaderboard.tsv`. Does not auto-overwrite the live skill. Useful for A/B-ing SkillOpt's proposer against autoresearch on the same eval set, with the asymmetry bounded to the proposer rather than the judge. Full setup steps, env overrides (`REGRADE_TOP_N`, `REGRADE_RUNS`, `UV_PYTHON`, …), and decision rule in `scripts/README.md`.
+**SkillOpt as a sibling optimizer.** `brunnr skillopt <skill>` runs Microsoft's [SkillOpt](https://github.com/microsoft/SkillOpt) against a skill, parallel to `autoresearch-skill`. Useful for A/B-ing SkillOpt's proposer on the same eval set.
+
+```bash
+# One-time prereq
+brew install uv   # or: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# From your project root (needs .pi/skills/<name>/ + evals/<short>.json)
+brunnr skillopt argon-stance-chart
+```
+
+What it does:
+
+1. Clones `microsoft/SkillOpt` to `~/Development/SkillOpt` (first run only)
+2. Provisions a `uv` venv with SkillOpt installed (~30s, first run only)
+3. Converts `evals/<short>.json` → SkillOpt `items.json`
+4. Runs `python scripts/train.py` with your skill as the seed
+5. Re-grades SkillOpt's top-N snapshots with brunnr's full eval schema (deterministic + semantic + visual), so the winner is picked by *our* metric — not by SkillOpt's substring-only evaluator
+6. Writes winner to `.pi/skills/<skill>/SKILL.md.skillopt-candidate` (does not auto-overwrite the live skill); leaderboard at `outputs/skillopt-<short>/regrade/leaderboard.tsv`
+
+Common overrides:
+
+```bash
+REGRADE=0          # skip re-grading, promote SkillOpt's pick as-is
+REGRADE_TOP_N=10   # grade more snapshots (default 5)
+REGRADE_RUNS=2     # repeat each eval 2× (catches LLM flakiness)
+UV_PYTHON=3.11     # pin venv to a different Python
+```
+
+Full details in `scripts/README.md`.
 
 **Per-skill eval files (multi-skill projects).** Brokkr resolves the eval file for the picked skill in this order, first hit wins:
 
