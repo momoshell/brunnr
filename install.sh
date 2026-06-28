@@ -99,7 +99,7 @@ fi
 
 if ! have pi; then
   warn "Pi is not installed. brunnr installs catalog items into directories Pi reads."
-  echo "   Install Pi: https://github.com/badlogic/pi-mono"
+  echo "   Install Pi: https://github.com/earendil-works/pi"
 fi
 
 say "Done."

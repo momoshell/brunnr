@@ -6,7 +6,7 @@
 # Tool version — bump when changing justfile / install.sh in a way that catalog
 # entries may depend on. `brunnr sync` compares this against library.yaml's
 # `min_tool_version` and refuses if the local tool is older.
-export TOOL_VERSION := "3.0.23"
+export TOOL_VERSION := "3.0.24"
 
 # Default path to brunnr repository
 export BRUNNR_HOME := env_var_or_default("BRUNNR_HOME", env_var('HOME') / ".config/brunnr")
@@ -106,7 +106,7 @@ eitri *args:
 
     if ! command -v pi >/dev/null 2>&1; then
         echo "Error: 'pi' not found on PATH."
-        echo "  Install Pi: https://github.com/badlogic/pi-mono"
+        echo "  Install Pi: https://github.com/earendil-works/pi"
         exit 1
     fi
 
@@ -141,7 +141,7 @@ brokkr *args:
     fi
 
     if ! command -v pi >/dev/null 2>&1; then
-        echo "Error: 'pi' not found on PATH. Install Pi: https://github.com/badlogic/pi-mono"
+        echo "Error: 'pi' not found on PATH. Install Pi: https://github.com/earendil-works/pi"
         exit 1
     fi
 
@@ -1782,6 +1782,26 @@ check:
         end
       end
 
+      # Compatibility drift checks against current Pi docs. These stay warnings
+      # because older Pi releases may still accept legacy URLs/import namespaces.
+      text_files = Dir.glob("{README.md,SKILL.md,library.yaml,install.sh,justfile,agents/**/*.md,prompts/**/*.md,extensions/**/*.{md,ts},scripts/**/*,lore/**/*.md}")
+        .select { |p| File.file?(p) }
+
+      stale_pi_repo = "badlogic/" + "pi-mono"
+      legacy_pi_namespace = "@mariozechner" + "/"
+
+      text_files.each do |path|
+        File.readlines(path, chomp: true).each_with_index do |line, i|
+          if line.include?(stale_pi_repo)
+            warnings << "#{path}:#{i + 1}: stale Pi docs/repo reference `#{stale_pi_repo}`; prefer `earendil-works/pi`"
+          end
+
+          if line.include?(legacy_pi_namespace)
+            warnings << "#{path}:#{i + 1}: legacy Pi import namespace `#{legacy_pi_namespace}*`; verify against installed Pi docs, which now document `@earendil-works/*` peer dependencies"
+          end
+        end
+      end
+
       # Summary
       puts "library.yaml: parsed OK"
       sections.each do |s|
@@ -1974,7 +1994,7 @@ examples-discover:
         "pi.registerTool path:.pi extension:ts|Pi extensions (registerTool)"
         "path:.pi/skills/SKILL.md|Pi skills (SKILL.md)"
         "path:.pi/agents extension:md|Pi agents (.pi/agents)"
-        "topic:pi-mono|Repos tagged pi-mono"
+        "pi-package filename:package.json|Pi packages (package.json keyword)"
     )
 
     echo "Scanning GitHub for Pi-related repos not in the registry..."

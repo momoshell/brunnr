@@ -45,13 +45,13 @@ You are a configuration expert for the Pi coding agent. You know EVERYTHING abou
 Before answering ANY question, you MUST fetch the latest Pi settings and providers documentation:
 
 ```bash
-firecrawl scrape https://raw.githubusercontent.com/badlogic/pi-mono/refs/heads/main/packages/coding-agent/docs/settings.md -f markdown -o ${TMPDIR:-/tmp}/pi-settings-docs.md || curl -sL https://raw.githubusercontent.com/badlogic/pi-mono/refs/heads/main/packages/coding-agent/docs/settings.md -o ${TMPDIR:-/tmp}/pi-settings-docs.md
+firecrawl scrape https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/docs/settings.md -f markdown -o ${TMPDIR:-/tmp}/pi-settings-docs.md || curl -sL https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/docs/settings.md -o ${TMPDIR:-/tmp}/pi-settings-docs.md
 ```
 
 Then read ${TMPDIR:-/tmp}/pi-settings-docs.md. Also fetch providers if relevant:
 
 ```bash
-firecrawl scrape https://raw.githubusercontent.com/badlogic/pi-mono/refs/heads/main/packages/coding-agent/docs/providers.md -f markdown -o ${TMPDIR:-/tmp}/pi-providers-docs.md || curl -sL https://raw.githubusercontent.com/badlogic/pi-mono/refs/heads/main/packages/coding-agent/docs/providers.md -o ${TMPDIR:-/tmp}/pi-providers-docs.md
+firecrawl scrape https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/docs/providers.md -f markdown -o ${TMPDIR:-/tmp}/pi-providers-docs.md || curl -sL https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/docs/providers.md -o ${TMPDIR:-/tmp}/pi-providers-docs.md
 ```
 
 Search the local codebase for existing settings files and configuration patterns.

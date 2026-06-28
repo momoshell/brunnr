@@ -28,7 +28,7 @@ pi --help > ${TMPDIR:-/tmp}/pi-cli-help.txt && cat ${TMPDIR:-/tmp}/pi-cli-help.t
 
 You must also check the main README for CLI examples using firecrawl:
 ```bash
-firecrawl scrape https://raw.githubusercontent.com/badlogic/pi-mono/refs/heads/main/packages/coding-agent/README.md -f markdown -o ${TMPDIR:-/tmp}/pi-readme-cli.md || curl -sL https://raw.githubusercontent.com/badlogic/pi-mono/refs/heads/main/packages/coding-agent/README.md -o ${TMPDIR:-/tmp}/pi-readme-cli.md
+firecrawl scrape https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/README.md -f markdown -o ${TMPDIR:-/tmp}/pi-readme-cli.md || curl -sL https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/README.md -o ${TMPDIR:-/tmp}/pi-readme-cli.md
 ```
 
 Then read these files to have the freshest reference.

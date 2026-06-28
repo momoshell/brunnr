@@ -1,6 +1,6 @@
 # brunnr
 
-> A reference-first catalog for [Pi](https://github.com/badlogic/pi-mono) — skills, agents, prompts, extensions, and themes.
+> A reference-first catalog for [Pi](https://github.com/earendil-works/pi) — skills, agents, prompts, extensions, and themes.
 
 `brunnr <command>` installs catalog items into the directories Pi reads natively. Then use them in Pi.
 
@@ -13,7 +13,7 @@ The installer (`install.sh`) checks for these and offers to `brew install` any t
 | **git** | Every catalog mutation goes through git |
 | **just** | Runs `brunnr` commands |
 | **gh** | GitHub CLI — powers `brunnr push` / `scrap` / `status` (requires `gh auth login` before first push) |
-| **Pi** | The coding agent that reads your skills, agents, prompts, extensions, themes — [pi-mono](https://github.com/badlogic/pi-mono) |
+| **Pi** | The coding agent that reads your skills, agents, prompts, extensions, themes — [Pi](https://github.com/earendil-works/pi) |
 | **rsvg-convert** *(optional)* | SVG → PNG renderer used by `type: visual` eval assertions (`brew install librsvg`). Only needed when optimizing artifact-producing skills with visual judge calls. |
 
 ## Install
@@ -94,6 +94,10 @@ brunnr add <section> <name>     # install into this project's .pi/
 brunnr add -g <section> <name>  # install globally — every project sees it
 ```
 
+Pi treats project `.pi/*` resources as trusted project input: once a project is trusted, Pi can load those skills, prompts, themes, settings, and extensions. Review third-party catalog items before installing them, especially extensions and skills with helper scripts, because Pi does not sandbox them.
+
+Pi also has first-class package support (`pi install npm:...`, `pi install git:...`, or `pi install ./local-package`) for bundles with conventional `extensions/`, `skills/`, `prompts/`, and `themes/` directories or a `package.json` `pi` manifest. brunnr deliberately remains a curation and copy/install layer today; package export is the natural path when you want to publish a bundle through Pi's package manager.
+
 **Eitri** — the authoring tool that ships with brunnr — is **not** installed anywhere. `brunnr eitri` loads it on demand directly from `$BRUNNR_HOME/extensions/eitri/`, so plain `pi` sessions stay free of it.
 
 `-g` (global) routes installs to `~/.pi/agent/<section>s/`, available in every project. Use it for items you want everywhere (e.g. `eval-designer`).
@@ -162,7 +166,7 @@ brunnr examples-check                          # ping each entry, flag 404 / arc
 
 `examples-add` parses the URL, calls `gh api repos/<owner>/<repo>` to confirm reachability and pull the repo description, refuses duplicates, and appends to `examples-data.yaml`. Category is one of `extension`, `skill`, `agent`, `prompt`, `theme`, `mixed` (default).
 
-`examples-discover` runs a handful of GitHub code-search queries (`pi.registerCommand`, `path:.pi/skills/SKILL.md`, `topic:pi-mono`, …), filters out repos already in the registry and archived ones, and prints stars + description for each candidate. Treat it as a weekly habit — you skim, run `examples-add` on the ones worth keeping.
+`examples-discover` runs a handful of GitHub code-search queries (`pi.registerCommand`, `path:.pi/skills/SKILL.md`, `pi-package filename:package.json`, …), filters out repos already in the registry and archived ones, and prints stars + description for each candidate. Treat it as a weekly habit — you skim, run `examples-add` on the ones worth keeping.
 
 `examples-check` is the rot detector. Run it before a release or on a schedule. It updates `last_validated: <today>` on every entry that pings successfully, and exits non-zero if any entry is unreachable or archived.
 
