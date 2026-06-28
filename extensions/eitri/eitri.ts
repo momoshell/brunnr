@@ -40,11 +40,11 @@
  * ─────────────────────────────────────────────────────────────────────────
  */
 
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { truncateHead, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, parseFrontmatter, getSelectListTheme } from "@mariozechner/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
-import type { Component } from "@mariozechner/pi-tui";
-import { Text, truncateToWidth, visibleWidth, SelectList } from "@mariozechner/pi-tui";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { truncateHead, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, parseFrontmatter, getSelectListTheme } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
+import type { Component } from "@earendil-works/pi-tui";
+import { Text, truncateToWidth, visibleWidth, SelectList } from "@earendil-works/pi-tui";
 import { spawn } from "child_process";
 import { createHash } from "crypto";
 import { readdirSync, readFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, unlinkSync, rmdirSync, appendFileSync, statSync, renameSync } from "fs";
