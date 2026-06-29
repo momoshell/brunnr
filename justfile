@@ -6,7 +6,7 @@
 # Tool version — bump when changing justfile / install.sh in a way that catalog
 # entries may depend on. `brunnr sync` compares this against library.yaml's
 # `min_tool_version` and refuses if the local tool is older.
-export TOOL_VERSION := "3.0.25"
+export TOOL_VERSION := "3.0.26"
 
 # Default path to brunnr repository
 export BRUNNR_HOME := env_var_or_default("BRUNNR_HOME", env_var('HOME') / ".config/brunnr")
@@ -1683,6 +1683,7 @@ check:
 
       sections = %w[skills agents prompts extensions themes]
       required = %w[name description source]
+      skill_name_pattern = /\A[a-z0-9]+(?:-[a-z0-9]+)*\z/
       theme_color_tokens = %w[
         accent border borderAccent borderMuted success error warning muted dim text thinkingText
         selectedBg userMessageBg userMessageText customMessageBg customMessageText customMessageLabel
@@ -1751,17 +1752,43 @@ check:
           # Normalize for orphan tracking: directory sources end with /
           known_paths << (Dir.exist?(src) ? src.chomp("/") + "/" : src)
 
-          # Frontmatter `name:` must match library.yaml name (for .md files only)
+          # Frontmatter checks for markdown-backed items.
           if src.end_with?(".md") && File.file?(src)
             content = File.read(src)
             if content =~ /\A---\s*\n(.*?)\n---/m
               fm = YAML.safe_load($1, permitted_classes: [], permitted_symbols: [], aliases: false) rescue {}
-              fm_name = fm.is_a?(Hash) ? fm["name"] : nil
+              fm = {} unless fm.is_a?(Hash)
+              fm_name = fm["name"]
+
+              if section == "skills"
+                skill_desc = fm["description"]
+
+                if fm_name.nil? || fm_name.to_s.empty?
+                  errors << "#{label}: skill frontmatter missing required `name` (#{src})"
+                elsif !fm_name.is_a?(String)
+                  errors << "#{label}: skill frontmatter `name` must be a string (#{src})"
+                elsif fm_name.length > 64
+                  errors << "#{label}: skill frontmatter `name` exceeds 64 characters (#{src})"
+                elsif !fm_name.match?(skill_name_pattern)
+                  errors << "#{label}: skill frontmatter `name` must use lowercase letters, numbers, and single hyphens with no leading/trailing hyphen (#{src})"
+                end
+
+                if skill_desc.nil? || skill_desc.to_s.empty?
+                  errors << "#{label}: skill frontmatter missing required `description`; Pi will not load this skill (#{src})"
+                elsif !skill_desc.is_a?(String)
+                  errors << "#{label}: skill frontmatter `description` must be a string (#{src})"
+                elsif skill_desc.length > 1024
+                  errors << "#{label}: skill frontmatter `description` exceeds 1024 characters (#{src})"
+                end
+              end
+
               if fm_name && fm_name != name
                 errors << "#{label}: frontmatter name `#{fm_name}` != library.yaml name `#{name}` (#{src})"
-              elsif fm_name.nil?
+              elsif fm_name.nil? && section != "skills"
                 warnings << "#{label}: source has no `name:` frontmatter field (#{src})"
               end
+            elsif section == "skills"
+              errors << "#{label}: skill source has no YAML frontmatter; Pi requires `name` and `description` (#{src})"
             else
               warnings << "#{label}: source has no YAML frontmatter (#{src})"
             end
