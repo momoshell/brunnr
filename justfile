@@ -6,7 +6,7 @@
 # Tool version — bump when changing justfile / install.sh in a way that catalog
 # entries may depend on. `brunnr sync` compares this against library.yaml's
 # `min_tool_version` and refuses if the local tool is older.
-export TOOL_VERSION := "3.0.23"
+export TOOL_VERSION := "3.0.31"
 
 # Default path to brunnr repository
 export BRUNNR_HOME := env_var_or_default("BRUNNR_HOME", env_var('HOME') / ".config/brunnr")
@@ -106,7 +106,7 @@ eitri *args:
 
     if ! command -v pi >/dev/null 2>&1; then
         echo "Error: 'pi' not found on PATH."
-        echo "  Install Pi: https://github.com/badlogic/pi-mono"
+        echo "  Install Pi: https://github.com/earendil-works/pi"
         exit 1
     fi
 
@@ -141,7 +141,7 @@ brokkr *args:
     fi
 
     if ! command -v pi >/dev/null 2>&1; then
-        echo "Error: 'pi' not found on PATH. Install Pi: https://github.com/badlogic/pi-mono"
+        echo "Error: 'pi' not found on PATH. Install Pi: https://github.com/earendil-works/pi"
         exit 1
     fi
 
@@ -323,10 +323,30 @@ add *args:
     
     # Check if target already exists
     if [ "$SECTION" = "extension" ] && [ -d "$RESOLVED_SRC" ]; then
-        # Directory-style extensions install to multiple targets — check for the
-        # canonical .ts file at the extensions target as the conflict marker.
-        if [ -e "$EXTENSIONS_TARGET/$NAME.ts" ]; then
-            echo "Error: extension '$NAME' already installed ($SCOPE_LABEL: $EXTENSIONS_TARGET/$NAME.ts)"
+        # Directory-style extensions install to multiple targets. Check every
+        # routed top-level destination up front so we never merge/overwrite an
+        # existing extension, agent subtree, or theme subtree.
+        shopt -s nullglob
+        CONFLICTS=()
+        for ts in "$RESOLVED_SRC"/*.ts; do
+            base="$(basename "$ts")"
+            [ -e "$EXTENSIONS_TARGET/$base" ] && CONFLICTS+=("$EXTENSIONS_TARGET/$base")
+        done
+        if [ -d "$RESOLVED_SRC/agents" ]; then
+            for entry in "$RESOLVED_SRC/agents"/*; do
+                base="$(basename "$entry")"
+                [ -e "$AGENTS_TARGET/$base" ] && CONFLICTS+=("$AGENTS_TARGET/$base")
+            done
+        fi
+        if [ -d "$RESOLVED_SRC/themes" ]; then
+            for entry in "$RESOLVED_SRC/themes"/*; do
+                base="$(basename "$entry")"
+                [ -e "$THEMES_TARGET/$base" ] && CONFLICTS+=("$THEMES_TARGET/$base")
+            done
+        fi
+        if [ "${#CONFLICTS[@]}" -gt 0 ]; then
+            echo "Error: extension '$NAME' conflicts with existing $SCOPE_LABEL target(s):"
+            printf '  - %s\n' "${CONFLICTS[@]}"
             echo "Use 'push' to update brunnr with local changes, or remove first."
             exit 1
         fi
@@ -345,17 +365,53 @@ add *args:
         #   <src>/agents/<sub>/   → $AGENTS_TARGET/<sub>/ (preserves subdir structure)
         #   <src>/themes/<sub>/   → $THEMES_TARGET/<sub>/
         # Other top-level files (README.md etc.) are ignored.
-        mkdir -p "$EXTENSIONS_TARGET" "$AGENTS_TARGET" "$THEMES_TARGET"
         shopt -s nullglob
+        for target_dir in "$EXTENSIONS_TARGET" "$AGENTS_TARGET" "$THEMES_TARGET"; do
+            if [ -e "$target_dir" ] && [ ! -d "$target_dir" ]; then
+                echo "Error: target path exists but is not a directory: $target_dir"
+                exit 1
+            fi
+        done
+
+        CREATED_PATHS=()
+        rollback_extension_install() {
+            local status=$?
+            if [ "$status" -ne 0 ] && [ "${#CREATED_PATHS[@]}" -gt 0 ]; then
+                echo "Install failed; rolling back partial extension install..." >&2
+                local i
+                for (( i=${#CREATED_PATHS[@]}-1; i>=0; i-- )); do
+                    rm -rf "${CREATED_PATHS[$i]}"
+                done
+            fi
+            exit "$status"
+        }
+        trap rollback_extension_install ERR
+
+        mkdir -p "$EXTENSIONS_TARGET" "$AGENTS_TARGET" "$THEMES_TARGET"
         for ts in "$RESOLVED_SRC"/*.ts; do
-            [ -f "$ts" ] && cp "$ts" "$EXTENSIONS_TARGET/"
+            if [ -f "$ts" ]; then
+                dst="$EXTENSIONS_TARGET/$(basename "$ts")"
+                cp "$ts" "$dst"
+                CREATED_PATHS+=("$dst")
+            fi
         done
         if [ -d "$RESOLVED_SRC/agents" ]; then
-            cp -r "$RESOLVED_SRC/agents/." "$AGENTS_TARGET/"
+            for entry in "$RESOLVED_SRC/agents"/*; do
+                base="$(basename "$entry")"
+                dst="$AGENTS_TARGET/$base"
+                cp -R "$entry" "$dst"
+                CREATED_PATHS+=("$dst")
+            done
         fi
         if [ -d "$RESOLVED_SRC/themes" ]; then
-            cp -r "$RESOLVED_SRC/themes/." "$THEMES_TARGET/"
+            for entry in "$RESOLVED_SRC/themes"/*; do
+                base="$(basename "$entry")"
+                dst="$THEMES_TARGET/$base"
+                cp -R "$entry" "$dst"
+                CREATED_PATHS+=("$dst")
+            done
         fi
+        trap - ERR
         echo "Installed extension '$NAME' (routed to $EXTENSIONS_TARGET/, $AGENTS_TARGET/, $THEMES_TARGET/)"
     else
         # Ensure destination directory exists
@@ -376,6 +432,8 @@ remove *args:
     #!/usr/bin/env bash
     set -euo pipefail
     cd "{{invocation_directory()}}"
+    BRUNNR_HOME="{{BRUNNR_HOME}}"
+    LIBRARY="$BRUNNR_HOME/library.yaml"
 
     GLOBAL=0
     POSITIONAL=()
@@ -423,24 +481,77 @@ remove *args:
     esac
 
     if [ "$SECTION" = "extension" ]; then
-        # Directory-style extension: remove the .ts file plus the matching
-        # agents/<name>/ and themes/<name>/ subdirs that were created on install.
+        # Directory-style extension: remove the same routed artifacts that add
+        # installed. Fall back to the legacy name-based targets if the catalog
+        # entry/source is unavailable.
         REMOVED_ANY=0
-        if [ -e "$EXTENSIONS_TARGET/$NAME.ts" ]; then
-            rm "$EXTENSIONS_TARGET/$NAME.ts"
-            echo "Removed $EXTENSIONS_TARGET/$NAME.ts"
-            REMOVED_ANY=1
+        TARGETS=()
+
+        add_extension_remove_target() {
+            local target="$1"
+            local existing
+            if [ "${#TARGETS[@]}" -gt 0 ]; then
+                for existing in "${TARGETS[@]}"; do
+                    [ "$existing" = "$target" ] && return
+                done
+            fi
+            TARGETS+=("$target")
+        }
+
+        SOURCE=""
+        if [ -f "$LIBRARY" ]; then
+            SOURCE=$(ruby -ryaml -e '
+                catalog = YAML.safe_load(File.read(ARGV[0]), permitted_classes: [], permitted_symbols: [], aliases: false)
+                item = (catalog["extensions"] || []).find { |i| i["name"] == ARGV[1] }
+                puts(item ? item["source"].to_s : "")
+            ' "$LIBRARY" "$NAME")
         fi
-        if [ -d "$AGENTS_TARGET/$NAME" ]; then
-            rm -r "$AGENTS_TARGET/$NAME"
-            echo "Removed $AGENTS_TARGET/$NAME/"
-            REMOVED_ANY=1
+
+        RESOLVED_SRC=""
+        if [[ "$SOURCE" == file://* ]]; then
+            RESOLVED_SRC="${SOURCE#file://}"
+        elif [[ "$SOURCE" == extensions/* ]]; then
+            RESOLVED_SRC="$BRUNNR_HOME/${SOURCE%/}"
         fi
-        if [ -d "$THEMES_TARGET/$NAME" ]; then
-            rm -r "$THEMES_TARGET/$NAME"
-            echo "Removed $THEMES_TARGET/$NAME/"
-            REMOVED_ANY=1
+
+        if [ -n "$RESOLVED_SRC" ] && [ -d "$RESOLVED_SRC" ]; then
+            shopt -s nullglob
+            for ts in "$RESOLVED_SRC"/*.ts; do
+                add_extension_remove_target "$EXTENSIONS_TARGET/$(basename "$ts")"
+            done
+            if [ -d "$RESOLVED_SRC/agents" ]; then
+                for entry in "$RESOLVED_SRC/agents"/*; do
+                    add_extension_remove_target "$AGENTS_TARGET/$(basename "$entry")"
+                done
+            fi
+            if [ -d "$RESOLVED_SRC/themes" ]; then
+                for entry in "$RESOLVED_SRC/themes"/*; do
+                    add_extension_remove_target "$THEMES_TARGET/$(basename "$entry")"
+                done
+            fi
+        elif [ -n "$RESOLVED_SRC" ] && [ -f "$RESOLVED_SRC" ]; then
+            add_extension_remove_target "$EXTENSIONS_TARGET/$(basename "$RESOLVED_SRC")"
         fi
+
+        if [ "${#TARGETS[@]}" -eq 0 ]; then
+            add_extension_remove_target "$EXTENSIONS_TARGET/$NAME.ts"
+            add_extension_remove_target "$AGENTS_TARGET/$NAME"
+            add_extension_remove_target "$THEMES_TARGET/$NAME"
+        fi
+
+        for target in "${TARGETS[@]}"; do
+            if [ -e "$target" ]; then
+                if [ -d "$target" ]; then
+                    rm -r "$target"
+                    echo "Removed $target/"
+                else
+                    rm "$target"
+                    echo "Removed $target"
+                fi
+                REMOVED_ANY=1
+            fi
+        done
+
         if [ "$REMOVED_ANY" = "0" ]; then
             echo "Error: extension '$NAME' is not installed ($SCOPE_LABEL)"
             exit 1
@@ -1672,7 +1783,7 @@ check:
         fi
     fi
 
-    ruby -ryaml <<'RUBY'
+    ruby -ryaml -rjson <<'RUBY'
       errors   = []
       warnings = []
 
@@ -1683,6 +1794,18 @@ check:
 
       sections = %w[skills agents prompts extensions themes]
       required = %w[name description source]
+      skill_name_pattern = /\A[a-z0-9]+(?:-[a-z0-9]+)*\z/
+      prompt_frontmatter_fields = %w[name description argument-hint type tags dependencies origin]
+      theme_color_tokens = %w[
+        accent border borderAccent borderMuted success error warning muted dim text thinkingText
+        selectedBg userMessageBg userMessageText customMessageBg customMessageText customMessageLabel
+        toolPendingBg toolSuccessBg toolErrorBg toolTitle toolOutput
+        mdHeading mdLink mdLinkUrl mdCode mdCodeBlock mdCodeBlockBorder mdQuote mdQuoteBorder mdHr mdListBullet
+        toolDiffAdded toolDiffRemoved toolDiffContext
+        syntaxComment syntaxKeyword syntaxFunction syntaxVariable syntaxString syntaxNumber syntaxType syntaxOperator syntaxPunctuation
+        thinkingOff thinkingMinimal thinkingLow thinkingMedium thinkingHigh thinkingXhigh
+        bashMode
+      ]
 
       # Index all entry names per section for dep validation
       entries_by_section = {}
@@ -1728,8 +1851,28 @@ check:
           src = item["source"]
           next unless src
 
-          # External sources skip path/frontmatter checks
-          if src.start_with?("file://") || src.start_with?("https://")
+          # External sources are catalog references today. Validate their
+          # shape, then skip repo-local path/frontmatter checks.
+          if src.include?("://")
+            if src.start_with?("file://")
+              path = src.delete_prefix("file://")
+              if path.empty?
+                errors << "#{label}: file:// source must include an absolute path"
+              elsif !path.start_with?("/")
+                errors << "#{label}: file:// source must use an absolute path: #{src}"
+              elsif !File.exist?(path) && !Dir.exist?(path)
+                warnings << "#{label}: file:// source does not exist on this machine: #{path}"
+              end
+            elsif src.start_with?("https://")
+              unless src.start_with?("https://raw.githubusercontent.com/")
+                errors << "#{label}: remote source must use a raw GitHub content URL (https://raw.githubusercontent.com/...): #{src}"
+              end
+            elsif src.start_with?("http://")
+              errors << "#{label}: source uses unsupported insecure scheme `http://`; use https://raw.githubusercontent.com/... for remote references"
+            else
+              scheme = src.split("://", 2).first
+              errors << "#{label}: source uses unsupported scheme `#{scheme}://`; supported external schemes are file:// and https://"
+            end
             next
           end
 
@@ -1741,19 +1884,132 @@ check:
           # Normalize for orphan tracking: directory sources end with /
           known_paths << (Dir.exist?(src) ? src.chomp("/") + "/" : src)
 
-          # Frontmatter `name:` must match library.yaml name (for .md files only)
+          # Frontmatter checks for markdown-backed items.
           if src.end_with?(".md") && File.file?(src)
             content = File.read(src)
             if content =~ /\A---\s*\n(.*?)\n---/m
               fm = YAML.safe_load($1, permitted_classes: [], permitted_symbols: [], aliases: false) rescue {}
-              fm_name = fm.is_a?(Hash) ? fm["name"] : nil
+              fm = {} unless fm.is_a?(Hash)
+              fm_name = fm["name"]
+
+              if section == "skills"
+                skill_desc = fm["description"]
+
+                if fm_name.nil? || fm_name.to_s.empty?
+                  errors << "#{label}: skill frontmatter missing required `name` (#{src})"
+                elsif !fm_name.is_a?(String)
+                  errors << "#{label}: skill frontmatter `name` must be a string (#{src})"
+                elsif fm_name.length > 64
+                  errors << "#{label}: skill frontmatter `name` exceeds 64 characters (#{src})"
+                elsif !fm_name.match?(skill_name_pattern)
+                  errors << "#{label}: skill frontmatter `name` must use lowercase letters, numbers, and single hyphens with no leading/trailing hyphen (#{src})"
+                end
+
+                if skill_desc.nil? || skill_desc.to_s.empty?
+                  errors << "#{label}: skill frontmatter missing required `description`; Pi will not load this skill (#{src})"
+                elsif !skill_desc.is_a?(String)
+                  errors << "#{label}: skill frontmatter `description` must be a string (#{src})"
+                elsif skill_desc.length > 1024
+                  errors << "#{label}: skill frontmatter `description` exceeds 1024 characters (#{src})"
+                end
+              end
+
+              if section == "prompts"
+                prompt_desc = fm["description"]
+                argument_hint = fm["argument-hint"]
+                prompt_type = fm["type"]
+                unknown_prompt_fields = fm.keys - prompt_frontmatter_fields
+
+                if prompt_desc.nil? || prompt_desc.to_s.empty?
+                  errors << "#{label}: prompt frontmatter missing `description`; Pi will fall back to body text and autocomplete will be weaker (#{src})"
+                elsif !prompt_desc.is_a?(String)
+                  errors << "#{label}: prompt frontmatter `description` must be a string (#{src})"
+                end
+
+                if argument_hint && !argument_hint.is_a?(String)
+                  errors << "#{label}: prompt frontmatter `argument-hint` must be a string (#{src})"
+                elsif argument_hint.is_a?(String) && argument_hint.include?("\n")
+                  errors << "#{label}: prompt frontmatter `argument-hint` must be a single line (#{src})"
+                elsif argument_hint.is_a?(String) && !(argument_hint.include?("<") || argument_hint.include?("["))
+                  warnings << "#{label}: prompt `argument-hint` should show required args with <...> or optional args with [...] (#{src})"
+                end
+
+                if prompt_type && !%w[single multi-agent].include?(prompt_type)
+                  errors << "#{label}: prompt frontmatter `type` must be `single` or `multi-agent` (#{src})"
+                elsif prompt_type && item["type"] && prompt_type != item["type"]
+                  errors << "#{label}: prompt frontmatter type `#{prompt_type}` != library.yaml type `#{item["type"]}` (#{src})"
+                end
+
+                unless unknown_prompt_fields.empty?
+                  warnings << "#{label}: prompt frontmatter has unknown field(s): #{unknown_prompt_fields.join(", ")} (#{src})"
+                end
+              end
+
               if fm_name && fm_name != name
                 errors << "#{label}: frontmatter name `#{fm_name}` != library.yaml name `#{name}` (#{src})"
-              elsif fm_name.nil?
+              elsif fm_name.nil? && section != "skills"
                 warnings << "#{label}: source has no `name:` frontmatter field (#{src})"
               end
+            elsif section == "skills"
+              errors << "#{label}: skill source has no YAML frontmatter; Pi requires `name` and `description` (#{src})"
+            elsif section == "prompts"
+              errors << "#{label}: prompt source has no YAML frontmatter; brunnr requires prompt metadata and Pi autocomplete benefits from `description` (#{src})"
             else
               warnings << "#{label}: source has no YAML frontmatter (#{src})"
+            end
+          end
+
+          if section == "themes"
+            unless src.end_with?(".json") && File.file?(src)
+              errors << "#{label}: theme source must be a .json file (#{src})"
+              next
+            end
+
+            begin
+              theme = JSON.parse(File.read(src))
+            rescue JSON::ParserError => e
+              errors << "#{label}: invalid theme JSON (#{src}): #{e.message}"
+              next
+            end
+
+            unless theme.is_a?(Hash)
+              errors << "#{label}: theme root must be a JSON object (#{src})"
+              next
+            end
+
+            if theme["name"] != name
+              errors << "#{label}: theme name `#{theme["name"] || "<missing>"}` != library.yaml name `#{name}` (#{src})"
+            end
+
+            colors = theme["colors"]
+            unless colors.is_a?(Hash)
+              errors << "#{label}: theme must define a `colors` object (#{src})"
+              next
+            end
+
+            missing_tokens = theme_color_tokens.reject { |token| colors.key?(token) }
+            extra_tokens = colors.keys - theme_color_tokens
+
+            unless missing_tokens.empty?
+              errors << "#{label}: theme missing required color token(s): #{missing_tokens.join(", ")} (#{src})"
+            end
+
+            unless extra_tokens.empty?
+              warnings << "#{label}: theme has unknown color token(s) ignored by Pi: #{extra_tokens.join(", ")} (#{src})"
+            end
+
+            vars = theme["vars"]
+            var_names = vars.is_a?(Hash) ? vars.keys : []
+            colors.each do |token, value|
+              valid_value =
+                value == "" ||
+                (value.is_a?(Integer) && value.between?(0, 255)) ||
+                (value.is_a?(String) && value.match?(/\A#[0-9a-fA-F]{6}\z/)) ||
+                (value.is_a?(String) && var_names.include?(value))
+
+              unless valid_value
+                errors << "#{label}: theme color `#{token}` has invalid value `#{value.inspect}`; expected empty string, #rrggbb, 0-255, or a vars reference (#{src})"
+              end
             end
           end
         end
@@ -1778,6 +2034,26 @@ check:
           next if bundled_paths.include?(p_norm)
           unless known_paths.include?(p_norm)
             warnings << "orphan: `#{p_norm}` exists on disk but is not registered in library.yaml under `#{section}`"
+          end
+        end
+      end
+
+      # Compatibility drift checks against current Pi docs. These stay warnings
+      # because older Pi releases may still accept legacy URLs/import namespaces.
+      text_files = Dir.glob("{README.md,SKILL.md,library.yaml,install.sh,justfile,agents/**/*.md,prompts/**/*.md,extensions/**/*.{md,ts},scripts/**/*,lore/**/*.md}")
+        .select { |p| File.file?(p) }
+
+      stale_pi_repo = "badlogic/" + "pi-mono"
+      legacy_pi_namespace = "@mariozechner" + "/"
+
+      text_files.each do |path|
+        File.readlines(path, chomp: true).each_with_index do |line, i|
+          if line.include?(stale_pi_repo)
+            warnings << "#{path}:#{i + 1}: stale Pi docs/repo reference `#{stale_pi_repo}`; prefer `earendil-works/pi`"
+          end
+
+          if line.include?(legacy_pi_namespace)
+            warnings << "#{path}:#{i + 1}: legacy Pi import namespace `#{legacy_pi_namespace}*`; verify against installed Pi docs, which now document `@earendil-works/*` peer dependencies"
           end
         end
       end
@@ -1974,7 +2250,7 @@ examples-discover:
         "pi.registerTool path:.pi extension:ts|Pi extensions (registerTool)"
         "path:.pi/skills/SKILL.md|Pi skills (SKILL.md)"
         "path:.pi/agents extension:md|Pi agents (.pi/agents)"
-        "topic:pi-mono|Repos tagged pi-mono"
+        "pi-package filename:package.json|Pi packages (package.json keyword)"
     )
 
     echo "Scanning GitHub for Pi-related repos not in the registry..."

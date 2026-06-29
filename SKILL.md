@@ -1,6 +1,6 @@
 # SKILL.md — brunnr Specification v3.0
 
-> Specification for the brunnr meta-skill: a reference-first catalog for Pi (badlogic/pi-mono) — skills, agents, prompts, extensions, themes.
+> Specification for the brunnr meta-skill: a reference-first catalog for Pi (earendil-works/pi) — skills, agents, prompts, extensions, themes.
 
 ## Overview
 
@@ -71,15 +71,15 @@ source: file:///Users/you/projects/shared-skills/my-skill/SKILL.md
 
 #### 3. Remote Reference
 
-Content is fetched from a GitHub blob/raw URL.
+Content is referenced by a raw GitHub content URL.
 
 ```yaml
 source: https://raw.githubusercontent.com/org/repo/main/skills/my-skill/SKILL.md
 ```
 
-- Must use raw GitHub content URL
-- Fetched on demand, not stored in brunnr
-- Use for referencing published external components
+- Must use a raw GitHub content URL
+- Valid as catalog metadata today, but `brunnr add` currently rejects `https://` sources until remote fetching is implemented
+- Use for tracking published external components that should be forked before local installation or optimization
 
 ## library.yaml Schema
 
@@ -96,7 +96,7 @@ source: https://raw.githubusercontent.com/org/repo/main/skills/my-skill/SKILL.md
 | Field | Type | Description |
 |-------|------|-------------|
 | `type` | string | For prompts: `"single"` (default) or `"multi-agent"` |
-| `install_to` | string | Override default install path (rarely needed) |
+| `install_to` | string | Reserved for a future install-path override; current `brunnr add` ignores it |
 | `tags` | array | Searchable tags for filtering (see Tag Style below) |
 | `dependencies` | object | Required skills/agents and related prompts |
 | `origin` | string | Source attribution (URL, author, etc.) |
@@ -317,6 +317,7 @@ Add an item from brunnr to the current project.
 - Resolves the source from `library.yaml`
 - Copies files from source to project target
 - For directory-style extensions, routes files per the convention table above (`.ts` → `EXTENSIONS_DIR`, `agents/` → `AGENTS_DIR`, `themes/` → `THEMES_DIR`)
+- Repo-backed and `file://` sources are installable today; `https://` remote references are valid catalog metadata but `brunnr add` currently rejects them until remote fetching is implemented
 - Fails if item doesn't exist in catalog
 - Fails if target already exists (use `push` to update)
 
@@ -341,7 +342,7 @@ Remove an item from the current project.
 
 **Behavior**:
 - Removes files from project target directory
-- For extensions, removes the `.ts` file plus the matching `agents/<name>/` and `themes/<name>/` subdirs that were created on install
+- For extensions, removes the routed `.ts`, `agents/`, and `themes/` artifacts derived from the catalog source; falls back to name-based targets if the source is unavailable
 - Fails if item is not installed
 
 **Safety rules**:

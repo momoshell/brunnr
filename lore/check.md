@@ -17,13 +17,17 @@ No arguments. Validates the `library.yaml` at `$BRUNNR_HOME`.
 | Required fields (`name`, `description`, `source`) | Hard error |
 | Duplicate names within a section | Hard error |
 | Source paths exist on disk (for repo-backed entries) | Hard error |
+| External source shape (`file://` absolute paths, raw GitHub `https://` URLs) | Hard error |
 | Frontmatter `name:` matches `library.yaml` name | Hard error |
+| Skill frontmatter has valid `name` and `description` | Hard error |
+| Prompt frontmatter has valid `description`, `argument-hint`, and `type` metadata | Hard error |
+| Theme JSON has required Pi color tokens and valid values | Hard error |
 | Declared `dependencies.{skills,agents,prompts}` reference real catalog entries | Hard error |
 | Prompt `type` is `single` or `multi-agent` if present | Hard error |
-| Source files have YAML frontmatter | Warning |
+| Non-skill/prompt markdown sources have YAML frontmatter | Warning |
 | Files on disk that aren't registered in `library.yaml` (orphans) | Warning |
 
-External sources (`file://` / `https://`) skip the path-existence and frontmatter checks.
+External sources are reference-only during `check`: `file://` entries must be absolute local paths and warn if missing on this machine, while `https://` entries must be raw GitHub content URLs. They skip repo-local frontmatter checks.
 
 ## Output
 

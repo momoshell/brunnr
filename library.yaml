@@ -1,10 +1,10 @@
 # brunnr Catalog
-# Reference-first catalog for Pi (badlogic/pi-mono) — skills, agents, prompts, extensions, themes
+# Reference-first catalog for Pi (earendil-works/pi) — skills, agents, prompts, extensions, themes
 # This file is the authoritative source of truth for what exists in the catalog
 
 name: brunnr
 description: Reference-first catalog for Pi — skills, agents, prompts, extensions, themes
-version: "3.0.23"
+version: "3.0.31"
 
 # Minimum brunnr tool version (justfile/install.sh) required by this catalog.
 # `brunnr sync` reads this from origin and refuses if your local tool is older —
@@ -30,11 +30,12 @@ min_tool_version: "3.0.0"
 #    - Not synced with brunnr git
 #    - Use for personal components or external repos
 #
-# 3. REMOTE REFERENCE: GitHub blob/raw URL
+# 3. REMOTE REFERENCE: Raw GitHub content URL
 #    source: https://raw.githubusercontent.com/org/repo/main/skills/my-skill/SKILL.md
-#    - Content fetched on demand
+#    - Valid as catalog metadata today, but `brunnr add` currently rejects https://
+#      sources until remote fetching is implemented
 #    - Not stored in brunnr
-#    - Use for referencing external, published components
+#    - Use for tracking published external components before forking/installing
 #
 # =============================================================================
 # REQUIRED FIELDS (per entry)
@@ -47,7 +48,7 @@ min_tool_version: "3.0.0"
 # OPTIONAL METADATA
 # =============================================================================
 # - type: For prompts only — "single" (default) or "multi-agent"
-# - install_to: Override default install path (rarely needed)
+# - install_to: Reserved for a future install-path override; current `brunnr add` ignores it
 # - dependencies:
 #     skills: [skill-name]      # Required skills
 #     agents: [agent-name]      # Required agents
@@ -266,7 +267,7 @@ prompts:
 #   <source-dir>/agents/<sub>/    →  .pi/agents/<sub>/
 #   <source-dir>/themes/<sub>/    →  .pi/themes/<sub>/
 #
-# Override default install path via `install_to` if needed.
+# `install_to` is reserved for a future override; current `brunnr add` ignores it.
 # =============================================================================
 extensions: []
 # (Eitri ships with brunnr as a built-in authoring capability — invoked via

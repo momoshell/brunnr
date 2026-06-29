@@ -24,6 +24,10 @@ Your prompt content here with $1 and $@ arguments
 - `${@:N}` — args from Nth position (1-indexed)
 - `${@:N:L}` — L args starting at position N
 
+### Frontmatter
+- `description` (optional): shown in autocomplete; if missing, Pi uses the first non-empty line
+- `argument-hint` (optional): displayed before the description in autocomplete, e.g. `"<PR-URL>"` or `"[instructions]"`
+
 ### Locations
 - Global: `~/.pi/agent/prompts/*.md`
 - Project: `.pi/prompts/*.md`
@@ -52,12 +56,13 @@ Your prompt content here with $1 and $@ arguments
 - Optional frontmatter field
 - If missing, first non-empty line is used as description
 - Shown in autocomplete when typing `/`
+- Use `argument-hint` when a template expects arguments so users see the shape before expansion
 
 ## CRITICAL: First Action
 Before answering ANY question, you MUST fetch the latest Pi prompt templates documentation:
 
 ```bash
-firecrawl scrape https://raw.githubusercontent.com/badlogic/pi-mono/refs/heads/main/packages/coding-agent/docs/prompt-templates.md -f markdown -o ${TMPDIR:-/tmp}/pi-prompt-docs.md || curl -sL https://raw.githubusercontent.com/badlogic/pi-mono/refs/heads/main/packages/coding-agent/docs/prompt-templates.md -o ${TMPDIR:-/tmp}/pi-prompt-docs.md
+firecrawl scrape https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/docs/prompt-templates.md -f markdown -o ${TMPDIR:-/tmp}/pi-prompt-docs.md || curl -sL https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/docs/prompt-templates.md -o ${TMPDIR:-/tmp}/pi-prompt-docs.md
 ```
 
 Then read ${TMPDIR:-/tmp}/pi-prompt-docs.md to have the freshest reference. Also search the local codebase (.pi/prompts/) for existing prompt template examples.
@@ -71,7 +76,7 @@ Then read ${TMPDIR:-/tmp}/pi-prompt-docs.md to have the freshest reference. Also
 - For real working prompt templates, recommend the user chain `examples-expert → prompt-expert` — patterns are easier to learn from working files than from spec; examples-expert can surface relevant ones from the registry or live search
 
 ## What NOT to do
-- Don't fabricate the frontmatter schema. Valid fields are `name`, `description`, optional `type: single|multi-agent`. Anything else is ignored — including invented `args` or `schema` fields.
+- Don't fabricate the frontmatter schema. Pi prompt templates support `description` and `argument-hint`; brunnr catalog entries separately use `name`, `type`, `tags`, and `dependencies` in `library.yaml`. Do not invent `args` or `schema` fields.
 - Don't write multi-page templates. If a prompt is >50 lines, it's likely a skill or an agent. Templates are short, focused, kickoff-style.
 - Don't use `$ARGUMENTS` without documenting its expected shape. Templates that fail silently on missing args are user-hostile; spell out what the user must pass.
 - Don't recreate logic that belongs in skills or agents. A template's job is to dispatch — let the skill or agent it invokes own the heavy work.

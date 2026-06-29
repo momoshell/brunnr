@@ -25,10 +25,10 @@ brunnr remove [-g|--global] <section> <name>
 | `skill` | `.pi/skills/<name>/` | `~/.pi/agent/skills/<name>/` |
 | `agent` | `.pi/agents/<name>.md` | `~/.pi/agent/agents/<name>.md` |
 | `prompt` | `.pi/prompts/<name>.md` | `~/.pi/agent/prompts/<name>.md` |
-| `extension` | `.pi/extensions/<name>.ts` + matching `.pi/agents/<name>/` + `.pi/themes/<name>/` (for directory-style extensions) | Same routing under `~/.pi/agent/` |
+| `extension` | Routed `.ts`, `.pi/agents/<sub>/`, and `.pi/themes/<sub>/` artifacts from the catalog source | Same routing under `~/.pi/agent/` |
 | `theme` | `.pi/themes/<name>.json` | `~/.pi/agent/themes/<name>.json` |
 
-For directory-style extensions, `remove` undoes all the routed installs (`.ts` plus the matching `agents/<name>/` and `themes/<name>/` subdirs) in one go.
+For directory-style extensions, `remove` reads the catalog source and undoes the routed installs (`.ts` files plus any `agents/<sub>/` and `themes/<sub>/` subdirs) in one go. If the source is unavailable, it falls back to the legacy name-based targets.
 
 ## Examples
 

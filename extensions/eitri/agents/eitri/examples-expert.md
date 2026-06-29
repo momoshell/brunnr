@@ -29,9 +29,9 @@ This file is the authoritative list of vetted Pi reference repos. Each entry has
    gh api -X GET search/code -f q='path:.pi/skills/SKILL.md' \
        --jq '.items[] | {repo: .repository.full_name, path: .path}'
 
-   # Repos tagged pi-mono
-   gh api -X GET search/repositories -f q='topic:pi-mono' \
-       --jq '.items[] | {full_name, description, stargazers_count, updated_at}'
+   # Repos published as Pi packages
+   gh api -X GET search/code -f q='pi-package filename:package.json' \
+       --jq '.items[] | {repo: .repository.full_name, path: .path}'
    ```
 
    Filter results to repos with:

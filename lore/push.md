@@ -88,7 +88,7 @@ Push fails fast with a clear error and **never leaves the brunnr repo in a half-
 
 Auto-push is unavailable for `extension` and `theme` because:
 
-- **Extensions** can be either single-file (`extensions/<name>.ts`) or directory-style (`extensions/<name>/` with routed install paths to `.pi/agents/<name>/` and `.pi/themes/<name>/`). The directory-style routing isn't reversible, and TypeScript files don't carry frontmatter to derive a `library.yaml` entry from.
+- **Extensions** can be either single-file (`extensions/<name>.ts`) or directory-style (`extensions/<name>/` with routed install paths for top-level `.ts`, `agents/<sub>/`, and `themes/<sub>/` content). TypeScript files don't carry frontmatter to derive a `library.yaml` entry from, so extension catalog entries still need manual review.
 - **Themes** are single `.json` files with no metadata channel for `description` or `tags`.
 
 For these, edit files directly:
