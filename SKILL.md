@@ -342,7 +342,7 @@ Remove an item from the current project.
 
 **Behavior**:
 - Removes files from project target directory
-- For extensions, removes the `.ts` file plus the matching `agents/<name>/` and `themes/<name>/` subdirs that were created on install
+- For extensions, removes the routed `.ts`, `agents/`, and `themes/` artifacts derived from the catalog source; falls back to name-based targets if the source is unavailable
 - Fails if item is not installed
 
 **Safety rules**:

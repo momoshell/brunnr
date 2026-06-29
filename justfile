@@ -6,7 +6,7 @@
 # Tool version — bump when changing justfile / install.sh in a way that catalog
 # entries may depend on. `brunnr sync` compares this against library.yaml's
 # `min_tool_version` and refuses if the local tool is older.
-export TOOL_VERSION := "3.0.29"
+export TOOL_VERSION := "3.0.30"
 
 # Default path to brunnr repository
 export BRUNNR_HOME := env_var_or_default("BRUNNR_HOME", env_var('HOME') / ".config/brunnr")
@@ -432,6 +432,8 @@ remove *args:
     #!/usr/bin/env bash
     set -euo pipefail
     cd "{{invocation_directory()}}"
+    BRUNNR_HOME="{{BRUNNR_HOME}}"
+    LIBRARY="$BRUNNR_HOME/library.yaml"
 
     GLOBAL=0
     POSITIONAL=()
@@ -479,24 +481,77 @@ remove *args:
     esac
 
     if [ "$SECTION" = "extension" ]; then
-        # Directory-style extension: remove the .ts file plus the matching
-        # agents/<name>/ and themes/<name>/ subdirs that were created on install.
+        # Directory-style extension: remove the same routed artifacts that add
+        # installed. Fall back to the legacy name-based targets if the catalog
+        # entry/source is unavailable.
         REMOVED_ANY=0
-        if [ -e "$EXTENSIONS_TARGET/$NAME.ts" ]; then
-            rm "$EXTENSIONS_TARGET/$NAME.ts"
-            echo "Removed $EXTENSIONS_TARGET/$NAME.ts"
-            REMOVED_ANY=1
+        TARGETS=()
+
+        add_extension_remove_target() {
+            local target="$1"
+            local existing
+            if [ "${#TARGETS[@]}" -gt 0 ]; then
+                for existing in "${TARGETS[@]}"; do
+                    [ "$existing" = "$target" ] && return
+                done
+            fi
+            TARGETS+=("$target")
+        }
+
+        SOURCE=""
+        if [ -f "$LIBRARY" ]; then
+            SOURCE=$(ruby -ryaml -e '
+                catalog = YAML.safe_load(File.read(ARGV[0]), permitted_classes: [], permitted_symbols: [], aliases: false)
+                item = (catalog["extensions"] || []).find { |i| i["name"] == ARGV[1] }
+                puts(item ? item["source"].to_s : "")
+            ' "$LIBRARY" "$NAME")
         fi
-        if [ -d "$AGENTS_TARGET/$NAME" ]; then
-            rm -r "$AGENTS_TARGET/$NAME"
-            echo "Removed $AGENTS_TARGET/$NAME/"
-            REMOVED_ANY=1
+
+        RESOLVED_SRC=""
+        if [[ "$SOURCE" == file://* ]]; then
+            RESOLVED_SRC="${SOURCE#file://}"
+        elif [[ "$SOURCE" == extensions/* ]]; then
+            RESOLVED_SRC="$BRUNNR_HOME/${SOURCE%/}"
         fi
-        if [ -d "$THEMES_TARGET/$NAME" ]; then
-            rm -r "$THEMES_TARGET/$NAME"
-            echo "Removed $THEMES_TARGET/$NAME/"
-            REMOVED_ANY=1
+
+        if [ -n "$RESOLVED_SRC" ] && [ -d "$RESOLVED_SRC" ]; then
+            shopt -s nullglob
+            for ts in "$RESOLVED_SRC"/*.ts; do
+                add_extension_remove_target "$EXTENSIONS_TARGET/$(basename "$ts")"
+            done
+            if [ -d "$RESOLVED_SRC/agents" ]; then
+                for entry in "$RESOLVED_SRC/agents"/*; do
+                    add_extension_remove_target "$AGENTS_TARGET/$(basename "$entry")"
+                done
+            fi
+            if [ -d "$RESOLVED_SRC/themes" ]; then
+                for entry in "$RESOLVED_SRC/themes"/*; do
+                    add_extension_remove_target "$THEMES_TARGET/$(basename "$entry")"
+                done
+            fi
+        elif [ -n "$RESOLVED_SRC" ] && [ -f "$RESOLVED_SRC" ]; then
+            add_extension_remove_target "$EXTENSIONS_TARGET/$(basename "$RESOLVED_SRC")"
         fi
+
+        if [ "${#TARGETS[@]}" -eq 0 ]; then
+            add_extension_remove_target "$EXTENSIONS_TARGET/$NAME.ts"
+            add_extension_remove_target "$AGENTS_TARGET/$NAME"
+            add_extension_remove_target "$THEMES_TARGET/$NAME"
+        fi
+
+        for target in "${TARGETS[@]}"; do
+            if [ -e "$target" ]; then
+                if [ -d "$target" ]; then
+                    rm -r "$target"
+                    echo "Removed $target/"
+                else
+                    rm "$target"
+                    echo "Removed $target"
+                fi
+                REMOVED_ANY=1
+            fi
+        done
+
         if [ "$REMOVED_ANY" = "0" ]; then
             echo "Error: extension '$NAME' is not installed ($SCOPE_LABEL)"
             exit 1
