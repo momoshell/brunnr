@@ -6,7 +6,7 @@
 # Tool version — bump when changing justfile / install.sh in a way that catalog
 # entries may depend on. `brunnr sync` compares this against library.yaml's
 # `min_tool_version` and refuses if the local tool is older.
-export TOOL_VERSION := "3.0.24"
+export TOOL_VERSION := "3.0.25"
 
 # Default path to brunnr repository
 export BRUNNR_HOME := env_var_or_default("BRUNNR_HOME", env_var('HOME') / ".config/brunnr")
@@ -1672,7 +1672,7 @@ check:
         fi
     fi
 
-    ruby -ryaml <<'RUBY'
+    ruby -ryaml -rjson <<'RUBY'
       errors   = []
       warnings = []
 
@@ -1683,6 +1683,16 @@ check:
 
       sections = %w[skills agents prompts extensions themes]
       required = %w[name description source]
+      theme_color_tokens = %w[
+        accent border borderAccent borderMuted success error warning muted dim text thinkingText
+        selectedBg userMessageBg userMessageText customMessageBg customMessageText customMessageLabel
+        toolPendingBg toolSuccessBg toolErrorBg toolTitle toolOutput
+        mdHeading mdLink mdLinkUrl mdCode mdCodeBlock mdCodeBlockBorder mdQuote mdQuoteBorder mdHr mdListBullet
+        toolDiffAdded toolDiffRemoved toolDiffContext
+        syntaxComment syntaxKeyword syntaxFunction syntaxVariable syntaxString syntaxNumber syntaxType syntaxOperator syntaxPunctuation
+        thinkingOff thinkingMinimal thinkingLow thinkingMedium thinkingHigh thinkingXhigh
+        bashMode
+      ]
 
       # Index all entry names per section for dep validation
       entries_by_section = {}
@@ -1754,6 +1764,60 @@ check:
               end
             else
               warnings << "#{label}: source has no YAML frontmatter (#{src})"
+            end
+          end
+
+          if section == "themes"
+            unless src.end_with?(".json") && File.file?(src)
+              errors << "#{label}: theme source must be a .json file (#{src})"
+              next
+            end
+
+            begin
+              theme = JSON.parse(File.read(src))
+            rescue JSON::ParserError => e
+              errors << "#{label}: invalid theme JSON (#{src}): #{e.message}"
+              next
+            end
+
+            unless theme.is_a?(Hash)
+              errors << "#{label}: theme root must be a JSON object (#{src})"
+              next
+            end
+
+            if theme["name"] != name
+              errors << "#{label}: theme name `#{theme["name"] || "<missing>"}` != library.yaml name `#{name}` (#{src})"
+            end
+
+            colors = theme["colors"]
+            unless colors.is_a?(Hash)
+              errors << "#{label}: theme must define a `colors` object (#{src})"
+              next
+            end
+
+            missing_tokens = theme_color_tokens.reject { |token| colors.key?(token) }
+            extra_tokens = colors.keys - theme_color_tokens
+
+            unless missing_tokens.empty?
+              errors << "#{label}: theme missing required color token(s): #{missing_tokens.join(", ")} (#{src})"
+            end
+
+            unless extra_tokens.empty?
+              warnings << "#{label}: theme has unknown color token(s) ignored by Pi: #{extra_tokens.join(", ")} (#{src})"
+            end
+
+            vars = theme["vars"]
+            var_names = vars.is_a?(Hash) ? vars.keys : []
+            colors.each do |token, value|
+              valid_value =
+                value == "" ||
+                (value.is_a?(Integer) && value.between?(0, 255)) ||
+                (value.is_a?(String) && value.match?(/\A#[0-9a-fA-F]{6}\z/)) ||
+                (value.is_a?(String) && var_names.include?(value))
+
+              unless valid_value
+                errors << "#{label}: theme color `#{token}` has invalid value `#{value.inspect}`; expected empty string, #rrggbb, 0-255, or a vars reference (#{src})"
+              end
             end
           end
         end
