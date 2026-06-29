@@ -4,7 +4,7 @@
 
 name: brunnr
 description: Reference-first catalog for Pi — skills, agents, prompts, extensions, themes
-version: "3.0.28"
+version: "3.0.29"
 
 # Minimum brunnr tool version (justfile/install.sh) required by this catalog.
 # `brunnr sync` reads this from origin and refuses if your local tool is older —
@@ -30,7 +30,7 @@ min_tool_version: "3.0.0"
 #    - Not synced with brunnr git
 #    - Use for personal components or external repos
 #
-# 3. REMOTE REFERENCE: GitHub blob/raw URL
+# 3. REMOTE REFERENCE: Raw GitHub content URL
 #    source: https://raw.githubusercontent.com/org/repo/main/skills/my-skill/SKILL.md
 #    - Valid as catalog metadata today, but `brunnr add` currently rejects https://
 #      sources until remote fetching is implemented

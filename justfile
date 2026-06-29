@@ -6,7 +6,7 @@
 # Tool version — bump when changing justfile / install.sh in a way that catalog
 # entries may depend on. `brunnr sync` compares this against library.yaml's
 # `min_tool_version` and refuses if the local tool is older.
-export TOOL_VERSION := "3.0.28"
+export TOOL_VERSION := "3.0.29"
 
 # Default path to brunnr repository
 export BRUNNR_HOME := env_var_or_default("BRUNNR_HOME", env_var('HOME') / ".config/brunnr")
@@ -1796,8 +1796,28 @@ check:
           src = item["source"]
           next unless src
 
-          # External sources skip path/frontmatter checks
-          if src.start_with?("file://") || src.start_with?("https://")
+          # External sources are catalog references today. Validate their
+          # shape, then skip repo-local path/frontmatter checks.
+          if src.include?("://")
+            if src.start_with?("file://")
+              path = src.delete_prefix("file://")
+              if path.empty?
+                errors << "#{label}: file:// source must include an absolute path"
+              elsif !path.start_with?("/")
+                errors << "#{label}: file:// source must use an absolute path: #{src}"
+              elsif !File.exist?(path) && !Dir.exist?(path)
+                warnings << "#{label}: file:// source does not exist on this machine: #{path}"
+              end
+            elsif src.start_with?("https://")
+              unless src.start_with?("https://raw.githubusercontent.com/")
+                errors << "#{label}: remote source must use a raw GitHub content URL (https://raw.githubusercontent.com/...): #{src}"
+              end
+            elsif src.start_with?("http://")
+              errors << "#{label}: source uses unsupported insecure scheme `http://`; use https://raw.githubusercontent.com/... for remote references"
+            else
+              scheme = src.split("://", 2).first
+              errors << "#{label}: source uses unsupported scheme `#{scheme}://`; supported external schemes are file:// and https://"
+            end
             next
           end
 

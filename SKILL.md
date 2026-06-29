@@ -71,7 +71,7 @@ source: file:///Users/you/projects/shared-skills/my-skill/SKILL.md
 
 #### 3. Remote Reference
 
-Content is referenced by a GitHub blob/raw URL.
+Content is referenced by a raw GitHub content URL.
 
 ```yaml
 source: https://raw.githubusercontent.com/org/repo/main/skills/my-skill/SKILL.md
