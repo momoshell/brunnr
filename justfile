@@ -6,7 +6,7 @@
 # Tool version — bump when changing justfile / install.sh in a way that catalog
 # entries may depend on. `brunnr sync` compares this against library.yaml's
 # `min_tool_version` and refuses if the local tool is older.
-export TOOL_VERSION := "3.0.27"
+export TOOL_VERSION := "3.0.28"
 
 # Default path to brunnr repository
 export BRUNNR_HOME := env_var_or_default("BRUNNR_HOME", env_var('HOME') / ".config/brunnr")
@@ -323,10 +323,30 @@ add *args:
     
     # Check if target already exists
     if [ "$SECTION" = "extension" ] && [ -d "$RESOLVED_SRC" ]; then
-        # Directory-style extensions install to multiple targets — check for the
-        # canonical .ts file at the extensions target as the conflict marker.
-        if [ -e "$EXTENSIONS_TARGET/$NAME.ts" ]; then
-            echo "Error: extension '$NAME' already installed ($SCOPE_LABEL: $EXTENSIONS_TARGET/$NAME.ts)"
+        # Directory-style extensions install to multiple targets. Check every
+        # routed top-level destination up front so we never merge/overwrite an
+        # existing extension, agent subtree, or theme subtree.
+        shopt -s nullglob
+        CONFLICTS=()
+        for ts in "$RESOLVED_SRC"/*.ts; do
+            base="$(basename "$ts")"
+            [ -e "$EXTENSIONS_TARGET/$base" ] && CONFLICTS+=("$EXTENSIONS_TARGET/$base")
+        done
+        if [ -d "$RESOLVED_SRC/agents" ]; then
+            for entry in "$RESOLVED_SRC/agents"/*; do
+                base="$(basename "$entry")"
+                [ -e "$AGENTS_TARGET/$base" ] && CONFLICTS+=("$AGENTS_TARGET/$base")
+            done
+        fi
+        if [ -d "$RESOLVED_SRC/themes" ]; then
+            for entry in "$RESOLVED_SRC/themes"/*; do
+                base="$(basename "$entry")"
+                [ -e "$THEMES_TARGET/$base" ] && CONFLICTS+=("$THEMES_TARGET/$base")
+            done
+        fi
+        if [ "${#CONFLICTS[@]}" -gt 0 ]; then
+            echo "Error: extension '$NAME' conflicts with existing $SCOPE_LABEL target(s):"
+            printf '  - %s\n' "${CONFLICTS[@]}"
             echo "Use 'push' to update brunnr with local changes, or remove first."
             exit 1
         fi
@@ -345,17 +365,53 @@ add *args:
         #   <src>/agents/<sub>/   → $AGENTS_TARGET/<sub>/ (preserves subdir structure)
         #   <src>/themes/<sub>/   → $THEMES_TARGET/<sub>/
         # Other top-level files (README.md etc.) are ignored.
-        mkdir -p "$EXTENSIONS_TARGET" "$AGENTS_TARGET" "$THEMES_TARGET"
         shopt -s nullglob
+        for target_dir in "$EXTENSIONS_TARGET" "$AGENTS_TARGET" "$THEMES_TARGET"; do
+            if [ -e "$target_dir" ] && [ ! -d "$target_dir" ]; then
+                echo "Error: target path exists but is not a directory: $target_dir"
+                exit 1
+            fi
+        done
+
+        CREATED_PATHS=()
+        rollback_extension_install() {
+            local status=$?
+            if [ "$status" -ne 0 ] && [ "${#CREATED_PATHS[@]}" -gt 0 ]; then
+                echo "Install failed; rolling back partial extension install..." >&2
+                local i
+                for (( i=${#CREATED_PATHS[@]}-1; i>=0; i-- )); do
+                    rm -rf "${CREATED_PATHS[$i]}"
+                done
+            fi
+            exit "$status"
+        }
+        trap rollback_extension_install ERR
+
+        mkdir -p "$EXTENSIONS_TARGET" "$AGENTS_TARGET" "$THEMES_TARGET"
         for ts in "$RESOLVED_SRC"/*.ts; do
-            [ -f "$ts" ] && cp "$ts" "$EXTENSIONS_TARGET/"
+            if [ -f "$ts" ]; then
+                dst="$EXTENSIONS_TARGET/$(basename "$ts")"
+                cp "$ts" "$dst"
+                CREATED_PATHS+=("$dst")
+            fi
         done
         if [ -d "$RESOLVED_SRC/agents" ]; then
-            cp -r "$RESOLVED_SRC/agents/." "$AGENTS_TARGET/"
+            for entry in "$RESOLVED_SRC/agents"/*; do
+                base="$(basename "$entry")"
+                dst="$AGENTS_TARGET/$base"
+                cp -R "$entry" "$dst"
+                CREATED_PATHS+=("$dst")
+            done
         fi
         if [ -d "$RESOLVED_SRC/themes" ]; then
-            cp -r "$RESOLVED_SRC/themes/." "$THEMES_TARGET/"
+            for entry in "$RESOLVED_SRC/themes"/*; do
+                base="$(basename "$entry")"
+                dst="$THEMES_TARGET/$base"
+                cp -R "$entry" "$dst"
+                CREATED_PATHS+=("$dst")
+            done
         fi
+        trap - ERR
         echo "Installed extension '$NAME' (routed to $EXTENSIONS_TARGET/, $AGENTS_TARGET/, $THEMES_TARGET/)"
     else
         # Ensure destination directory exists
