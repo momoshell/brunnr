@@ -6,7 +6,7 @@
 # Tool version — bump when changing justfile / install.sh in a way that catalog
 # entries may depend on. `brunnr sync` compares this against library.yaml's
 # `min_tool_version` and refuses if the local tool is older.
-export TOOL_VERSION := "3.0.26"
+export TOOL_VERSION := "3.0.27"
 
 # Default path to brunnr repository
 export BRUNNR_HOME := env_var_or_default("BRUNNR_HOME", env_var('HOME') / ".config/brunnr")
@@ -1684,6 +1684,7 @@ check:
       sections = %w[skills agents prompts extensions themes]
       required = %w[name description source]
       skill_name_pattern = /\A[a-z0-9]+(?:-[a-z0-9]+)*\z/
+      prompt_frontmatter_fields = %w[name description argument-hint type tags dependencies origin]
       theme_color_tokens = %w[
         accent border borderAccent borderMuted success error warning muted dim text thinkingText
         selectedBg userMessageBg userMessageText customMessageBg customMessageText customMessageLabel
@@ -1782,6 +1783,37 @@ check:
                 end
               end
 
+              if section == "prompts"
+                prompt_desc = fm["description"]
+                argument_hint = fm["argument-hint"]
+                prompt_type = fm["type"]
+                unknown_prompt_fields = fm.keys - prompt_frontmatter_fields
+
+                if prompt_desc.nil? || prompt_desc.to_s.empty?
+                  errors << "#{label}: prompt frontmatter missing `description`; Pi will fall back to body text and autocomplete will be weaker (#{src})"
+                elsif !prompt_desc.is_a?(String)
+                  errors << "#{label}: prompt frontmatter `description` must be a string (#{src})"
+                end
+
+                if argument_hint && !argument_hint.is_a?(String)
+                  errors << "#{label}: prompt frontmatter `argument-hint` must be a string (#{src})"
+                elsif argument_hint.is_a?(String) && argument_hint.include?("\n")
+                  errors << "#{label}: prompt frontmatter `argument-hint` must be a single line (#{src})"
+                elsif argument_hint.is_a?(String) && !(argument_hint.include?("<") || argument_hint.include?("["))
+                  warnings << "#{label}: prompt `argument-hint` should show required args with <...> or optional args with [...] (#{src})"
+                end
+
+                if prompt_type && !%w[single multi-agent].include?(prompt_type)
+                  errors << "#{label}: prompt frontmatter `type` must be `single` or `multi-agent` (#{src})"
+                elsif prompt_type && item["type"] && prompt_type != item["type"]
+                  errors << "#{label}: prompt frontmatter type `#{prompt_type}` != library.yaml type `#{item["type"]}` (#{src})"
+                end
+
+                unless unknown_prompt_fields.empty?
+                  warnings << "#{label}: prompt frontmatter has unknown field(s): #{unknown_prompt_fields.join(", ")} (#{src})"
+                end
+              end
+
               if fm_name && fm_name != name
                 errors << "#{label}: frontmatter name `#{fm_name}` != library.yaml name `#{name}` (#{src})"
               elsif fm_name.nil? && section != "skills"
@@ -1789,6 +1821,8 @@ check:
               end
             elsif section == "skills"
               errors << "#{label}: skill source has no YAML frontmatter; Pi requires `name` and `description` (#{src})"
+            elsif section == "prompts"
+              errors << "#{label}: prompt source has no YAML frontmatter; brunnr requires prompt metadata and Pi autocomplete benefits from `description` (#{src})"
             else
               warnings << "#{label}: source has no YAML frontmatter (#{src})"
             end
