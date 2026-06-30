@@ -10,6 +10,7 @@ hird:
   - hird-devops-lead
   - hird-qa-lead
   - hird-coder
+  - hird-mechanical-coder
   - hird-test-engineer
   - hird-code-reviewer
   - hird-code-reviewer-deep
@@ -32,6 +33,7 @@ hird-planning:
 hird-implementation:
   - hird-orchestrator
   - hird-coder
+  - hird-mechanical-coder
   - hird-test-engineer
   - hird-doc-writer
   - hird-code-reviewer

@@ -53,7 +53,8 @@ Use these agents by name when the harness supports sub-agent dispatch:
 - `hird-frontend-lead`: read-only UI/component/client planning.
 - `hird-devops-lead`: read-only CI/CD/infra/deploy planning.
 - `hird-qa-lead`: read-only QA strategy, acceptance criteria, review-depth decision.
-- `hird-coder`: write-capable executor for exactly one Handover Spec.
+- `hird-coder`: write-capable executor for exactly one Handover Spec requiring normal implementation judgment.
+- `hird-mechanical-coder`: low-autonomy executor for simple, explicitly scoped mechanical edits only.
 - `hird-test-engineer`: write-capable test executor, and executor for `qa` domain specs.
 - `hird-code-reviewer`: read-only standard reviewer.
 - `hird-code-reviewer-deep`: read-only deep/adversarial reviewer.
@@ -131,6 +132,20 @@ Coders and test engineers must return:
 ```
 
 If `status=insufficient`, send the missing context back to the originating lead and keep `task_id` and `files_in_scope` stable. Retry no more than twice in conversational mode.
+
+## Coder routing
+
+Use `hird-mechanical-coder` instead of `hird-coder` only when all are true:
+
+1. The edit is simple and mechanical.
+2. The files are concrete and explicitly scoped.
+3. The desired transformation is fully specified.
+4. No design, behavior, architecture, data-shape, UX, security, migration, or test-strategy decision is required.
+5. The expected diff is small and locally checkable.
+
+Use `hird-coder` when implementation requires local engineering judgment, behavior-preserving refactor choices, feature wiring, new files, non-trivial tests, or interpreting acceptance criteria. If unsure, choose `hird-coder`; if risk is high, return to a lead for a better Handover Spec.
+
+Mechanical-coder QA is still required: inspect the diff, run cheap deterministic validation when relevant, and use `hird-code-reviewer` for runtime code, tests, config/build files, public APIs, or multi-file edits. Escalate to the normal QA ladder if the diff becomes behavioral, security-sensitive, or broader than requested.
 
 ## QA ladder
 
