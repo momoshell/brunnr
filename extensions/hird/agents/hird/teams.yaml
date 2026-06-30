@@ -1,0 +1,54 @@
+# Hird — a Norse-themed Pi engineering retinue.
+# Top-level keys are team names; values are agent names.
+
+hird:
+  - hird-orchestrator
+  - hird-explorer
+  - hird-architecture-lead
+  - hird-backend-lead
+  - hird-frontend-lead
+  - hird-devops-lead
+  - hird-qa-lead
+  - hird-coder
+  - hird-test-engineer
+  - hird-code-reviewer
+  - hird-code-reviewer-deep
+  - hird-build-validator
+  - hird-architect
+  - hird-plan-reviewer
+  - hird-doc-writer
+
+hird-planning:
+  - hird-orchestrator
+  - hird-explorer
+  - hird-architecture-lead
+  - hird-backend-lead
+  - hird-frontend-lead
+  - hird-devops-lead
+  - hird-qa-lead
+  - hird-architect
+  - hird-plan-reviewer
+
+hird-implementation:
+  - hird-orchestrator
+  - hird-coder
+  - hird-test-engineer
+  - hird-doc-writer
+  - hird-code-reviewer
+  - hird-build-validator
+
+hird-qa:
+  - hird-orchestrator
+  - hird-qa-lead
+  - hird-code-reviewer
+  - hird-code-reviewer-deep
+  - hird-build-validator
+  - hird-test-engineer
+
+hird-architecture:
+  - hird-orchestrator
+  - hird-explorer
+  - hird-architecture-lead
+  - hird-architect
+  - hird-plan-reviewer
+  - hird-doc-writer
