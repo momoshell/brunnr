@@ -1,0 +1,1153 @@
+/**
+ * Hird — on-demand Pi engineering retinue.
+ *
+ * Hird bundles the dev-team recreation as a Pi extension: one user-facing
+ * orchestrator, read-only leads, scoped executors, reviewers, validators, and
+ * a Norse longhall theme. It is launched by `brunnr hird`, not installed into
+ * Pi's normal project extension search path.
+ */
+
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+	DEFAULT_MAX_BYTES,
+	DEFAULT_MAX_LINES,
+	parseFrontmatter,
+	truncateHead,
+} from "@earendil-works/pi-coding-agent";
+import { StringEnum } from "@earendil-works/pi-ai";
+import { Text, truncateToWidth, visibleWidth, type Component } from "@earendil-works/pi-tui";
+import { Type } from "typebox";
+import { spawn } from "child_process";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmdirSync,
+	unlinkSync,
+	writeFileSync,
+} from "fs";
+import { tmpdir } from "os";
+import { basename, dirname, join } from "path";
+import { fileURLToPath } from "url";
+
+// ── Types ────────────────────────────────────────────────────────────────
+
+type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
+interface HirdAgent {
+	name: string;
+	description: string;
+	tools: string;
+	model?: string;
+	provider?: string;
+	thinking?: ThinkingLevel;
+	systemPrompt: string;
+	file: string;
+}
+
+interface RunResult {
+	agent: string;
+	prompt: string;
+	status: "done" | "error" | "cancelled";
+	exitCode: number;
+	elapsedMs: number;
+	output: string;
+	fullOutput: string;
+	truncated: boolean;
+	stopReason?: string;
+	errorMessage?: string;
+	model?: string;
+}
+
+type HirdRunState = "idle" | "run" | "done" | "error";
+type HirdViewMode = "lanes" | "orbit";
+
+interface HirdActivityRun {
+	name: string;
+	query: string;
+	state: HirdRunState;
+	startedAt?: number;
+	endedAt?: number;
+	lastLine: string;
+	lastActivityAt?: number;
+	activity?: number;
+}
+
+type RGB = readonly [number, number, number];
+
+const VALID_THINKING: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+const EXT_DIR = dirname(fileURLToPath(import.meta.url));
+const HIRD_AGENT_DIR = join(EXT_DIR, "agents", "hird");
+const HIRD_THEME_DIR = join(EXT_DIR, "themes");
+const HIRD_THEME_NAME = "hird";
+
+// ── Parallel activity TUI primitives ────────────────────────────────────
+// Pi's TUI components render styled strings, so the spec's paint(col,row,glyph,
+// colorHex) adapter is implemented by emitting one styled braille cell per
+// terminal cell. The activity feed is session state maintained by the dispatch
+// controller; the view never polls subprocesses directly.
+
+const BRAILLE_BASE = 0x2800;
+const BIT = [
+	[0x01, 0x02, 0x04, 0x40],
+	[0x08, 0x10, 0x20, 0x80],
+] as const;
+const DEFAULT_ACCENT: RGB = [0x46, 0xd7, 0xff];
+const DEFAULT_ACCENT2: RGB = [0x8c, 0x7b, 0xff];
+const DEFAULT_SUCCESS: RGB = [0x37, 0xe0, 0xa0];
+const DEFAULT_MUTED: RGB = [0x46, 0x55, 0x6f];
+const DEFAULT_FAINT: RGB = [0x24, 0x30, 0x49];
+const DEFAULT_BRIGHT: RGB = [0xe8, 0xee, 0xfb];
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const BLOCKS = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+
+class Braille {
+	readonly W: number;
+	readonly H: number;
+	private dots: Uint8Array;
+	private color: (string | null)[];
+	private prio: Int8Array;
+
+	constructor(public cols: number, public rows: number) {
+		this.W = cols * 2;
+		this.H = rows * 4;
+		this.dots = new Uint8Array(cols * rows);
+		this.color = new Array(cols * rows).fill(null);
+		this.prio = new Int8Array(cols * rows);
+	}
+
+	clear(): void {
+		this.dots.fill(0);
+		this.color.fill(null);
+		this.prio.fill(0);
+	}
+
+	set(x: number, y: number, color: string, prio: number): void {
+		x = Math.round(x);
+		y = Math.round(y);
+		if (x < 0 || y < 0 || x >= this.W || y >= this.H) return;
+		const cell = ((y >> 2) * this.cols) + (x >> 1);
+		this.dots[cell] |= BIT[x & 1][y & 3];
+		if (prio >= this.prio[cell]) {
+			this.prio[cell] = prio;
+			this.color[cell] = color;
+		}
+	}
+
+	line(x0: number, y0: number, x1: number, y1: number, color: string, prio: number): void {
+		const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)) | 0;
+		for (let i = 0; i <= n; i++) {
+			const f = n ? i / n : 0;
+			this.set(x0 + (x1 - x0) * f, y0 + (y1 - y0) * f, color, prio);
+		}
+	}
+
+	arc(cx: number, cy: number, r: number, color: string, prio: number, step = 0.05): void {
+		for (let a = 0; a < Math.PI * 2; a += step) this.set(cx + Math.cos(a) * r, cy + Math.sin(a) * r, color, prio);
+	}
+
+	disc(cx: number, cy: number, r: number, color: string, prio: number): void {
+		for (let dy = -r; dy <= r; dy++) {
+			for (let dx = -r; dx <= r; dx++) {
+				if (dx * dx + dy * dy <= r * r) this.set(cx + dx, cy + dy, color, prio);
+			}
+		}
+	}
+
+	renderRows(colorize: (glyph: string, colorHex: string | null) => string): string[] {
+		const rows: string[] = [];
+		for (let r = 0; r < this.rows; r++) {
+			let line = "";
+			for (let cc = 0; cc < this.cols; cc++) {
+				const i = r * this.cols + cc;
+				line += colorize(String.fromCharCode(BRAILLE_BASE + this.dots[i]), this.color[i]);
+			}
+			rows.push(line);
+		}
+		return rows;
+	}
+}
+
+function hexOf(rgb: RGB): string {
+	return "#" + rgb.map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")).join("");
+}
+
+function parseHex(raw: unknown): RGB | undefined {
+	if (typeof raw !== "string" || !/^#[0-9a-fA-F]{6}$/.test(raw)) return undefined;
+	return [parseInt(raw.slice(1, 3), 16), parseInt(raw.slice(3, 5), 16), parseInt(raw.slice(5, 7), 16)];
+}
+
+function themeRGB(theme: any, token: string, fallback: RGB): RGB {
+	const roots = [theme, theme?.theme, theme?.raw, theme?.definition, theme?.config];
+	for (const root of roots) {
+		const colors = root?.colors;
+		const vars = root?.vars;
+		const value = colors?.[token];
+		const direct = parseHex(value);
+		if (direct) return direct;
+		const viaVar = typeof value === "string" ? parseHex(vars?.[value]) : undefined;
+		if (viaVar) return viaVar;
+	}
+	return fallback;
+}
+
+function lerpRGB(a: RGB, b: RGB, t: number): string {
+	return hexOf([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]);
+}
+
+function plasma(t: number, accent: RGB, accent2: RGB): string {
+	return lerpRGB(accent, accent2, Math.round(Math.max(0, Math.min(1, t)) * 5) / 5);
+}
+
+function hashSeed(name: string): { seed: number; sp: number } {
+	let h = 0;
+	for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0;
+	const u = Math.abs(h);
+	return { seed: (u % 1000) / 1000 * Math.PI * 2, sp: 0.6 + (u % 70) / 100 };
+}
+
+function drawWave(b: Braille, time: number, st: "run" | "done", activity: number, seed: number, sp: number, accent: RGB, accent2: RGB, success: string): void {
+	b.clear();
+	const mid = b.H / 2 - 0.5;
+	if (st === "done") {
+		for (let x = 0; x < b.W; x++) b.set(x, mid + Math.sin(x * 0.25) * 0.6, success, 1);
+		return;
+	}
+	const t = time * 0.0016;
+	const A = (b.H / 2 - 1) * Math.max(0, Math.min(1, activity));
+	let prev: number | null = null;
+	for (let x = 0; x < b.W; x++) {
+		const env = 0.6 + 0.4 * Math.sin(x * 0.045 + t * 1.0 * sp + seed);
+		const y = mid + (
+			Math.sin(x * 0.075 + t * 3.4 * sp + seed) * 0.78 +
+			Math.sin(x * 0.19 - t * 5.2 * sp + seed * 2) * 0.26 +
+			Math.sin(x * 0.41 + t * 8.0) * 0.10
+		) * A * env;
+		const col = plasma(x / b.W, accent, accent2);
+		if (prev !== null) {
+			const lo = Math.min(prev, y), hi = Math.max(prev, y);
+			for (let yy = lo; yy <= hi; yy += 1) b.set(x, yy, col, 3);
+		}
+		b.set(x, y, col, 3);
+		prev = y;
+	}
+}
+
+function supportsTrueColor(): boolean {
+	return /truecolor|24bit/i.test(process.env.COLORTERM || "");
+}
+
+function supportsUnicode(): boolean {
+	if (process.env.HIRD_ASCII === "1") return false;
+	const lang = `${process.env.LC_ALL || process.env.LC_CTYPE || process.env.LANG || ""}`;
+	return !/^C$|^POSIX$/i.test(lang);
+}
+
+function supportsBraille(): boolean {
+	return supportsUnicode() && process.env.HIRD_NO_BRAILLE !== "1";
+}
+
+function reducedMotion(): boolean {
+	return !process.stdout.isTTY || process.env.HIRD_REDUCED_MOTION === "1" || process.env.NO_COLOR === "1";
+}
+
+function fgHex(theme: any, hex: string | null, text: string, fallbackToken = "accent"): string {
+	if (!hex) return text;
+	if (!supportsTrueColor()) return theme.fg(fallbackToken, text);
+	try { return theme.fg(hex, text); } catch {}
+	const rgb = parseHex(hex);
+	if (!rgb) return text;
+	return `\x1b[38;2;${rgb[0]};${rgb[1]};${rgb[2]}m${text}\x1b[39m`;
+}
+
+function elapsedLabel(ms: number | undefined): string {
+	if (ms === undefined) return "--:--";
+	const total = Math.max(0, Math.round(ms / 1000));
+	const m = Math.floor(total / 60);
+	const s = total % 60;
+	return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+function activityFor(run: HirdActivityRun, now: number): number {
+	if (run.state !== "run") return 0;
+	if (typeof run.activity === "number") return Math.max(0, Math.min(1, run.activity));
+	// Activity source: Pi JSON subprocesses do not expose streaming token/sec in a
+	// stable extension API, so Hird uses the spec's fallback path — output/tool
+	// events pulse to 1.0, then decay toward a constant 0.70 while running.
+	const quietMs = now - (run.lastActivityAt ?? run.startedAt ?? now);
+	return Math.max(0.7, 1 - quietMs / 4000);
+}
+
+function wrapWords(text: string, width: number): string[] {
+	const words = text.split(/\s+/).filter(Boolean);
+	const out: string[] = [];
+	let line = "";
+	for (const word of words) {
+		const next = line ? `${line} ${word}` : word;
+		if (visibleWidth(next) > width && line) {
+			out.push(line);
+			line = word;
+		} else {
+			line = next;
+		}
+	}
+	if (line) out.push(line);
+	return out.length ? out : [""];
+}
+
+class HirdActivityView implements Component {
+	private cachedWidth?: number;
+	private cachedRevision = -1;
+	private cachedMode?: HirdViewMode;
+	private cachedLines?: string[];
+
+	constructor(
+		private runs: () => HirdActivityRun[],
+		private revision: () => number,
+		private mode: () => HirdViewMode,
+		private theme: any,
+	) {}
+
+	invalidate(): void {
+		this.cachedWidth = undefined;
+		this.cachedRevision = -1;
+		this.cachedMode = undefined;
+		this.cachedLines = undefined;
+	}
+
+	render(width: number): string[] {
+		const rev = this.revision();
+		const mode = this.mode();
+		if (this.cachedLines && this.cachedWidth === width && this.cachedRevision === rev && this.cachedMode === mode && reducedMotion()) return this.cachedLines;
+		const lines = mode === "orbit" ? this.renderOrbit(width) : this.renderLanes(width);
+		this.cachedWidth = width;
+		this.cachedRevision = rev;
+		this.cachedMode = mode;
+		this.cachedLines = lines.map(line => truncateToWidth(line, width, ""));
+		return this.cachedLines;
+	}
+
+	private pad(inner: number, content: string): string {
+		const clipped = truncateToWidth(content, inner, "…");
+		return `${this.theme.fg("borderAccent", "┃")} ${clipped}${" ".repeat(Math.max(0, inner - visibleWidth(clipped)))} ${this.theme.fg("borderAccent", "┃")}`;
+	}
+
+	private frame(width: number, body: string[]): string[] {
+		const inner = Math.max(20, width - 4);
+		return [
+			this.theme.fg("borderAccent", `┏${"━".repeat(Math.max(0, width - 2))}┓`),
+			...body.map(line => this.pad(inner, line)),
+			this.theme.fg("borderAccent", `┗${"━".repeat(Math.max(0, width - 2))}┛`),
+		];
+	}
+
+	private headerLine(runs: HirdActivityRun[], inner: number, now: number): string {
+		const running = runs.filter(r => r.state === "run").length;
+		const done = runs.filter(r => r.state === "done").length;
+		const failed = runs.filter(r => r.state === "error").length;
+		const idle = runs.filter(r => r.state === "idle").length;
+		const started = runs.map(r => r.startedAt).filter((v): v is number => typeof v === "number");
+		const elapsed = started.length ? elapsedLabel(now - Math.min(...started)) : "00:00";
+		const barWidth = Math.max(8, Math.min(24, Math.floor(inner * 0.22)));
+		const total = Math.max(1, runs.length);
+		const doneN = Math.round(barWidth * done / total);
+		const runN = Math.round(barWidth * running / total);
+		const failN = Math.round(barWidth * failed / total);
+		const idleN = Math.max(0, barWidth - doneN - runN - failN);
+		const bar = this.theme.fg("success", "█".repeat(doneN)) + this.theme.fg("accent", "█".repeat(runN)) + this.theme.fg("error", "█".repeat(failN)) + this.theme.fg("muted", "█".repeat(idleN));
+		return `${this.theme.bold(this.theme.fg("accent", "Hird activity"))} ${this.theme.fg("dim", "·")} ${elapsed} elapsed ${this.theme.fg("dim", "·")} ${done} done ${this.theme.fg("dim", "·")} ${running} running ${this.theme.fg("dim", "·")} ${idle} idle ${failed ? this.theme.fg("error", `· ${failed} failed `) : ""}${bar}`;
+	}
+
+	private renderWave(run: HirdActivityRun, cols: number, now: number): string[] {
+		if (!supportsBraille()) return [this.renderSparkline(run, cols * 2, now)];
+		const accent = themeRGB(this.theme, "accent", DEFAULT_ACCENT);
+		const accent2 = themeRGB(this.theme, "borderAccent", DEFAULT_ACCENT2);
+		const success = hexOf(themeRGB(this.theme, "success", DEFAULT_SUCCESS));
+		const b = new Braille(cols, 3);
+		const { seed, sp } = hashSeed(run.name);
+		drawWave(b, now, run.state === "done" || run.state === "error" ? "done" : "run", activityFor(run, now), seed, sp, accent, accent2, run.state === "error" ? hexOf(themeRGB(this.theme, "error", DEFAULT_SUCCESS)) : success);
+		return b.renderRows((glyph, color) => fgHex(this.theme, color, glyph, run.state === "done" ? "success" : run.state === "error" ? "error" : "accent"));
+	}
+
+	private renderSparkline(run: HirdActivityRun, width: number, now: number): string {
+		if (!supportsUnicode()) {
+			return run.state === "run" ? "~".repeat(Math.max(1, width)) : "-".repeat(Math.max(1, width));
+		}
+		const { seed, sp } = hashSeed(run.name);
+		let out = "";
+		for (let x = 0; x < width; x++) {
+			let level = 0.25;
+			if (run.state === "run") {
+				const t = now * 0.0016;
+				level = 0.5 + 0.5 * Math.sin(x * 0.2 + t * 3.4 * sp + seed) * activityFor(run, now);
+			} else if (run.state === "done") level = 0.45;
+			else if (run.state === "error") level = 0.15;
+			const block = BLOCKS[Math.max(0, Math.min(BLOCKS.length - 1, Math.round(level * (BLOCKS.length - 1))))];
+			const token = run.state === "done" ? "success" : run.state === "error" ? "error" : run.state === "run" ? "accent" : "muted";
+			out += this.theme.fg(token, block);
+		}
+		return out;
+	}
+
+	private renderLanes(width: number): string[] {
+		const now = reducedMotion() ? 1000 : Date.now();
+		const inner = Math.max(20, width - 4);
+		const runs = this.runs();
+		const running = runs.filter(r => r.state === "run").sort((a, b) => a.name.localeCompare(b.name));
+		const done = runs.filter(r => r.state === "done" || r.state === "error").sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0));
+		const idle = runs.filter(r => r.state === "idle").sort((a, b) => a.name.localeCompare(b.name));
+		const waveCols = inner >= 92 ? 30 : inner >= 68 ? 22 : 0;
+		const elapsedW = 6;
+		const textW = Math.max(16, inner - (waveCols ? waveCols + 2 : 0) - elapsedW - 4);
+		const body: string[] = [this.headerLine(runs, inner, now), this.theme.fg("dim", "activity: stream pulse + decay fallback 0.70 · f8 hide/show · f9 lanes/orbit"), ""];
+
+		const section = (label: string, count: number) => body.push(this.theme.fg("muted", `${label.toUpperCase()} (${count})`));
+		const row = (run: HirdActivityRun) => {
+			const icon = run.state === "run"
+				? this.theme.fg("accent", reducedMotion() ? "◉" : SPINNER_FRAMES[Math.floor(now / 80) % SPINNER_FRAMES.length])
+				: run.state === "done" ? this.theme.fg("success", "✓") : run.state === "error" ? this.theme.fg("error", "✗") : this.theme.fg("muted", "○");
+			const title = truncateToWidth(`${displayName(run.name)}${run.query ? ` — ${run.query}` : ""}`, textW, "…");
+			const elapsed = elapsedLabel((run.endedAt ?? now) - (run.startedAt ?? now));
+			if (!waveCols) {
+				body.push(`${icon} ${title}${" ".repeat(Math.max(1, textW - visibleWidth(title) + 1))}${this.theme.fg("dim", elapsed)}`);
+				return;
+			}
+			const waves = this.renderWave(run, waveCols, now);
+			body.push(`${icon} ${title}${" ".repeat(Math.max(1, textW - visibleWidth(title) + 1))}${waves[1] ?? waves[0]} ${this.theme.fg("dim", elapsed)}`);
+		};
+
+		section("Running", running.length);
+		if (running.length) running.slice(0, 10).forEach(row);
+		else body.push(this.theme.fg("dim", "○ no active Hird agents"));
+		if (running.length > 10) body.push(this.theme.fg("dim", `… ${running.length - 10} more running`));
+		body.push("");
+
+		section("Done", done.length);
+		if (done.length) done.slice(0, 6).forEach(row);
+		else body.push(this.theme.fg("dim", "— none complete yet"));
+		if (done.length > 6) body.push(this.theme.fg("dim", `… ${done.length - 6} more complete`));
+		body.push("");
+
+		section("Idle", idle.length);
+		const idleNames = idle.map(r => displayName(r.name).replace(/^Hird /, "")).join(" · ");
+		for (const line of wrapWords(idleNames || "none", inner)) body.push(this.theme.fg("dim", `○ ${line}`));
+		return this.frame(width, body);
+	}
+
+	private renderOrbit(width: number): string[] {
+		const now = reducedMotion() ? 1000 : Date.now();
+		const inner = Math.max(20, width - 4);
+		if (!supportsBraille() || inner < 70) return this.renderLanes(width);
+		const cols = Math.min(60, Math.max(34, inner - 4));
+		const b = new Braille(cols, 18);
+		const accent = themeRGB(this.theme, "accent", DEFAULT_ACCENT);
+		const accent2 = themeRGB(this.theme, "borderAccent", DEFAULT_ACCENT2);
+		const success = hexOf(themeRGB(this.theme, "success", DEFAULT_SUCCESS));
+		const muted = hexOf(themeRGB(this.theme, "muted", DEFAULT_MUTED));
+		const faint = hexOf(themeRGB(this.theme, "borderMuted", DEFAULT_FAINT));
+		const bright = hexOf(themeRGB(this.theme, "text", DEFAULT_BRIGHT));
+		const runs = this.runs();
+		const running = runs.filter(r => r.state === "run");
+		const done = runs.filter(r => r.state === "done" || r.state === "error");
+		const idle = runs.filter(r => r.state === "idle");
+		const cx = b.W / 2, cy = b.H / 2;
+		b.disc(cx, cy, 4, bright, 4);
+		b.arc(cx, cy, 7, plasma(0.5, accent, accent2), 3);
+		const t = now * 0.001;
+		running.forEach((run, i) => {
+			const { seed, sp } = hashSeed(run.name);
+			const a = seed + t * sp;
+			const r = b.H * 0.62;
+			const x = cx + Math.cos(a) * r;
+			const y = cy + Math.sin(a) * r;
+			const c = plasma((i % 6) / 5, accent, accent2);
+			b.line(cx, cy, x, y, faint, 1);
+			const pulse = (Math.sin(t * 3 * sp + seed) + 1) / 2;
+			b.disc(cx + (x - cx) * pulse, cy + (y - cy) * pulse, 1.5, c, 2);
+			b.disc(x, y, 2.3 + activityFor(run, now) * 1.2, c, 4);
+		});
+		done.slice(0, 14).forEach((run, i) => {
+			const a = Math.PI * (1.08 + (i / Math.max(1, done.length - 1)) * 0.84);
+			const x = cx + Math.cos(a) * b.H * 0.92;
+			const y = cy + Math.sin(a) * b.H * 0.92;
+			b.disc(x, y, 1.6, run.state === "error" ? hexOf(themeRGB(this.theme, "error", DEFAULT_SUCCESS)) : success, 3);
+		});
+		idle.slice(0, 20).forEach((run, i) => {
+			const a = (Math.PI * 2 * i) / Math.max(1, idle.length);
+			b.set(cx + Math.cos(a) * b.W * 0.46, cy + Math.sin(a) * b.H * 0.46, muted, 1);
+		});
+		const art = b.renderRows((glyph, color) => fgHex(this.theme, color, glyph));
+		const legend = `${this.theme.bold(this.theme.fg("accent", "Orbital reactor"))} ${this.theme.fg("dim", "·")} ${running.length} orbiting ${this.theme.fg("dim", "·")} ${done.length} parked ${this.theme.fg("dim", "·")} ${idle.length} edge-idle`;
+		return this.frame(width, [legend, ...art, this.theme.fg("dim", "f9 returns to activity lanes")]);
+	}
+}
+
+function normalizeThinking(raw: unknown): ThinkingLevel | undefined {
+	if (raw === undefined || raw === null) return undefined;
+	const v = String(raw).trim().toLowerCase() as ThinkingLevel;
+	return (VALID_THINKING as readonly string[]).includes(v) ? v : undefined;
+}
+
+function displayName(name: string): string {
+	return name.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+}
+
+function parseAgentFile(filePath: string): HirdAgent | undefined {
+	try {
+		const raw = readFileSync(filePath, "utf-8");
+		const { frontmatter, body } = parseFrontmatter<Record<string, unknown>>(raw);
+		if (!frontmatter?.name) return undefined;
+		return {
+			name: String(frontmatter.name),
+			description: String(frontmatter.description ?? ""),
+			tools: String(frontmatter.tools ?? "read,grep,find,ls"),
+			model: frontmatter.model ? String(frontmatter.model) : undefined,
+			provider: frontmatter.provider ? String(frontmatter.provider) : undefined,
+			thinking: normalizeThinking(frontmatter.thinking ?? frontmatter.thinkingLevel),
+			systemPrompt: (body || "").trim(),
+			file: filePath,
+		};
+	} catch {
+		return undefined;
+	}
+}
+
+function loadAgents(): HirdAgent[] {
+	if (!existsSync(HIRD_AGENT_DIR)) return [];
+	return readdirSync(HIRD_AGENT_DIR)
+		.filter(entry => entry.endsWith(".md"))
+		.map(entry => parseAgentFile(join(HIRD_AGENT_DIR, entry)))
+		.filter((a): a is HirdAgent => Boolean(a))
+		.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function loadTeams(): Record<string, string[]> {
+	const file = join(HIRD_AGENT_DIR, "teams.yaml");
+	if (!existsSync(file)) return {};
+	const teams: Record<string, string[]> = {};
+	let current: string | undefined;
+	for (const rawLine of readFileSync(file, "utf-8").split(/\r?\n/)) {
+		const line = rawLine.replace(/\s+#.*$/, "");
+		if (!line.trim() || line.trimStart().startsWith("#")) continue;
+		const teamMatch = line.match(/^([A-Za-z0-9_-]+):\s*$/);
+		if (teamMatch) {
+			current = teamMatch[1];
+			teams[current] = [];
+			continue;
+		}
+		const itemMatch = line.match(/^\s*-\s*([A-Za-z0-9_-]+)\s*$/);
+		if (current && itemMatch) teams[current].push(itemMatch[1]);
+	}
+	return teams;
+}
+
+function getPiInvocation(args: string[]): { command: string; args: string[] } {
+	const currentScript = (process as any).argv?.[1] as string | undefined;
+	const isBunVirtualScript = currentScript?.startsWith("/$bunfs/root/");
+	if (currentScript && !isBunVirtualScript) {
+		try {
+			if (existsSync(currentScript)) return { command: process.execPath, args: [currentScript, ...args] };
+		} catch {}
+	}
+	const execName = basename(process.execPath).toLowerCase();
+	const isGenericRuntime = /^(node|bun)(\.exe)?$/.test(execName);
+	return isGenericRuntime ? { command: "pi", args } : { command: process.execPath, args };
+}
+
+function writePromptToTempFile(name: string, prompt: string): { dir: string; file: string } {
+	const dir = mkdtempSync(join(tmpdir(), "hird-agent-"));
+	const safe = name.replace(/[^\w.-]+/g, "_");
+	const file = join(dir, `prompt-${safe}.md`);
+	writeFileSync(file, prompt, { encoding: "utf-8", mode: 0o600 });
+	return { dir, file };
+}
+
+function assistantText(message: any): string {
+	const content = Array.isArray(message?.content) ? message.content : [];
+	return content
+		.map((part: any) => {
+			if (part?.type === "text" && typeof part.text === "string") return part.text;
+			if (typeof part === "string") return part;
+			return "";
+		})
+		.filter(Boolean)
+		.join("\n");
+}
+
+function buildOrchestratorPrompt(agents: HirdAgent[], teams: Record<string, string[]>): string {
+	const orchestrator = agents.find(a => a.name === "hird-orchestrator");
+	const base = orchestrator?.systemPrompt || "You are Hird Orchestrator.";
+	const roster = agents
+		.map(a => `- \`${a.name}\` — ${a.description} (tools: ${a.tools}; thinking: ${a.thinking ?? "default"})`)
+		.join("\n");
+	const teamList = Object.entries(teams)
+		.map(([name, members]) => `- \`${name}\`: ${members.join(", ")}`)
+		.join("\n") || "- none loaded";
+
+	return `${base}
+
+## Extension runtime
+
+The Hird extension is active. You have two extension tools:
+
+- \`hird_agent_info\`: list or inspect bundled Hird agents and teams.
+- \`hird_dispatch_agent\`: spawn one or more bundled Hird agents in isolated Pi subprocesses. Use this for all Tier 2/3 lead, coder, reviewer, validator, and scout handoffs.
+
+When using \`hird_dispatch_agent\`, send concrete handoff prompts that include objective, scope, constraints, required output, and whether editing is allowed. Use \`mode: "parallel"\` only for independent read-only work or disjoint implementation packets; use \`mode: "chain"\` when the next agent must receive the prior output through the \`{previous}\` placeholder.
+
+## Bundled Hird roster
+${roster}
+
+## Bundled Hird teams
+${teamList}
+`;
+}
+
+async function runAgent(
+	agent: HirdAgent,
+	prompt: string,
+	ctx: any,
+	signal?: AbortSignal,
+	hooks?: {
+		onEvent?: (line: string) => void;
+		onFinish?: (result: RunResult) => void;
+	},
+): Promise<RunResult> {
+	const args: string[] = ["--mode", "json", "-p", "--no-session", "--no-extensions"];
+	if (agent.provider) args.push("--provider", agent.provider);
+	const model = agent.model || ctx?.model;
+	if (model) args.push("--model", model);
+	args.push("--tools", agent.tools);
+	if (agent.thinking) args.push("--thinking", agent.thinking);
+
+	let promptTmp: { dir: string; file: string } | undefined;
+	try {
+		promptTmp = writePromptToTempFile(agent.name, agent.systemPrompt);
+		args.push("--append-system-prompt", promptTmp.file);
+	} catch {
+		if (agent.systemPrompt) args.push("--append-system-prompt", agent.systemPrompt);
+	}
+	args.push(prompt);
+
+	const start = Date.now();
+	const textParts: string[] = [];
+	let stderrBuf = "";
+	let stopReason: string | undefined;
+	let errorMessage: string | undefined;
+	let resolvedModel: string | undefined;
+
+	return await new Promise<RunResult>((resolve) => {
+		const invocation = getPiInvocation(args);
+		const proc = spawn(invocation.command, invocation.args, {
+			stdio: ["ignore", "pipe", "pipe"],
+			env: { ...process.env },
+		});
+
+		let killTimer: ReturnType<typeof setTimeout> | undefined;
+		const onAbort = () => {
+			if (proc.killed) return;
+			try { proc.kill("SIGTERM"); } catch {}
+			killTimer = setTimeout(() => {
+				if (!proc.killed) {
+					try { proc.kill("SIGKILL"); } catch {}
+				}
+			}, 5000);
+		};
+		if (signal) {
+			if (signal.aborted) onAbort();
+			else signal.addEventListener("abort", onAbort, { once: true });
+		}
+
+		const handleEvent = (event: any) => {
+			if (event?.type === "message_end" && event.message?.role === "assistant") {
+				const t = assistantText(event.message);
+				if (t) {
+					textParts.push(t);
+					const last = t.split("\n").filter((line: string) => line.trim()).pop();
+					if (last) hooks?.onEvent?.(last.slice(0, 160));
+				}
+				if (event.message.stopReason) stopReason = event.message.stopReason;
+				if (event.message.errorMessage) errorMessage = event.message.errorMessage;
+				if (event.message.model && !resolvedModel) resolvedModel = event.message.model;
+				return;
+			}
+			if (event?.type === "tool_result_end" && event.message?.content) {
+				const first = event.message.content.find?.((p: any) => p?.type === "toolResult");
+				const preview = String(first?.output || first?.content || "").split("\n").find((line: string) => line.trim());
+				if (preview) hooks?.onEvent?.(preview.slice(0, 160));
+			}
+		};
+
+		let buffer = "";
+		proc.stdout?.setEncoding("utf-8");
+		proc.stdout?.on("data", (chunk: string) => {
+			buffer += chunk;
+			const lines = buffer.split("\n");
+			buffer = lines.pop() || "";
+			for (const line of lines) {
+				if (!line.trim()) continue;
+				try { handleEvent(JSON.parse(line)); }
+				catch { hooks?.onEvent?.(line.slice(0, 160)); }
+			}
+		});
+
+		proc.stderr?.setEncoding("utf-8");
+		proc.stderr?.on("data", (chunk: string) => {
+			stderrBuf += chunk;
+			const last = chunk.split("\n").filter(line => line.trim()).pop();
+			if (last) hooks?.onEvent?.(last.slice(0, 160));
+		});
+
+		const cleanup = () => {
+			if (killTimer) clearTimeout(killTimer);
+			if (signal) signal.removeEventListener("abort", onAbort);
+			if (promptTmp) {
+				try { unlinkSync(promptTmp.file); } catch {}
+				try { rmdirSync(promptTmp.dir); } catch {}
+			}
+		};
+
+		proc.on("close", (code) => {
+			if (buffer.trim()) {
+				try { handleEvent(JSON.parse(buffer)); } catch {}
+			}
+			cleanup();
+			const fullOutput = textParts.join("\n");
+			const wasCancelled = signal?.aborted || stopReason === "aborted";
+			const isError = !wasCancelled && ((code !== 0) || stopReason === "error");
+			const raw = isError && errorMessage
+				? `[${stopReason || "error"}] ${errorMessage}${stderrBuf.trim() ? `\n\n--- stderr ---\n${stderrBuf.trim()}` : ""}`
+				: wasCancelled ? "cancelled" : (fullOutput || stderrBuf.trim() || "(no assistant output)");
+			const trunc = truncateHead(raw, { maxBytes: DEFAULT_MAX_BYTES, maxLines: DEFAULT_MAX_LINES });
+			const result: RunResult = {
+				agent: agent.name,
+				prompt,
+				status: wasCancelled ? "cancelled" : isError ? "error" : "done",
+				exitCode: code ?? (isError ? 1 : 0),
+				elapsedMs: Date.now() - start,
+				output: trunc.content,
+				fullOutput: raw,
+				truncated: trunc.truncated,
+				stopReason,
+				errorMessage,
+				model: resolvedModel,
+			};
+			hooks?.onFinish?.(result);
+			resolve(result);
+		});
+
+		proc.on("error", (err) => {
+			cleanup();
+			const result: RunResult = {
+				agent: agent.name,
+				prompt,
+				status: "error",
+				exitCode: 1,
+				elapsedMs: Date.now() - start,
+				output: `Error spawning ${agent.name}: ${err.message}`,
+				fullOutput: `Error spawning ${agent.name}: ${err.message}`,
+				truncated: false,
+				stopReason: "error",
+				errorMessage: err.message,
+			};
+			hooks?.onFinish?.(result);
+			resolve(result);
+		});
+	});
+}
+
+// ── Extension entry point ────────────────────────────────────────────────
+
+export default function hird(pi: ExtensionAPI) {
+	let agents: HirdAgent[] = [];
+	let teams: Record<string, string[]> = {};
+	let previousThemeName: string | undefined;
+	let cachedSystemPrompt: string | undefined;
+	let widgetCtx: any;
+	let activityVisible = true;
+	let activityMode: HirdViewMode = "lanes";
+	let activityRevision = 0;
+	let activityComponent: Component | undefined;
+	let activityTui: any;
+	let activityTicker: ReturnType<typeof setInterval> | undefined;
+	const activityRuns = new Map<string, HirdActivityRun>();
+
+	function agentByName(name: string): HirdAgent | undefined {
+		const key = name.trim().toLowerCase();
+		return agents.find(a => a.name.toLowerCase() === key);
+	}
+
+	function refresh() {
+		agents = loadAgents();
+		teams = loadTeams();
+		cachedSystemPrompt = undefined;
+		seedIdleAgents();
+	}
+
+	function seedIdleAgents(): void {
+		for (const agent of agents) {
+			if (!activityRuns.has(agent.name)) {
+				activityRuns.set(agent.name, {
+					name: agent.name,
+					query: "",
+					state: "idle",
+					lastLine: "idle",
+				});
+			}
+		}
+	}
+
+	function hasRunningActivity(): boolean {
+		return Array.from(activityRuns.values()).some(run => run.state === "run");
+	}
+
+	function bumpActivity(): void {
+		activityRevision++;
+		activityComponent?.invalidate();
+		activityTui?.requestRender?.();
+		ensureActivityTicker();
+	}
+
+	function setActivityRun(name: string, patch: Partial<HirdActivityRun>): void {
+		const prev = activityRuns.get(name) || { name, query: "", state: "idle", lastLine: "idle" } as HirdActivityRun;
+		activityRuns.set(name, { ...prev, ...patch, name });
+		bumpActivity();
+	}
+
+	function ensureActivityTicker(): void {
+		if (!activityVisible || reducedMotion() || !process.stdout.isTTY || !hasRunningActivity()) {
+			if (activityTicker) {
+				clearInterval(activityTicker);
+				activityTicker = undefined;
+			}
+			return;
+		}
+		if (activityTicker) return;
+		activityTicker = setInterval(() => {
+			if (!hasRunningActivity() || !activityVisible) {
+				ensureActivityTicker();
+				return;
+			}
+			activityComponent?.invalidate();
+			activityTui?.requestRender?.();
+		}, 66);
+	}
+
+	function updateActivityWidget(): void {
+		if (!widgetCtx?.ui) return;
+		if (!activityVisible) {
+			widgetCtx.ui.setWidget("hird-activity", undefined);
+			activityComponent = undefined;
+			activityTui = undefined;
+			ensureActivityTicker();
+			return;
+		}
+		widgetCtx.ui.setWidget("hird-activity", (tui: any, theme: any) => {
+			activityTui = tui;
+			activityComponent = new HirdActivityView(
+				() => Array.from(activityRuns.values()),
+				() => activityRevision,
+				() => activityMode,
+				theme,
+			);
+			return activityComponent;
+		}, { placement: "aboveEditor" });
+		ensureActivityTicker();
+	}
+
+	function promptSummary(prompt: string): string {
+		return prompt.split("\n").map(line => line.trim()).find(Boolean)?.slice(0, 120) || "assigned handoff";
+	}
+
+	const agentInfoSchema = Type.Object({
+		agent: Type.Optional(Type.String({ description: "Bundled Hird agent name. Omit to list all agents." })),
+		team: Type.Optional(Type.String({ description: "Bundled Hird team name. Omit to list all teams." })),
+		format: Type.Optional(StringEnum(["summary", "full"] as const)),
+	});
+
+	pi.registerTool({
+		name: "hird_agent_info",
+		label: "Hird Agent Info",
+		description: "List or inspect Hird's bundled agents and teams.",
+		promptSnippet: "Inspect the bundled Hird engineering retinue agents or teams.",
+		promptGuidelines: [
+			"Use hird_agent_info when you need the Hird roster, team membership, or a specific agent's instructions.",
+		],
+		parameters: agentInfoSchema,
+		async execute(_toolCallId, params) {
+			const p = params as { agent?: string; team?: string; format?: "summary" | "full" };
+			if (p.team) {
+				const members = teams[p.team];
+				if (!members) throw new Error(`Unknown Hird team: ${p.team}`);
+				return {
+					content: [{ type: "text", text: `${p.team}: ${members.join(", ")}` }],
+					details: { team: p.team, members },
+				};
+			}
+			if (p.agent) {
+				const agent = agentByName(p.agent);
+				if (!agent) throw new Error(`Unknown Hird agent: ${p.agent}`);
+				const text = p.format === "full"
+					? [`# ${agent.name}`, "", agent.description, "", `Tools: ${agent.tools}`, `Thinking: ${agent.thinking ?? "default"}`, "", agent.systemPrompt].join("\n")
+					: `${agent.name}: ${agent.description}\nTools: ${agent.tools}\nThinking: ${agent.thinking ?? "default"}`;
+				const trunc = truncateHead(text, { maxBytes: DEFAULT_MAX_BYTES, maxLines: DEFAULT_MAX_LINES });
+				return {
+					content: [{ type: "text", text: trunc.content }],
+					details: { agent, truncated: trunc.truncated },
+				};
+			}
+			const lines = [
+				`Hird agents (${agents.length}):`,
+				...agents.map(a => `- ${a.name}: ${a.description}`),
+				"",
+				"Teams:",
+				...Object.entries(teams).map(([name, members]) => `- ${name}: ${members.join(", ")}`),
+			];
+			return { content: [{ type: "text", text: lines.join("\n") }], details: { agents, teams } };
+		},
+		renderCall(args, theme) {
+			const label = (args as any).agent || (args as any).team || "roster";
+			return new Text(theme.fg("toolTitle", "hird_agent_info ") + theme.fg("muted", String(label)), 0, 0);
+		},
+		renderResult(result, _ctx, theme) {
+			const count = Array.isArray((result as any).details?.agents) ? (result as any).details.agents.length : undefined;
+			const text = count !== undefined ? `Hird roster: ${count} agents` : "Hird info loaded";
+			return new Text(theme.fg("success", `✓ ${text}`), 0, 0);
+		},
+	});
+
+	const dispatchSchema = Type.Object({
+		mode: Type.Optional(StringEnum(["parallel", "chain"] as const)),
+		tasks: Type.Array(Type.Object({
+			agent: Type.String({ description: "Bundled Hird agent name, e.g. hird-backend-lead." }),
+			prompt: Type.String({ description: "Concrete handoff prompt for this agent. In chain mode, may include {previous}." }),
+		})),
+	});
+
+	pi.registerTool({
+		name: "hird_dispatch_agent",
+		label: "Dispatch Hird Agent",
+		description: "Spawn bundled Hird agents as isolated Pi subprocesses. Supports parallel or chain dispatch.",
+		promptSnippet: "Dispatch Hird specialists with explicit role objectives, scope, constraints, and output contracts.",
+		promptGuidelines: [
+			"Use hird_dispatch_agent for Tier 2/3 Hird work instead of role-playing every specialist in the main context.",
+			"Each task must name an agent and include a complete handoff with objective, scope, out-of-scope, safety constraints, and required output format.",
+			"Use chain mode when a later prompt needs the prior result via {previous}; otherwise use parallel only for independent work.",
+		],
+		parameters: dispatchSchema,
+		async execute(_toolCallId, params, signal, onUpdate, ctx) {
+			const p = params as { mode?: "parallel" | "chain"; tasks?: { agent: string; prompt: string }[] };
+			const tasks = p.tasks || [];
+			const mode = p.mode === "chain" ? "chain" : "parallel";
+			if (tasks.length === 0) {
+				return { content: [{ type: "text", text: "No Hird dispatch tasks provided." }], details: { status: "error", results: [] } };
+			}
+
+			const resolved = tasks.map(task => {
+				const agent = agentByName(task.agent);
+				if (!agent) throw new Error(`Unknown Hird agent: ${task.agent}`);
+				return { agent, prompt: task.prompt };
+			});
+
+			const emitPartial = (results: RunResult[] = []) => {
+				onUpdate?.({
+					content: [{
+						type: "text",
+						text: Array.from(activityRuns.values())
+							.filter(run => resolved.some(r => r.agent.name === run.name))
+							.map(run => {
+								const icon = run.state === "run" ? "◉" : run.state === "done" ? "✓" : run.state === "error" ? "✗" : "○";
+								return `${icon} ${run.name}: ${run.lastLine || run.state}`;
+							})
+							.join("\n") || `Dispatching ${resolved.length} Hird agent(s)`,
+					}],
+					details: { status: "running", mode, agents: resolved.map(r => r.agent.name), results },
+				});
+			};
+
+			emitPartial();
+
+			const runOne = async (task: { agent: HirdAgent; prompt: string }): Promise<RunResult> => {
+				const startedAt = Date.now();
+				setActivityRun(task.agent.name, {
+					state: "run",
+					query: promptSummary(task.prompt),
+					startedAt,
+					endedAt: undefined,
+					lastLine: "starting",
+					lastActivityAt: startedAt,
+				});
+				return await runAgent(task.agent, task.prompt, ctx, signal, {
+					onEvent: (line) => setActivityRun(task.agent.name, {
+						state: "run",
+						lastLine: line,
+						lastActivityAt: Date.now(),
+					}),
+					onFinish: (result) => setActivityRun(task.agent.name, {
+						state: result.status === "done" ? "done" : "error",
+						endedAt: Date.now(),
+						lastLine: result.status === "done" ? "done" : result.status === "cancelled" ? "cancelled" : (result.errorMessage || `exit ${result.exitCode}`),
+						lastActivityAt: Date.now(),
+					}),
+				});
+			};
+
+			let results: RunResult[];
+			if (mode === "chain") {
+				results = [];
+				let previous = "";
+				for (const task of resolved) {
+					const prompt = task.prompt.replaceAll("{previous}", previous);
+					const result = await runOne({ agent: task.agent, prompt });
+					results.push(result);
+					emitPartial(results);
+					previous = result.fullOutput;
+					if (result.status !== "done") break;
+				}
+			} else {
+				results = await Promise.all(resolved.map(async task => {
+					const result = await runOne(task);
+					emitPartial([result]);
+					return result;
+				}));
+			}
+
+			const sections = results.map(r => {
+				const header = `## [${r.status === "done" ? "✓" : "✗"}] ${displayName(r.agent)} (${Math.round(r.elapsedMs / 1000)}s)`;
+				return `${header}\n\n${r.output}${r.truncated ? "\n\n[output truncated]" : ""}`;
+			});
+			const ok = results.every(r => r.status === "done");
+			return {
+				content: [{ type: "text", text: sections.join("\n\n---\n\n") }],
+				details: { status: ok ? "done" : "error", mode, results },
+			};
+		},
+		renderCall(args, theme) {
+			const tasks = Array.isArray((args as any).tasks) ? (args as any).tasks : [];
+			const names = tasks.map((t: any) => t.agent).filter(Boolean).join(", ") || "none";
+			return new Text(theme.fg("toolTitle", "hird_dispatch_agent ") + theme.fg("muted", names), 0, 0);
+		},
+		renderResult(result, _ctx, theme) {
+			const results = Array.isArray((result as any).details?.results) ? (result as any).details.results : [];
+			const ok = (result as any).details?.status === "done";
+			return new Text(theme.fg(ok ? "success" : "error", `${ok ? "✓" : "✗"} Hird dispatch: ${results.length} result(s)`), 0, 0);
+		},
+	});
+
+	pi.registerCommand("hird-agents", {
+		description: "List bundled Hird agents and teams",
+		handler: async (_args: string, ctx: any) => {
+			ctx.ui.setWidget("hird-roster", [
+				`Hird retinue (${agents.length} agents)`,
+				...agents.map(a => `${a.name} — ${a.description}`),
+				"",
+				"Teams:",
+				...Object.entries(teams).map(([name, members]) => `${name}: ${members.join(", ")}`),
+			]);
+		},
+	});
+
+	pi.registerCommand("hird", {
+		description: "Kick off the Hird orchestrator protocol for your next request",
+		handler: async (args: string, _ctx: any) => {
+			const task = args.trim() || "Introduce yourself, show the Hird activation modes, and ask what engineering task to take on.";
+			pi.sendUserMessage(`Use Hird. ${task}`);
+		},
+	});
+
+	pi.registerCommand("hird-view", {
+		description: "Control the Hird parallel-agent activity view: show, hide, toggle, lanes, orbit",
+		handler: async (args: string, ctx: any) => {
+			const cmd = args.trim().toLowerCase();
+			if (cmd === "hide") activityVisible = false;
+			else if (cmd === "show") activityVisible = true;
+			else if (cmd === "toggle" || cmd === "") activityVisible = !activityVisible;
+			else if (cmd === "lanes") { activityMode = "lanes"; activityVisible = true; }
+			else if (cmd === "orbit") { activityMode = "orbit"; activityVisible = true; }
+			else {
+				ctx.ui.notify("Usage: /hird-view [show|hide|toggle|lanes|orbit]", "warning");
+				return;
+			}
+			updateActivityWidget();
+			bumpActivity();
+			ctx.ui.notify(`Hird activity view: ${activityVisible ? activityMode : "hidden"}`, "info");
+		},
+	});
+
+	pi.registerShortcut("f8", {
+		description: "Toggle Hird activity view",
+		handler: async (ctx: any) => {
+			if (ctx.hasUI === false) return;
+			activityVisible = !activityVisible;
+			updateActivityWidget();
+			bumpActivity();
+			ctx.ui.notify(activityVisible ? "Hird activity view shown" : "Hird activity view hidden", "info");
+		},
+	});
+
+	pi.registerShortcut("f9", {
+		description: "Switch Hird activity view between lanes and orbit",
+		handler: async (ctx: any) => {
+			if (ctx.hasUI === false) return;
+			activityMode = activityMode === "lanes" ? "orbit" : "lanes";
+			activityVisible = true;
+			updateActivityWidget();
+			bumpActivity();
+			ctx.ui.notify(`Hird activity view: ${activityMode}`, "info");
+		},
+	});
+
+	pi.on("resources_discover", async () => ({
+		themePaths: existsSync(HIRD_THEME_DIR) ? [HIRD_THEME_DIR] : [],
+	}));
+
+	pi.on("before_agent_start", async () => {
+		if (!cachedSystemPrompt) cachedSystemPrompt = buildOrchestratorPrompt(agents, teams);
+		return { systemPrompt: cachedSystemPrompt };
+	});
+
+	pi.on("session_start", async (_event, ctx) => {
+		widgetCtx = ctx;
+		refresh();
+		try {
+			const ui = ctx?.ui as any;
+			if (ui?.setTheme && ui?.getAllThemes) {
+				const available = (ui.getAllThemes() || []).map((t: any) => t?.name);
+				if (available.includes(HIRD_THEME_NAME)) {
+					const current = ui.theme?.name;
+					const result = ui.setTheme(HIRD_THEME_NAME);
+					if (result?.success && current && current !== HIRD_THEME_NAME) previousThemeName = current;
+				}
+			}
+		} catch {}
+		try {
+			ctx.ui.setStatus("hird", `Hird (${agents.length} agents)`);
+			ctx.ui.notify(`Hird loaded: ${agents.length} agents, ${Object.keys(teams).length} teams. Use /hird, /hird-agents, or /hird-view.`, "success");
+			ctx.ui.setWidget("hird-start", [
+				"ᚺ Hird is active — disciplined lead → coder → QA engineering retinue.",
+				"Activity lanes are shown above the editor. f8 toggles, f9 switches orbit/lanes.",
+				"Use /hird <task> to start under the Hird orchestrator, or /hird-agents for the roster.",
+			]);
+			updateActivityWidget();
+		} catch {}
+	});
+
+	pi.on("session_shutdown", async () => {
+		if (activityTicker) {
+			clearInterval(activityTicker);
+			activityTicker = undefined;
+		}
+		try { widgetCtx?.ui?.setStatus?.("hird", undefined); } catch {}
+		try { widgetCtx?.ui?.setWidget?.("hird-start", undefined); } catch {}
+		try { widgetCtx?.ui?.setWidget?.("hird-roster", undefined); } catch {}
+		try { widgetCtx?.ui?.setWidget?.("hird-activity", undefined); } catch {}
+		activityComponent = undefined;
+		activityTui = undefined;
+		if (previousThemeName) {
+			try { (widgetCtx?.ui as any)?.setTheme?.(previousThemeName); } catch {}
+			previousThemeName = undefined;
+		}
+	});
+}

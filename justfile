@@ -6,7 +6,7 @@
 # Tool version — bump when changing justfile / install.sh in a way that catalog
 # entries may depend on. `brunnr sync` compares this against library.yaml's
 # `min_tool_version` and refuses if the local tool is older.
-export TOOL_VERSION := "3.0.31"
+export TOOL_VERSION := "3.0.32"
 
 # Default path to brunnr repository
 export BRUNNR_HOME := env_var_or_default("BRUNNR_HOME", env_var('HOME') / ".config/brunnr")
@@ -43,6 +43,7 @@ THEMES_SRC := BRUNNR_HOME / "themes"
     echo "  install              Initialize brunnr in current project (creates .pi/ subdirs)"
     echo "  eitri                Launch Pi with the eitri authoring extension (loaded on-demand from BRUNNR_HOME)"
     echo "  brokkr               Launch Pi with the Brokkr extension (skill picker + pipeline launcher)"
+    echo "  hird                 Launch Pi with the Hird engineering-team extension"
     echo "  add [-g] <section> <name>    Install item to project (.pi/) or globally with -g (~/.pi/agent/)"
     echo "  remove [-g] <section> <name> Uninstall item from project or globally with -g"
     echo "  push <section> <name> Push a new item to brunnr (opens a PR)"
@@ -86,7 +87,7 @@ install:
     echo "  - {{EXTENSIONS_DIR}}"
     echo "  - {{THEMES_DIR}}"
     echo ""
-    echo "brunnr is ready. Run 'brunnr eitri' to forge new components, or 'brunnr add <section> <name>' for catalog items."
+    echo "brunnr is ready. Run 'brunnr eitri' to forge components, 'brunnr hird' for the engineering team, or 'brunnr add <section> <name>' for catalog items."
 
 # Launch Pi with the eitri extension loaded on-demand from BRUNNR_HOME.
 # Eitri is bundled with brunnr — never installed into Pi's extension search
@@ -170,6 +171,39 @@ brokkr *args:
     # previous theme on session_shutdown).
     [ -f "{{BRUNNR_HOME}}/themes/forge.json" ] && PI_ARGS+=(--theme "{{BRUNNR_HOME}}/themes/forge.json")
     exec pi "${PI_ARGS[@]}" -e "$BROKKR_PATH" {{args}}
+
+# Launch Pi with Hird — a Norse engineering retinue implementing the
+# dev-team lead → coder → QA protocol. Like eitri/brokkr, Hird is bundled with
+# brunnr and loaded on demand; plain `pi` sessions stay clean. Project context
+# files are intentionally left enabled so Hird sees the target repo's rules.
+hird *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{invocation_directory()}}"
+
+    HIRD_PATH="{{BRUNNR_HOME}}/extensions/hird/hird.ts"
+    HIRD_THEME="{{BRUNNR_HOME}}/extensions/hird/themes/hird.json"
+    if [ ! -f "$HIRD_PATH" ]; then
+        echo "Error: hird.ts not found at $HIRD_PATH"
+        echo "  Check that BRUNNR_HOME points at your brunnr clone (currently: {{BRUNNR_HOME}})"
+        exit 1
+    fi
+
+    if ! command -v pi >/dev/null 2>&1; then
+        echo "Error: 'pi' not found on PATH. Install Pi: https://github.com/earendil-works/pi"
+        exit 1
+    fi
+
+    # Isolate extension/skill/prompt/theme discovery from the project, then
+    # explicitly re-add globally installed resources plus Hird's bundled theme.
+    # There is no Pi agent-path flag; Hird dispatches its bundled agents itself.
+    PI_GLOBAL="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
+    PI_ARGS=(--no-extensions --no-skills --no-prompt-templates --no-themes)
+    [ -d "$PI_GLOBAL/skills"  ] && PI_ARGS+=(--skill           "$PI_GLOBAL/skills")
+    [ -d "$PI_GLOBAL/prompts" ] && PI_ARGS+=(--prompt-template "$PI_GLOBAL/prompts")
+    [ -d "$PI_GLOBAL/themes"  ] && PI_ARGS+=(--theme           "$PI_GLOBAL/themes")
+    [ -f "$HIRD_THEME"        ] && PI_ARGS+=(--theme           "$HIRD_THEME")
+    exec pi "${PI_ARGS[@]}" -e "$HIRD_PATH" {{args}}
 
 # Run microsoft/SkillOpt as a sibling optimizer to autoresearch-skill against
 # one of the current project's skills. Converts the skill's brunnr eval suite
@@ -2016,9 +2050,9 @@ check:
       end
 
       # Orphan check — files on disk not referenced by library.yaml.
-      # Built-in capabilities (eitri) live under extensions/ but are intentionally
-      # not catalog items, so they're whitelisted here.
-      bundled_paths = ["extensions/eitri/", "extensions/brokkr/"]
+      # Built-in capabilities (eitri, brokkr, hird) live under extensions/ but are
+      # intentionally not catalog items, so they're whitelisted here.
+      bundled_paths = ["extensions/eitri/", "extensions/brokkr/", "extensions/hird/"]
 
       on_disk = {
         "skills"     => Dir.glob("skills/*/SKILL.md"),
