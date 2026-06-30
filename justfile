@@ -203,13 +203,16 @@ hird *args:
     fi
 
     # Isolate extension/skill/prompt/theme discovery from the project, then
-    # explicitly re-add globally installed resources plus Hird's bundled theme.
+    # explicitly re-add globally installed resources, brunnr's bundled themes
+    # (so a persisted theme like "snow" still resolves), plus Hird's theme.
     # There is no Pi agent-path flag; Hird dispatches its bundled agents itself.
     PI_GLOBAL="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
     PI_ARGS=(--no-extensions --no-skills --no-prompt-templates --no-themes)
     [ -d "$PI_GLOBAL/skills"  ] && PI_ARGS+=(--skill           "$PI_GLOBAL/skills")
     [ -d "$PI_GLOBAL/prompts" ] && PI_ARGS+=(--prompt-template "$PI_GLOBAL/prompts")
     [ -d "$PI_GLOBAL/themes"  ] && PI_ARGS+=(--theme           "$PI_GLOBAL/themes")
+    [ -f "{{BRUNNR_HOME}}/themes/snow.json"  ] && PI_ARGS+=(--theme "{{BRUNNR_HOME}}/themes/snow.json")
+    [ -f "{{BRUNNR_HOME}}/themes/forge.json" ] && PI_ARGS+=(--theme "{{BRUNNR_HOME}}/themes/forge.json")
     [ -f "$HIRD_THEME"        ] && PI_ARGS+=(--theme           "$HIRD_THEME")
     exec pi "${PI_ARGS[@]}" -e "$HIRD_PATH" {{args}}
 

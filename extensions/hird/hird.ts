@@ -100,7 +100,6 @@ interface HirdMemoryProposal {
 const VALID_THINKING: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 const EXT_DIR = dirname(fileURLToPath(import.meta.url));
 const HIRD_AGENT_DIR = join(EXT_DIR, "agents", "hird");
-const HIRD_THEME_DIR = join(EXT_DIR, "themes");
 const HIRD_THEME_NAME = "hird";
 const PROJECT_MEMORY_FILES: Record<HirdMemoryFile, string> = {
 	conventions: "conventions.md",
@@ -1431,10 +1430,6 @@ export default function hird(pi: ExtensionAPI) {
 			ctx.ui.notify(`Hird activity view: ${activityMode}`, "info");
 		},
 	});
-
-	pi.on("resources_discover", async () => ({
-		themePaths: existsSync(HIRD_THEME_DIR) ? [HIRD_THEME_DIR] : [],
-	}));
 
 	pi.on("before_agent_start", async () => {
 		if (!cachedSystemPrompt) cachedSystemPrompt = buildOrchestratorPrompt(agents, teams);
