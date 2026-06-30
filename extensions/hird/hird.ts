@@ -24,12 +24,15 @@ import {
 	mkdtempSync,
 	readdirSync,
 	readFileSync,
+	renameSync,
 	rmdirSync,
+	statSync,
 	unlinkSync,
 	writeFileSync,
 } from "fs";
-import { tmpdir } from "os";
-import { basename, dirname, join } from "path";
+import { randomUUID } from "crypto";
+import { homedir, tmpdir } from "os";
+import { basename, dirname, join, relative, resolve, sep } from "path";
 import { fileURLToPath } from "url";
 
 // ── Types ────────────────────────────────────────────────────────────────
@@ -76,12 +79,183 @@ interface HirdActivityRun {
 }
 
 type RGB = readonly [number, number, number];
+type HirdMemoryScope = "project" | "global";
+type HirdMemoryFile = "conventions" | "frontend" | "backend" | "devops" | "qa" | "architecture";
+type HirdMemoryAction = "read" | "propose" | "commit" | "status";
+type HirdMemoryDeltaStatus = "active" | "deprecated";
+
+interface HirdMemoryProposal {
+	id: string;
+	target: HirdMemoryScope;
+	file: HirdMemoryFile;
+	decision: string;
+	date: string;
+	scope: string;
+	status: HirdMemoryDeltaStatus;
+	supersedes: string;
+	rationale: string;
+	createdAt: string;
+}
 
 const VALID_THINKING: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 const EXT_DIR = dirname(fileURLToPath(import.meta.url));
 const HIRD_AGENT_DIR = join(EXT_DIR, "agents", "hird");
 const HIRD_THEME_DIR = join(EXT_DIR, "themes");
 const HIRD_THEME_NAME = "hird";
+const PROJECT_MEMORY_FILES: Record<HirdMemoryFile, string> = {
+	conventions: "conventions.md",
+	frontend: "frontend-notes.md",
+	backend: "backend-notes.md",
+	devops: "devops-notes.md",
+	qa: "qa-notes.md",
+	architecture: "architecture-notes.md",
+};
+const GLOBAL_MEMORY_FILES: Record<HirdMemoryFile, string> = {
+	...PROJECT_MEMORY_FILES,
+	conventions: "conventions.md",
+};
+const MEMORY_HEADER = `# Hird memory\n\nPrecedence: code > project memory > global memory. Entries are durable guidance, not absolute truth. Deprecate stale entries instead of deleting them.\n`;
+
+function isInside(parent: string, child: string): boolean {
+	const rel = relative(resolve(parent), resolve(child));
+	return rel === "" || (!rel.startsWith("..") && !rel.includes(`..${sep}`));
+}
+
+function projectMemoryRoot(): string {
+	return resolve(process.cwd(), ".pi", "hird", "memory");
+}
+
+function globalMemoryRoot(): string {
+	return resolve(homedir(), ".pi", "hird", "memory");
+}
+
+function memoryRoot(target: HirdMemoryScope): string {
+	return target === "global" ? globalMemoryRoot() : projectMemoryRoot();
+}
+
+function memoryPath(target: HirdMemoryScope, file: HirdMemoryFile): string {
+	const root = memoryRoot(target);
+	if (target === "global" && file !== "conventions") {
+		throw new Error("Global Hird memory currently supports only conventions.md");
+	}
+	const name = (target === "global" ? GLOBAL_MEMORY_FILES : PROJECT_MEMORY_FILES)[file];
+	const path = resolve(root, name);
+	if (!isInside(root, path)) throw new Error("Refusing memory path outside Hird memory root");
+	return path;
+}
+
+function proposalsPath(target: HirdMemoryScope): string {
+	const root = memoryRoot(target);
+	const path = resolve(root, "proposals.json");
+	if (!isInside(root, path)) throw new Error("Refusing proposal path outside Hird memory root");
+	return path;
+}
+
+function bootstrapMemory(target: HirdMemoryScope): void {
+	const root = memoryRoot(target);
+	mkdirSync(root, { recursive: true });
+	const files: HirdMemoryFile[] = target === "global"
+		? ["conventions"]
+		: ["conventions", "frontend", "backend", "devops", "qa", "architecture"];
+	for (const f of files) {
+		const p = memoryPath(target, f);
+		if (!existsSync(p)) writeFileSync(p, MEMORY_HEADER, { encoding: "utf-8", mode: 0o600 });
+	}
+}
+
+function readMemoryFile(target: HirdMemoryScope, file: HirdMemoryFile): string {
+	const p = memoryPath(target, file);
+	if (!existsSync(p)) return "";
+	return readFileSync(p, "utf-8");
+}
+
+function readProposals(target: HirdMemoryScope): HirdMemoryProposal[] {
+	const p = proposalsPath(target);
+	if (!existsSync(p)) return [];
+	try {
+		const parsed = JSON.parse(readFileSync(p, "utf-8"));
+		return Array.isArray(parsed) ? parsed : [];
+	} catch {
+		return [];
+	}
+}
+
+function atomicWrite(path: string, content: string): void {
+	mkdirSync(dirname(path), { recursive: true });
+	const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
+	writeFileSync(tmp, content, { encoding: "utf-8", mode: 0o600 });
+	renameSync(tmp, path);
+}
+
+function writeProposals(target: HirdMemoryScope, proposals: HirdMemoryProposal[]): void {
+	atomicWrite(proposalsPath(target), JSON.stringify(proposals, null, 2) + "\n");
+}
+
+function today(): string {
+	return new Date().toISOString().slice(0, 10);
+}
+
+function normalizeMemoryText(text: string): string {
+	return text.trim().replace(/\s+\n/g, "\n").slice(0, 4000);
+}
+
+function memoryEntry(delta: Omit<HirdMemoryProposal, "id" | "target" | "file" | "createdAt">): string {
+	return [
+		"",
+		`## ${delta.date} — ${delta.decision}`,
+		`- scope: ${delta.scope}`,
+		`- status: ${delta.status}`,
+		`- supersedes: ${delta.supersedes || "none"}`,
+		`- rationale: ${delta.rationale}`,
+	].join("\n") + "\n";
+}
+
+function compactMemoryExcerpt(target: HirdMemoryScope, file: HirdMemoryFile, maxChars = 1800): string {
+	const raw = readMemoryFile(target, file).trim();
+	if (!raw) return "";
+	const withoutHeader = raw.replace(/^# Hird memory\s*[\s\S]*?\n(?=## |$)/, "").trim() || raw;
+	const trunc = truncateHead(withoutHeader, { maxBytes: maxChars, maxLines: 40 });
+	return trunc.content.trim();
+}
+
+function hirdMemoryContext(): string {
+	const sections: string[] = [];
+	const add = (label: string, target: HirdMemoryScope, file: HirdMemoryFile, max = 1400) => {
+		try {
+			const excerpt = compactMemoryExcerpt(target, file, max);
+			if (excerpt) sections.push(`### ${label}\n${excerpt}`);
+		} catch {}
+	};
+	add("Project conventions (.pi/hird/memory/conventions.md)", "project", "conventions");
+	add("Project architecture (.pi/hird/memory/architecture-notes.md)", "project", "architecture");
+	add("Project frontend (.pi/hird/memory/frontend-notes.md)", "project", "frontend", 900);
+	add("Project backend (.pi/hird/memory/backend-notes.md)", "project", "backend", 900);
+	add("Project devops (.pi/hird/memory/devops-notes.md)", "project", "devops", 900);
+	add("Project QA (.pi/hird/memory/qa-notes.md)", "project", "qa", 900);
+	add("Global conventions (~/.pi/hird/memory/conventions.md)", "global", "conventions", 1200);
+	if (!sections.length) return "";
+	return `## Hird memory context\n\nPrecedence: code > project memory > global memory. Memory is advisory; verified code and explicit user instructions win. Only the orchestrator may commit memory. Specialists may propose deltas only.\n\n${sections.join("\n\n")}`;
+}
+
+function relevantMemoryForAgent(agentName: string): string {
+	const files: HirdMemoryFile[] = ["conventions"];
+	if (agentName.includes("frontend")) files.push("frontend");
+	if (agentName.includes("backend")) files.push("backend");
+	if (agentName.includes("devops")) files.push("devops");
+	if (agentName.includes("qa") || agentName.includes("test") || agentName.includes("review") || agentName.includes("validator")) files.push("qa");
+	if (agentName.includes("architect") || agentName.includes("architecture") || agentName.includes("plan")) files.push("architecture");
+	if (agentName.includes("coder")) files.push("frontend", "backend", "devops");
+	const unique = Array.from(new Set(files));
+	const chunks: string[] = [];
+	for (const f of unique) {
+		const project = compactMemoryExcerpt("project", f, 900);
+		if (project) chunks.push(`### Project ${PROJECT_MEMORY_FILES[f]}\n${project}`);
+	}
+	const global = compactMemoryExcerpt("global", "conventions", 900);
+	if (global) chunks.push(`### Global conventions.md\n${global}`);
+	if (!chunks.length) return "";
+	return `## Memory excerpts (read-only)\n\nPrecedence: code > project memory > global memory. Use these as advisory constraints; if code contradicts memory, trust code and report the contradiction. Do not write memory files. If you learn a durable convention, propose a memory delta in your required output.\n\n${chunks.join("\n\n")}`;
+}
 
 // ── Parallel activity TUI primitives ────────────────────────────────────
 // Pi's TUI components render styled strings, so the spec's paint(col,row,glyph,
@@ -594,8 +768,9 @@ The Hird extension is active. You have two extension tools:
 
 - \`hird_agent_info\`: list or inspect bundled Hird agents and teams.
 - \`hird_dispatch_agent\`: spawn one or more bundled Hird agents in isolated Pi subprocesses. Use this for all Tier 2/3 lead, coder, reviewer, validator, and scout handoffs.
+- \`hird_memory\`: read, propose, commit, or inspect Hird project/global memory. Only you may commit memory; specialists may only propose deltas in their text output.
 
-When using \`hird_dispatch_agent\`, send concrete handoff prompts that include objective, scope, constraints, required output, and whether editing is allowed. Use \`mode: "parallel"\` only for independent read-only work or disjoint implementation packets; use \`mode: "chain"\` when the next agent must receive the prior output through the \`{previous}\` placeholder.
+When using \`hird_dispatch_agent\`, send concrete handoff prompts that include objective, scope, constraints, required output, whether editing is allowed, and any relevant memory excerpts. Use \`mode: "parallel"\` only for independent read-only work or disjoint implementation packets; use \`mode: "chain"\` when the next agent must receive the prior output through the \`{previous}\` placeholder.
 
 ## Bundled Hird roster
 ${roster}
@@ -918,6 +1093,162 @@ export default function hird(pi: ExtensionAPI) {
 		},
 	});
 
+	const memorySchema = Type.Object({
+		action: StringEnum(["read", "propose", "commit", "status"] as const, {
+			description: "read memory, propose a delta, commit a delta, or show memory status",
+		}),
+		target: Type.Optional(StringEnum(["project", "global"] as const)),
+		file: Type.Optional(StringEnum(["conventions", "frontend", "backend", "devops", "qa", "architecture"] as const)),
+		proposalId: Type.Optional(Type.String({ description: "Proposal id to commit." })),
+		decision: Type.Optional(Type.String({ description: "Durable decision/convention to propose or commit." })),
+		date: Type.Optional(Type.String({ description: "YYYY-MM-DD; defaults to today." })),
+		scope: Type.Optional(Type.String({ description: "frontend|backend|devops|qa|architecture|cross-cutting or narrower scope." })),
+		status: Type.Optional(StringEnum(["active", "deprecated"] as const)),
+		supersedes: Type.Optional(Type.String({ description: "Entry/decision superseded by this delta; use none if not applicable." })),
+		rationale: Type.Optional(Type.String({ description: "Why this memory is durable and worth saving." })),
+		limit: Type.Optional(Type.Number({ minimum: 1, maximum: 120 })),
+	});
+
+	pi.registerTool({
+		name: "hird_memory",
+		label: "Hird Memory",
+		description: "Read, propose, commit, or inspect Hird project/global memory. Subagents cannot access this tool; only the orchestrator commits memory.",
+		promptSnippet: "Use hird_memory to read Hird memory or commit approved durable deltas using single-writer discipline.",
+		promptGuidelines: [
+			"Read Hird memory before relying on long-term project/global conventions.",
+			"Use propose for uncommitted deltas from specialists; use commit only after resolving conflicts and verifying the delta is durable.",
+			"Do not store secrets, credentials, tokens, PII, or task-local trivia. Deprecate stale entries instead of deleting them.",
+		],
+		parameters: memorySchema,
+		async execute(_toolCallId, params) {
+			const p = params as {
+				action: HirdMemoryAction;
+				target?: HirdMemoryScope;
+				file?: HirdMemoryFile;
+				proposalId?: string;
+				decision?: string;
+				date?: string;
+				scope?: string;
+				status?: HirdMemoryDeltaStatus;
+				supersedes?: string;
+				rationale?: string;
+				limit?: number;
+			};
+			const target = p.target ?? "project";
+			const file = p.file ?? "conventions";
+			if (target === "global" && file !== "conventions" && p.action !== "status") {
+				throw new Error("Global Hird memory supports only conventions.md; use target=project for domain notes.");
+			}
+
+			if (p.action === "status") {
+				const roots = target ? [target] as HirdMemoryScope[] : ["project", "global"] as HirdMemoryScope[];
+				const lines: string[] = [];
+				for (const t of roots) {
+					const root = memoryRoot(t);
+					const proposals = readProposals(t);
+					lines.push(`${t} root: ${root}`);
+					lines.push(`proposals: ${proposals.length}`);
+					const files = t === "global" ? ["conventions"] as HirdMemoryFile[] : ["conventions", "frontend", "backend", "devops", "qa", "architecture"] as HirdMemoryFile[];
+					for (const f of files) {
+						const path = memoryPath(t, f);
+						let bytes = 0;
+						try { bytes = statSync(path).size; } catch {}
+						lines.push(`- ${PROJECT_MEMORY_FILES[f]}: ${existsSync(path) ? `${bytes} bytes` : "missing"}`);
+					}
+				}
+				return { content: [{ type: "text", text: lines.join("\n") }], details: { action: p.action, target } };
+			}
+
+			if (p.action === "read") {
+				const path = memoryPath(target, file);
+				const raw = readMemoryFile(target, file) || `No ${target} ${PROJECT_MEMORY_FILES[file]} memory.`;
+				const trunc = truncateHead(raw, { maxBytes: DEFAULT_MAX_BYTES, maxLines: p.limit ?? DEFAULT_MAX_LINES });
+				return {
+					content: [{ type: "text", text: trunc.content }],
+					details: { action: p.action, target, file, path, truncated: trunc.truncated },
+				};
+			}
+
+			if (p.action === "propose") {
+				if (!p.decision || !p.rationale) throw new Error("hird_memory propose requires decision and rationale");
+				bootstrapMemory(target);
+				const proposal: HirdMemoryProposal = {
+					id: randomUUID(),
+					target,
+					file,
+					decision: normalizeMemoryText(p.decision),
+					date: p.date || today(),
+					scope: p.scope || file,
+					status: p.status || "active",
+					supersedes: p.supersedes || "none",
+					rationale: normalizeMemoryText(p.rationale),
+					createdAt: new Date().toISOString(),
+				};
+				const proposals = readProposals(target);
+				proposals.push(proposal);
+				writeProposals(target, proposals);
+				return {
+					content: [{ type: "text", text: `Proposed ${target}/${PROJECT_MEMORY_FILES[file]} memory ${proposal.id}: ${proposal.decision}` }],
+					details: { action: p.action, target, file, proposal },
+				};
+			}
+
+			if (p.action === "commit") {
+				bootstrapMemory(target);
+				let delta: Omit<HirdMemoryProposal, "id" | "target" | "file" | "createdAt">;
+				let proposal: HirdMemoryProposal | undefined;
+				if (p.proposalId) {
+					const proposals = readProposals(target);
+					const idx = proposals.findIndex(item => item.id === p.proposalId);
+					if (idx < 0) throw new Error(`Unknown Hird memory proposal: ${p.proposalId}`);
+					proposal = proposals[idx];
+					proposals.splice(idx, 1);
+					writeProposals(target, proposals);
+					delta = {
+						decision: proposal.decision,
+						date: proposal.date,
+						scope: proposal.scope,
+						status: proposal.status,
+						supersedes: proposal.supersedes,
+						rationale: proposal.rationale,
+					};
+				} else {
+					if (!p.decision || !p.rationale) throw new Error("hird_memory commit requires proposalId or decision+rationale");
+					delta = {
+						decision: normalizeMemoryText(p.decision),
+						date: p.date || today(),
+						scope: p.scope || file,
+						status: p.status || "active",
+						supersedes: p.supersedes || "none",
+						rationale: normalizeMemoryText(p.rationale),
+					};
+				}
+				const commitTarget = proposal?.target ?? target;
+				const commitFile = proposal?.file ?? file;
+				const path = memoryPath(commitTarget, commitFile);
+				const prior = readMemoryFile(commitTarget, commitFile) || MEMORY_HEADER;
+				atomicWrite(path, prior.replace(/\s*$/, "\n") + memoryEntry(delta));
+				return {
+					content: [{ type: "text", text: `Committed ${commitTarget}/${PROJECT_MEMORY_FILES[commitFile]} memory: ${delta.decision}` }],
+					details: { action: p.action, target: commitTarget, file: commitFile, path, committed: delta, proposalId: p.proposalId },
+				};
+			}
+
+			throw new Error(`Unsupported hird_memory action: ${p.action}`);
+		},
+		renderCall(args, theme) {
+			const p = args as { action?: string; target?: string; file?: string };
+			return new Text(theme.fg("toolTitle", "hird_memory ") + theme.fg("muted", `${p.action ?? "?"} ${p.target ?? "project"}/${p.file ?? "conventions"}`), 0, 0);
+		},
+		renderResult(result, options, theme) {
+			const d = (result as any).details || {};
+			let text = theme.fg("success", `✓ hird memory ${d.action ?? "done"}`);
+			if (options.expanded && d.path) text += `\n${theme.fg("dim", d.path)}`;
+			if (options.expanded && d.proposal?.id) text += `\nproposal: ${d.proposal.id}`;
+			return new Text(text, 0, 0);
+		},
+	});
+
 	const dispatchSchema = Type.Object({
 		mode: Type.Optional(StringEnum(["parallel", "chain"] as const)),
 		tasks: Type.Array(Type.Object({
@@ -971,6 +1302,8 @@ export default function hird(pi: ExtensionAPI) {
 
 			const runOne = async (task: { agent: HirdAgent; prompt: string }): Promise<RunResult> => {
 				const startedAt = Date.now();
+				const memory = relevantMemoryForAgent(task.agent.name);
+				const dispatchedPrompt = memory ? `${task.prompt}\n\n---\n\n${memory}` : task.prompt;
 				setActivityRun(task.agent.name, {
 					state: "run",
 					query: promptSummary(task.prompt),
@@ -979,7 +1312,7 @@ export default function hird(pi: ExtensionAPI) {
 					lastLine: "starting",
 					lastActivityAt: startedAt,
 				});
-				return await runAgent(task.agent, task.prompt, ctx, signal, {
+				return await runAgent(task.agent, dispatchedPrompt, ctx, signal, {
 					onEvent: (line) => setActivityRun(task.agent.name, {
 						state: "run",
 						lastLine: line,
@@ -1105,7 +1438,16 @@ export default function hird(pi: ExtensionAPI) {
 
 	pi.on("before_agent_start", async () => {
 		if (!cachedSystemPrompt) cachedSystemPrompt = buildOrchestratorPrompt(agents, teams);
-		return { systemPrompt: cachedSystemPrompt };
+		const memory = hirdMemoryContext();
+		if (!memory) return { systemPrompt: cachedSystemPrompt };
+		return {
+			systemPrompt: cachedSystemPrompt,
+			message: {
+				customType: "hird-memory-context",
+				content: memory,
+				display: false,
+			},
+		};
 	});
 
 	pi.on("session_start", async (_event, ctx) => {
