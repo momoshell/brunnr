@@ -88,7 +88,8 @@ install:
     echo ""
     echo "brunnr is ready. Run 'brunnr eitri' to forge new components, or 'brunnr add <section> <name>' for catalog items."
 
-# Launch Pi with the eitri extension loaded on-demand from BRUNNR_HOME.
+# Launch Pi with Eitri — the master dwarf smith of Norse myth, here a meta-agent
+# that builds Pi components by dispatching authoring experts (parallel/chain).
 # Eitri is bundled with brunnr — never installed into Pi's extension search
 # paths — so plain `pi` sessions stay clean and `brunnr eitri` is the only
 # entry point.

@@ -452,7 +452,7 @@ brunnr/
 │   ├── skill-status.md
 │   └── agent-status.md
 ├── extensions/eitri/
-│   ├── eitri.ts
+│   ├── eitri.ts          # Meta-agent shell: dispatches authoring experts (parallel/chain) via query_experts
 │   └── agents/eitri/
 │       ├── eitri-orchestrator.md
 │       ├── examples-data.yaml     # Curated Pi reference repos for examples-expert
