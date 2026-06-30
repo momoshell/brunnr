@@ -173,15 +173,17 @@ brokkr *args:
     [ -f "{{BRUNNR_HOME}}/themes/forge.json" ] && PI_ARGS+=(--theme "{{BRUNNR_HOME}}/themes/forge.json")
     exec pi "${PI_ARGS[@]}" -e "$BROKKR_PATH" {{args}}
 
-# Launch Pi with Hird — a Norse engineering retinue for serious code work.
-# A hird was a ruler's trusted household guard; here it is Hird Orchestrator plus
-# specialized leads, coders, reviewers, validators, memory, and a live activity
-# view. It implements the dev-team lead → coder → QA protocol while keeping the
-# star topology: the orchestrator talks to the user, specialists report back.
+# Hird is a Norse engineering retinue for serious code work. A hird was a
+# ruler's trusted household guard; here it is Hird Orchestrator plus specialized
+# leads, coders, reviewers, validators, memory, and a live activity view.
+# It implements the dev-team lead → coder → QA protocol while keeping the star
+# topology: the orchestrator talks to the user, specialists report back.
 #
 # Like Eitri and Brokkr, Hird is bundled with brunnr and loaded on demand; plain
 # `pi` sessions stay clean. Project context files are intentionally left enabled
 # so Hird sees the target repo's AGENTS.md / CLAUDE.md rules.
+
+# Launch Pi with Hird (engineering retinue + activity view).
 hird *args:
     #!/usr/bin/env bash
     set -euo pipefail
