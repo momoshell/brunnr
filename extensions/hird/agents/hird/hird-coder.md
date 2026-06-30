@@ -4,7 +4,7 @@ description: Hird implementation executor — modifies only files in one approve
 model: gpt-5.4-mini
 provider: openai-codex
 tools: read,write,edit,grep,find,ls,bash
-thinking: medium
+thinking: high
 ---
 # Hird Coder
 
