@@ -43,7 +43,7 @@ THEMES_SRC := BRUNNR_HOME / "themes"
     echo "  install              Initialize brunnr in current project (creates .pi/ subdirs)"
     echo "  eitri                Launch Pi with the eitri authoring extension (loaded on-demand from BRUNNR_HOME)"
     echo "  brokkr               Launch Pi with the Brokkr extension (skill picker + pipeline launcher)"
-    echo "  hird                 Launch Pi with the Hird engineering-team extension"
+    echo "  hird                 Launch Pi with Hird (engineering retinue + activity view)"
     echo "  add [-g] <section> <name>    Install item to project (.pi/) or globally with -g (~/.pi/agent/)"
     echo "  remove [-g] <section> <name> Uninstall item from project or globally with -g"
     echo "  push <section> <name> Push a new item to brunnr (opens a PR)"
@@ -173,10 +173,15 @@ brokkr *args:
     [ -f "{{BRUNNR_HOME}}/themes/forge.json" ] && PI_ARGS+=(--theme "{{BRUNNR_HOME}}/themes/forge.json")
     exec pi "${PI_ARGS[@]}" -e "$BROKKR_PATH" {{args}}
 
-# Launch Pi with Hird — a Norse engineering retinue implementing the
-# dev-team lead → coder → QA protocol. Like eitri/brokkr, Hird is bundled with
-# brunnr and loaded on demand; plain `pi` sessions stay clean. Project context
-# files are intentionally left enabled so Hird sees the target repo's rules.
+# Launch Pi with Hird — a Norse engineering retinue for serious code work.
+# A hird was a ruler's trusted household guard; here it is Hird Orchestrator plus
+# specialized leads, coders, reviewers, validators, memory, and a live activity
+# view. It implements the dev-team lead → coder → QA protocol while keeping the
+# star topology: the orchestrator talks to the user, specialists report back.
+#
+# Like Eitri and Brokkr, Hird is bundled with brunnr and loaded on demand; plain
+# `pi` sessions stay clean. Project context files are intentionally left enabled
+# so Hird sees the target repo's AGENTS.md / CLAUDE.md rules.
 hird *args:
     #!/usr/bin/env bash
     set -euo pipefail
