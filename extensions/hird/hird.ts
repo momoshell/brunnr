@@ -663,6 +663,30 @@ function normalizeThinking(raw: unknown): ThinkingLevel | undefined {
 	return (VALID_THINKING as readonly string[]).includes(v) ? v : undefined;
 }
 
+function providerToCli(provider: unknown): string | undefined {
+	if (typeof provider === "string" && provider.trim()) return provider.trim();
+	if (provider && typeof provider === "object") {
+		const p = provider as { id?: unknown; provider?: unknown };
+		if (typeof p.id === "string" && p.id.trim()) return p.id.trim();
+		if (typeof p.provider === "string" && p.provider.trim()) return p.provider.trim();
+	}
+	return undefined;
+}
+
+function modelToCli(model: unknown): string | undefined {
+	if (typeof model === "string") return model.trim() || undefined;
+	if (!model || typeof model !== "object") return undefined;
+	const m = model as { id?: unknown; model?: unknown; modelId?: unknown; provider?: unknown; providerId?: unknown };
+	const id =
+		typeof m.id === "string" && m.id.trim() ? m.id.trim() :
+		typeof m.model === "string" && m.model.trim() ? m.model.trim() :
+		typeof m.modelId === "string" && m.modelId.trim() ? m.modelId.trim() :
+		undefined;
+	if (!id) return undefined;
+	const provider = providerToCli(m.provider ?? m.providerId);
+	return provider ? `${provider}/${id}` : id;
+}
+
 function displayName(name: string): string {
 	return name.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
 }
@@ -790,8 +814,10 @@ async function runAgent(
 	},
 ): Promise<RunResult> {
 	const args: string[] = ["--mode", "json", "-p", "--no-session", "--no-extensions"];
-	if (agent.provider) args.push("--provider", agent.provider);
-	const model = agent.model || ctx?.model;
+	const inheritedModel = modelToCli(ctx?.model);
+	const explicitModel = typeof agent.model === "string" && agent.model.trim() ? agent.model.trim() : undefined;
+	const model = explicitModel || inheritedModel;
+	if (agent.provider && explicitModel && !explicitModel.includes("/")) args.push("--provider", agent.provider);
 	if (model) args.push("--model", model);
 	args.push("--tools", agent.tools);
 	if (agent.thinking) args.push("--thinking", agent.thinking);
