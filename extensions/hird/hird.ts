@@ -1039,31 +1039,36 @@ export default function hird(pi: ExtensionAPI) {
 		try {
 			if (ctx?.isIdle && !ctx.isIdle()) {
 				(pi as any).sendUserMessage(prompt, { deliverAs: "followUp" });
-				ctx.ui?.notify?.("Hird command queued as a follow-up.", "info");
+				ctx.ui?.notify?.("Hird task queued as a follow-up.", "info");
 				return;
 			}
 		} catch {}
 		(pi as any).sendUserMessage(prompt);
 	}
 
-	function hirdOnboardPrompt(args: string): string {
-		return `Use Hird. Run PROJECT ONBOARDING for this repository.\n\nUser context: ${args.trim() || "General project onboarding."}\n\nOnboarding owns all project-related setup, including next-task/board discovery. Do not implement product code during onboarding unless the user explicitly asks.\n\nRequired flow:\n1. Inspect project guidance and setup: AGENTS.md, CLAUDE.md, README, package/tool files, CI, tests, current git state, and existing .pi/hird memory.\n2. Discover the task/board source of truth in priority order. Check explicit local board/backlog files first, then repo docs, then available issue tracker references/CLI config. Do not invent a board.\n3. Produce a proposed onboarding record for .pi/hird/onboarding.json containing: status, project_summary, setup_commands, validation_commands, task_sources[], ranking_policy, next_task_rules, memory_files, and last_confirmed_at.\n4. HITL gate: summarize discovered setup, task sources, ranking policy, and proposed /hird-next behavior. Wait for explicit confirmation before creating or updating .pi/hird/onboarding.json or committing onboarding memory.\n5. After confirmation, bootstrap/update Hird memory using hird_memory when durable conventions are found.\n\nEnd with: project summary, confirmed or proposed board/task source, ranking policy, and the recommended next action. If no task source exists, propose a lightweight local board and ask before creating it.`;
+	async function runHird(ctx: any, task: string): Promise<void> {
+		const body = task.trim() || "Introduce yourself, show the Hird activation modes, and ask what engineering task to take on.";
+		await sendHirdKickoff(ctx, `Use Hird. Treat this as a /hird orchestrator task.\n\nTask:\n${body}\n\nRoute this through the Hird orchestrator protocol. Keep star topology: orchestrator talks to the user, specialists report back.`);
 	}
 
-	function hirdNextPrompt(args: string): string {
-		return `Use Hird. Select the next task ONLY from the onboarded project's defined board/task sources.\n\nConstraints/user context: ${args.trim() || "none"}\n\nRules:\n1. Read .pi/hird/onboarding.json first. If it is missing, incomplete, or has no task_sources, stop and tell the user to run /hird-onboard. Do not scan arbitrary TODOs, use default GitHub queries, or invent a board.\n2. Query only the recorded task_sources, in their recorded priority order.\n3. Rank candidates using the recorded ranking_policy, plus the user's constraints above.\n4. Propose exactly one next task with: source, id/link/path, why it wins, dependencies/blockers, likely files, validation approach, and recommended Hird team route.\n5. Do not start implementation or update the board unless the user explicitly confirms. Gate any external board writes.`;
+	function hirdOnboardTask(args: string): string {
+		return `Run PROJECT ONBOARDING for this repository.\n\nUser context: ${args.trim() || "General project onboarding."}\n\nOnboarding owns all project-related setup, including next-task/board discovery. Do not implement product code during onboarding unless the user explicitly asks.\n\nRequired flow:\n1. Inspect project guidance and setup: AGENTS.md, CLAUDE.md, README, package/tool files, CI, tests, current git state, and existing .pi/hird memory.\n2. Discover the task/board source of truth in priority order. Check explicit local board/backlog files first, then repo docs, then available issue tracker references/CLI config. Do not invent a board.\n3. Produce a proposed onboarding record for .pi/hird/onboarding.json containing: status, project_summary, setup_commands, validation_commands, task_sources[], ranking_policy, next_task_rules, memory_files, and last_confirmed_at.\n4. HITL gate: summarize discovered setup, task sources, ranking policy, and proposed /hird-next behavior. Wait for explicit confirmation before creating or updating .pi/hird/onboarding.json or committing onboarding memory.\n5. After confirmation, bootstrap/update Hird memory using hird_memory when durable conventions are found.\n\nEnd with: project summary, confirmed or proposed board/task source, ranking policy, and the recommended next action. If no task source exists, propose a lightweight local board and ask before creating it.`;
 	}
 
-	function hirdTeamPrompt(args: string): string {
-		return `Use Hird. Report team/status for this project and current goal.\n\nContext: ${args.trim() || "none"}\n\nUse existing onboarding and memory if available. Return: active mode, available Hird agents, recommended route, project onboarding status, task source status, current risks, and next recommended command. Do not create a board or pick a next task here; project/task setup belongs to /hird-onboard and task selection belongs to /hird-next after onboarding.`;
+	function hirdNextTask(args: string): string {
+		return `Select the next task ONLY from the onboarded project's defined board/task sources.\n\nConstraints/user context: ${args.trim() || "none"}\n\nRules:\n1. Read .pi/hird/onboarding.json first. If it is missing, incomplete, or has no task_sources, stop and tell the user to run /hird-onboard. Do not scan arbitrary TODOs, use default GitHub queries, or invent a board.\n2. Query only the recorded task_sources, in their recorded priority order.\n3. Rank candidates using the recorded ranking_policy, plus the user's constraints above.\n4. Propose exactly one next task with: source, id/link/path, why it wins, dependencies/blockers, likely files, validation approach, and recommended Hird team route.\n5. Do not start implementation or update the board unless the user explicitly confirms. Gate any external board writes.`;
 	}
 
-	function hirdShipPrompt(args: string): string {
-		return `Use Hird. Prepare the current work item for shipping.\n\nTarget/constraints: ${args.trim() || "current work"}\n\nUse onboarded project context and Hird memory if available. Check git state, validation commands, tests/build/lint, docs/changelog needs, open blockers, QA ladder, and release/rollback risks. End with a ship/no-ship recommendation and exact remaining actions. Do not run destructive/external release actions without explicit confirmation.`;
+	function hirdTeamTask(args: string): string {
+		return `Report team/status for this project and current goal.\n\nContext: ${args.trim() || "none"}\n\nUse existing onboarding and memory if available. Return: active mode, available Hird agents, recommended route, project onboarding status, task source status, current risks, and next recommended command. Do not create a board or pick a next task here; project/task setup belongs to /hird-onboard and task selection belongs to /hird-next after onboarding.`;
 	}
 
-	function hirdWorkflowPrompt(args: string): string {
-		return `Use Hird. Define or refine the Hird workflow for this project.\n\nGoal: ${args.trim() || "fit Hird workflow to this repository"}\n\nUse onboarding context if available. Do not create a separate next-task setup here. Return a lightweight workflow covering intake, onboarding, task-source priority, planning, agent assignment, implementation, review, testing, shipping, memory updates, and status reporting.`;
+	function hirdShipTask(args: string): string {
+		return `Prepare the current work item for shipping.\n\nTarget/constraints: ${args.trim() || "current work"}\n\nUse onboarded project context and Hird memory if available. Check git state, validation commands, tests/build/lint, docs/changelog needs, open blockers, QA ladder, and release/rollback risks. End with a ship/no-ship recommendation and exact remaining actions. Do not run destructive/external release actions without explicit confirmation.`;
+	}
+
+	function hirdWorkflowTask(args: string): string {
+		return `Define or refine the Hird workflow for this project.\n\nGoal: ${args.trim() || "fit Hird workflow to this repository"}\n\nUse onboarding context if available. Do not create a separate next-task setup here. Return a lightweight workflow covering intake, onboarding, task-source priority, planning, agent assignment, implementation, review, testing, shipping, memory updates, and status reporting.`;
 	}
 
 	const agentInfoSchema = Type.Object({
@@ -1414,35 +1419,32 @@ export default function hird(pi: ExtensionAPI) {
 
 	pi.registerCommand("hird", {
 		description: "Kick off the Hird orchestrator protocol for your next request",
-		handler: async (args: string, ctx: any) => {
-			const task = args.trim() || "Introduce yourself, show the Hird activation modes, and ask what engineering task to take on.";
-			await sendHirdKickoff(ctx, `Use Hird. ${task}`);
-		},
+		handler: async (args: string, ctx: any) => runHird(ctx, args),
 	});
 
 	pi.registerCommand("hird-onboard", {
 		description: "Onboard Hird to this project and define task/board sources",
-		handler: async (args: string, ctx: any) => sendHirdKickoff(ctx, hirdOnboardPrompt(args)),
+		handler: async (args: string, ctx: any) => runHird(ctx, hirdOnboardTask(args)),
 	});
 
 	pi.registerCommand("hird-next", {
 		description: "Select the next task from the onboarded board/task sources",
-		handler: async (args: string, ctx: any) => sendHirdKickoff(ctx, hirdNextPrompt(args)),
+		handler: async (args: string, ctx: any) => runHird(ctx, hirdNextTask(args)),
 	});
 
 	pi.registerCommand("hird-team", {
 		description: "Show Hird team/status for this project",
-		handler: async (args: string, ctx: any) => sendHirdKickoff(ctx, hirdTeamPrompt(args)),
+		handler: async (args: string, ctx: any) => runHird(ctx, hirdTeamTask(args)),
 	});
 
 	pi.registerCommand("hird-ship", {
 		description: "Run Hird shipping readiness checks for current work",
-		handler: async (args: string, ctx: any) => sendHirdKickoff(ctx, hirdShipPrompt(args)),
+		handler: async (args: string, ctx: any) => runHird(ctx, hirdShipTask(args)),
 	});
 
 	pi.registerCommand("hird-workflow", {
 		description: "Define or refine the Hird project workflow",
-		handler: async (args: string, ctx: any) => sendHirdKickoff(ctx, hirdWorkflowPrompt(args)),
+		handler: async (args: string, ctx: any) => runHird(ctx, hirdWorkflowTask(args)),
 	});
 
 	pi.registerCommand("hird-view", {
