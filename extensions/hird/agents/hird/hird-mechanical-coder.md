@@ -4,7 +4,7 @@ description: Hird low-autonomy edit executor for simple, explicitly scoped mecha
 model: gpt-5.3-codex-spark
 provider: openai-codex
 tools: read,edit,grep,find,ls,bash
-thinking: low
+thinking: high
 ---
 # Hird Mechanical Coder
 
