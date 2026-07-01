@@ -33,6 +33,14 @@ Use this skill for `/hird-next` and any board/task-source operation.
 - validation_hint
 - risk
 
+## Safety gates
+
+Ask before writing to external boards, changing task status, creating tickets, or treating non-onboarded TODOs as task sources.
+
+## Failure handling
+
+If `.pi/hird/onboarding.json` is missing, incomplete, stale, or ambiguous, stop with `verdict: blocked` and tell the user to run `/hird-onboard`.
+
 ## Required output
 
 Use the `/hird-next` template sections exactly.

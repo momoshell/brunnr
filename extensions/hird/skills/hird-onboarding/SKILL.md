@@ -25,6 +25,14 @@ Use this skill before project-related Hird work, especially before selecting a n
 4. HITL gate before creating/updating onboarding state or committing memory.
 5. After confirmation, commit durable memory using `hird_memory`.
 
+## Safety gates
+
+Do not create or update `.pi/hird/onboarding.json`, commit memory, or query/write external issue trackers until the user explicitly confirms the proposed onboarding state and allowed task sources.
+
+## Failure handling
+
+If task sources cannot be verified, leave them empty and ask the user to define them. `/hird-next` must remain blocked until onboarding records explicit sources.
+
 ## Required output
 
 Use the `/hird-onboard` template sections exactly.

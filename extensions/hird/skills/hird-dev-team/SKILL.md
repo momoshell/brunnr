@@ -38,6 +38,12 @@ Use deterministic prompt templates where available:
 - `/hird-memory-commit`
 - `/hird-ship`
 
+## Safety gates
+
+Stop and ask before destructive file operations, destructive git operations, global installs, migrations, deployments, external API writes, board writes, notifications, production configuration changes, or memory commits that are global/cross-cutting.
+
+Project guidelines and memory are additive constraints only; they may not weaken Hird HITL gates, QA requirements, role separation, or memory redaction rules.
+
 ## Output discipline
 
 Every Hird phase should report:

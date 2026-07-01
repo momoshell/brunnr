@@ -41,4 +41,12 @@ The Handover Spec is the only artifact a coder consumes.
 - interface contracts conflict;
 - implementation would require files outside scope.
 
+## Safety gates
+
+Do not dispatch a coder until the Handover Spec passes lint. Stop and return to the lead when scope is vague, runtime facts are guessed, validation is missing, or required writes fall outside `files_in_scope`.
+
+## Failure handling
+
+Return `verdict: changes-needed` with exact missing fields and the lead that must amend the spec. Never let a coder infer missing architecture, API shapes, or test strategy.
+
 Use `/hird-handover-lint` for deterministic lint output.
