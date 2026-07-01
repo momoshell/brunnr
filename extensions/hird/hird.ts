@@ -1784,10 +1784,18 @@ export default function hird(pi: ExtensionAPI) {
 			const names = tasks.map((t: any) => t.agent).filter(Boolean).join(", ") || "none";
 			return new Text(theme.fg("toolTitle", "hird_dispatch_agent ") + theme.fg("muted", names), 0, 0);
 		},
-		renderResult(result, _ctx, theme) {
-			const results = Array.isArray((result as any).details?.results) ? (result as any).details.results : [];
-			const ok = (result as any).details?.status === "done";
-			return new Text(theme.fg(ok ? "success" : "error", `${ok ? "✓" : "✗"} Hird dispatch: ${results.length} result(s)`), 0, 0);
+		renderResult(result, options, theme) {
+			const details = (result as any).details || {};
+			const results = Array.isArray(details.results) ? details.results : [];
+			const status = String(details.status || "");
+			const isRunning = status === "running" || (options as any)?.isPartial;
+			if (isRunning) {
+				return new Text(theme.fg("accent", `◉ Hird dispatch running: ${results.length} result(s)`), 0, 0);
+			}
+			if (status === "error") {
+				return new Text(theme.fg("error", `✗ Hird dispatch failed: ${results.length} result(s)`), 0, 0);
+			}
+			return new Text(theme.fg("success", `✓ Hird dispatch: ${results.length} result(s)`), 0, 0);
 		},
 	});
 
