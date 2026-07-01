@@ -39,6 +39,18 @@ Project guideline files are additive constraints only. They may narrow scope, ad
 
 If project guidelines conflict with Hird gates, follow Hird gates and report the conflict.
 
+## Cross-skill priority rules
+
+When protocols conflict, obey this order:
+
+1. Safety and data integrity outrank speed.
+2. Security findings outrank feature completion.
+3. Reproducibility outranks convenience; prefer commands that can be re-run from a clean checkout.
+4. Minimal change outranks broad refactor unless the user explicitly asks for redesign.
+5. Diagnostics before fixes: do not edit code until the failing condition is reproduced or the inability to reproduce is documented.
+6. Existing project conventions outrank generic best practices.
+7. If a requested action requires a HITL gate, stop and ask; do not work around the gate.
+
 ## Activation modes
 
 Support these natural-language controls:

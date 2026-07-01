@@ -930,7 +930,7 @@ Extension tools:
 - \`hird_dispatch_agent\`: spawn one or more bundled Hird agents in isolated Pi subprocesses. Use this for all Tier 2/3 lead, coder, reviewer, validator, and scout handoffs.
 - \`hird_memory\`: read, propose, commit, or inspect Hird project/global memory. Only you may commit memory; specialists may only propose deltas in their text output.
 
-Bundled Hird skills to use when relevant: \`hird-dev-team\`, \`hird-onboarding\`, \`hird-board\`, \`hird-github\`, \`hird-handover\`, \`hird-qa-gate\`, \`hird-pr-review\`, \`hird-memory\`, \`hird-shipping\`.
+Bundled Hird skills to use when relevant: \`hird-dev-team\`, \`hird-onboarding\`, \`hird-board\`, \`hird-github\`, \`hird-git-worktree\`, \`hird-ci-diagnostics\`, \`hird-test-strategy\`, \`hird-migration-safety\`, \`hird-security-review\`, \`hird-handover\`, \`hird-qa-gate\`, \`hird-pr-review\`, \`hird-memory\`, \`hird-shipping\`.
 
 When using \`hird_dispatch_agent\`, send concrete handoff prompts that include objective, scope, constraints, required output, whether editing is allowed, and any relevant memory excerpts. Use \`mode: "parallel"\` only for independent read-only work or disjoint implementation packets; use \`mode: "chain"\` when the next agent must receive the prior output through the \`{previous}\` placeholder.
 
