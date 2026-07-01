@@ -25,6 +25,14 @@ Use this skill before project-related Hird work, especially before selecting a n
 4. HITL gate before creating/updating onboarding state or committing memory.
 5. After confirmation, commit durable memory using `hird_memory`.
 
+## Public output rule
+
+During onboarding, user-visible text must contain only concise status, evidence, proposed state, missing evidence, and HITL questions. Do not expose scratchpad-style troubleshooting, command-output debugging, or speculative narration.
+
+If command output is truncated or inconclusive, state it only as an evidence limitation:
+
+`Evidence note: <source/command> was <truncated|empty|unavailable|inconclusive>; using <fallback|limitation>.`
+
 ## Safety gates
 
 Do not create or update `.pi/hird/onboarding.json`, commit memory, or query/write external issue trackers until the user explicitly confirms the proposed onboarding state and allowed task sources.

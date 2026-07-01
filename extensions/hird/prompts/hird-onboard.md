@@ -9,6 +9,14 @@ Repository: {{cwd}}
 
 Onboarding owns all project-related setup, including next-task/board discovery. Do not implement product code during onboarding unless the user explicitly asks.
 
+## Public transcript discipline
+
+User-visible output must be concise status and evidence only. Do not expose scratchpad-style narration, uncertainty loops, or tool-output troubleshooting such as “Investigating bash output”, “Maybe output was truncated”, “I’m checking why”, or speculative hypotheses about command behavior.
+
+When tool output is long, truncated, malformed, missing, or surprising, do not narrate the investigation. Continue with tools silently where appropriate, then report only the stable result as:
+
+`Evidence note: <source/command> was <truncated|empty|unavailable|inconclusive>; using <specific fallback or limitation>.`
+
 Deterministic flow:
 1. Inspect project guidance and setup: AGENTS.md, CLAUDE.md, README, package/tool files, CI, tests, current git state, and existing `.pi/hird` memory/state.
 2. Discover the task/board source of truth in priority order. Check explicit local board/backlog files first, then repo docs, then available issue tracker references/CLI config. Do not invent a board.
@@ -29,6 +37,8 @@ Output exactly:
 ## Proposed Ranking Policy
 
 ## Memory Updates Proposed
+
+## Evidence Notes
 
 ## HITL Confirmation Needed
 

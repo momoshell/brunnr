@@ -1105,6 +1105,7 @@ export default function hird(pi: ExtensionAPI) {
 	let previousThemeName: string | undefined;
 	let cachedSystemPrompt: string | undefined;
 	let widgetCtx: any;
+	let hintsVisible = true;
 	let activityVisible = true;
 	let activityMode: HirdViewMode = "lanes";
 	let activityRevision = 0;
@@ -1135,6 +1136,46 @@ export default function hird(pi: ExtensionAPI) {
 			console.error(`[hird] setWidget(${key}) failed: ${errMsg(err)}`);
 			return false;
 		}
+	}
+
+	function hirdStartLines(): string[] {
+		return [
+			"ᚺ Hird is active — disciplined lead → coder → QA engineering retinue.",
+			"Start: /hird or F10 opens selector. Help: /hird-help.",
+			"New project: /hird-onboard → /hird-workflow → /hird-next → /hird <task> → /hird-ship",
+			"Deterministic flows: /hird-handover-lint · /hird-qa-gate · /hird-pr-review · /hird-memory-commit",
+			"Activity: F8 toggle · F9 lanes/orbit. Roster: /hird-agents. Status: /hird-team.",
+			"Hints: F7 or /hird-hints toggles this panel.",
+		];
+	}
+
+	function renderHirdHints(ctx = widgetCtx): void {
+		if (!ctx) return;
+		if (!hintsVisible) {
+			setWidgetSafe(ctx, "hird-start", undefined);
+			return;
+		}
+		setWidgetSafe(ctx, "hird-start", (_tui: any, theme: any) => ({
+			render(width: number): string[] {
+				return hirdStartLines().map(line => {
+					if (line.startsWith("New project:")) return truncateToWidth(theme.fg("accent", theme.bold(line)), width);
+					if (line.startsWith("Hints:")) return truncateToWidth(theme.fg("dim", line), width);
+					return truncateToWidth(line, width);
+				});
+			},
+			invalidate(): void {},
+		}), { placement: "aboveEditor" });
+	}
+
+	function toggleHirdHints(ctx: any): void {
+		widgetCtx = ctx ?? widgetCtx;
+		if (ctx?.cwd) {
+			currentCwd = ctx.cwd;
+			hirdProjectCwd = ctx.cwd;
+		}
+		hintsVisible = !hintsVisible;
+		renderHirdHints(widgetCtx);
+		notifySafe(ctx ?? widgetCtx, hintsVisible ? "Hird startup hints shown" : "Hird startup hints hidden", "info");
 	}
 
 	function setEditorTextSafe(ctx: any, text: string): boolean {
@@ -1393,9 +1434,10 @@ export default function hird(pi: ExtensionAPI) {
 			"UI:",
 			"  /hird                  open selector; /hird <task> runs directly",
 			"  /hird-help             show this cheat sheet",
+			"  /hird-hints            toggle startup hints (F7)",
 			"  /hird-agents           show roster",
 			"  /hird-view lanes|orbit control activity view",
-			"  F8 toggle activity · F9 lanes/orbit · F10 selector",
+			"  F7 hints · F8 toggle activity · F9 lanes/orbit · F10 selector",
 			"",
 			"Project guideline files:",
 			"  .pi/hird/HIRD_GUIDELINES.md",
@@ -1816,6 +1858,7 @@ export default function hird(pi: ExtensionAPI) {
 	});
 
 	registerHirdCommand("hird-help", "Show Hird command cheat sheet", async (_args, ctx) => showHirdHelp(ctx));
+	registerHirdCommand("hird-hints", "Toggle the Hird startup hint widget", async (_args, ctx) => toggleHirdHints(ctx));
 	registerHirdCommand("hird-onboard", "Onboard Hird to this project and define task/board sources", async (args, ctx) => runRenderedFlow(ctx, "onboard", args, "hird-onboard"));
 	registerHirdCommand("hird-next", "Select the next task from the onboarded board/task sources", async (args, ctx) => runRenderedFlow(ctx, "next", args, "hird-next"));
 	registerHirdCommand("hird-team", "Show Hird team/status for this project", async (args, ctx) => runRenderedFlow(ctx, "team", args, "hird-team"));
@@ -1840,6 +1883,16 @@ export default function hird(pi: ExtensionAPI) {
 		updateActivityWidget();
 		bumpActivity();
 		notifySafe(ctx, `Hird activity view: ${activityVisible ? activityMode : "hidden"}`, "info");
+	});
+
+	pi.registerShortcut("f7", {
+		description: "Toggle Hird startup hints",
+		handler: async (ctx: any) => {
+			try {
+				if (ctx?.hasUI === false) return;
+				toggleHirdHints(ctx);
+			} catch (err) { notifySafe(ctx, `Hird F7 failed: ${errMsg(err)}`, "warning"); }
+		},
 	});
 
 	pi.registerShortcut("f8", {
@@ -1928,13 +1981,7 @@ export default function hird(pi: ExtensionAPI) {
 		try { ctx?.ui?.setStatus?.("hird", `Hird (${agents.length} agents)`); } catch {}
 		notifySafe(ctx, `Hird loaded: ${agents.length} agents, ${Object.keys(teams).length} teams. Start with /hird-onboard for project work.`, "success");
 		if (assetWarnings.length) notifySafe(ctx, `Hird asset validation warnings: ${assetWarnings.slice(0, 3).join("; ")}${assetWarnings.length > 3 ? " …" : ""}`, "warning");
-		setWidgetSafe(ctx, "hird-start", [
-			"ᚺ Hird is active — disciplined lead → coder → QA engineering retinue.",
-			"Start: /hird or F10 opens selector. Help: /hird-help.",
-			"New project: /hird-onboard → /hird-workflow → /hird-next → /hird <task> → /hird-ship",
-			"Deterministic flows: /hird-handover-lint · /hird-qa-gate · /hird-pr-review · /hird-memory-commit",
-			"Activity: F8 toggle · F9 lanes/orbit. Roster: /hird-agents. Status: /hird-team.",
-		]);
+		renderHirdHints(ctx);
 		updateActivityWidget();
 	});
 
