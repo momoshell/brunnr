@@ -53,10 +53,13 @@ The review identifies correctness, security, reliability, maintainability, test,
 3. Read the full relevant diff and surrounding source when context is needed.
 4. Trace call sites, data flow, error handling, permissions, persistence, and public contracts affected by the change.
 5. Inspect tests, docs, configuration, CI, and validation output relevant to the changed behavior.
-6. Escalate to deep/adversarial reviewer lenses for auth, secrets, payments, PII, migrations, infra, public APIs, concurrency, broad refactors, or high-risk changes.
-7. Classify findings and sort by criticality.
-8. Draft one inline comment suggestion per concrete finding.
-9. Produce the `/hird-pr-review` output contract exactly.
+6. Dispatch `hird-qa-lead` first for every PR review; the orchestrator must not jump straight to a code reviewer.
+7. Dispatch relevant domain lead(s) before code review when the diff has an identifiable domain: `hird-frontend-lead`, `hird-backend-lead`, `hird-devops-lead`, or `hird-architecture-lead`. If no domain applies, record why.
+8. Escalate to standard/deep/adversarial reviewer lenses based on QA lead routing and domain-lead risk notes.
+9. Dispatch `hird-build-validator` when safe deterministic validation is identified.
+10. Classify findings and sort by criticality.
+11. Draft one inline comment suggestion per concrete finding.
+12. Produce the `/hird-pr-review` output contract exactly.
 
 ## Criticality sorting
 
@@ -112,6 +115,7 @@ Use `/hird-pr-review` for the canonical visually marked output:
 
 - at-a-glance severity table;
 - `result: no-blocking-findings | comment | request-changes | blocked`;
+- specialist dispatch record including QA lead, applicable domain leads, reviewer(s), and validator;
 - criticality-sorted findings;
 - suggested inline comments for each finding;
 - validation evidence;
@@ -121,10 +125,10 @@ Use `/hird-pr-review` for the canonical visually marked output:
 
 ## Verdict rules
 
-- Use `request-changes` for any unresolved critical or high finding.
-- Use `blocked` when the diff, base, changed files, or required context cannot be inspected.
-- Use `comment` when all findings are non-blocking.
-- Use `no-blocking-findings` only when inspection and validation evidence are sufficient and no critical/high findings remain.
+- Use `blocked` when required QA lead or reviewer dispatch is missing, malformed, truncated, inconclusive, or when the diff/base/context cannot be inspected.
+- Use `request-changes` for any unresolved critical/high finding or any required reviewer `verdict: changes-needed`.
+- Use `comment` when all required specialists completed and all findings are non-blocking.
+- Use `no-blocking-findings` only when QA lead, applicable domain lead(s), required reviewer(s), and required validation completed or were explicitly not needed with evidence.
 - Missing validation for risky changes prevents `no-blocking-findings`.
 - Passing tests do not override a code-level blocker.
 

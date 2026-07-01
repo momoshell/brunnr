@@ -7,16 +7,22 @@ Run a read-only Hird PR review.
 Target/focus: {{args}}
 Repository: {{cwd}}
 
-This is a findings-only PR review. It is NOT a QA gate, NOT ship readiness, and NOT external PR action. Do not edit files, post comments, approve, request changes in GitHub/GitLab, merge, push, deploy, or alter branch state. Produce suggested inline comments only.
+This is a findings-only PR review performed by Hird specialists under orchestrator synthesis. It is NOT a QA gate, NOT ship readiness, and NOT external PR action. The orchestrator MUST NOT do the substantive review solo. Do not edit files, post comments, approve, request changes in GitHub/GitLab, merge, push, deploy, or alter branch state. Produce suggested inline comments only.
 
 ## Deterministic review flow
 
 1. Establish scope from the target/focus. If absent, inspect the current branch, git status, changed files, and likely base using read-only git commands. If the base or diff cannot be determined safely, return `result: blocked`.
 2. Inspect the relevant diff and surrounding code. Open tests, docs, config, CI, and call sites as needed for evidence.
-3. Route through Hird reviewers when useful:
-   - `hird-code-reviewer` for standard correctness/test/maintainability review.
-   - `hird-code-reviewer-deep` for auth, secrets, payments, PII, data migrations, infra, public APIs, concurrency, broad refactors, or high-risk changes.
-   - `hird-build-validator` only for safe read/build/test/lint validation evidence.
+3. Mandatory specialist dispatch. The orchestrator MUST NOT perform the substantive PR review solo. The orchestrator may establish scope, gather read-only evidence, prepare handoffs, validate specialist output shape, and synthesize the final report.
+
+   Use `hird_dispatch_agent` in this order:
+
+   1. `hird-qa-lead` — required for every PR review and must run before code reviewers. Ask it to assess risk, choose review tier, identify validation commands, and state whether build/test validation is needed. Required output must include: `verdict: gate-ready | needs-tests | blocked`, `review_tier: standard | deep | adversarial-panel`, `risk_reasons`, `validation_commands`, `test_engineer_needed`, `review_lenses`, and `blocking_issue_classes`.
+   2. Domain lead(s) — required when the diff has an identifiable domain. Dispatch at least one of `hird-frontend-lead`, `hird-backend-lead`, `hird-devops-lead`, or `hird-architecture-lead` based on changed files and QA lead risk reasons. Ask the lead to identify domain-specific risks, contracts, expected tests, and files that need reviewer attention. If no domain lead applies, record `domain_lead_status: not-applicable` with evidence.
+   3. `hird-code-reviewer` or `hird-code-reviewer-deep` — required for every PR review after QA lead/domain lead routing. Use `hird-code-reviewer` when QA lead selects `standard`; use `hird-code-reviewer-deep` when QA lead selects `deep`; if QA lead selects `adversarial-panel`, dispatch `hird-code-reviewer-deep` once per requested lens. Every reviewer output MUST begin exactly with `verdict: pass` or `verdict: changes-needed`.
+   4. `hird-build-validator` — required when QA lead lists safe validation commands or says validation is needed. The validator may run only safe read-only build/typecheck/test/lint commands. If validation cannot be run safely, record it as missing evidence; do not invent results.
+
+   If specialist dispatch is unavailable, blocked, missing, malformed, stale, truncated, or inconclusive, return `result: blocked`. Do not silently substitute a solo orchestrator review.
 4. Sort findings by criticality, highest first. Within the same criticality sort by user/runtime impact, confidence, then file path.
 5. For every finding, include a suggested inline comment. Do not post it.
 6. Avoid style-only nits unless they hide a real defect or project-convention risk. Avoid speculation; if evidence is insufficient, classify as `question` or `needs-evidence`.
@@ -31,10 +37,10 @@ This is a findings-only PR review. It is NOT a QA gate, NOT ship readiness, and 
 
 ## Verdict rules
 
-- `result: request-changes` if any unresolved 🔴 critical or 🟠 high finding exists.
-- `result: comment` if only 🟡 medium, 🔵 low, or ⚪ question items remain.
-- `result: no-blocking-findings` only if there are no critical/high findings and review evidence is sufficient. Do not call this approve/pass/ship-ready.
-- `result: blocked` if the PR/diff/base/context cannot be inspected or required evidence is unavailable.
+- `result: blocked` if required specialist dispatch is unavailable, missing, malformed, stale, truncated, inconclusive, or if the PR/diff/base/context cannot be inspected.
+- `result: request-changes` if any required reviewer returns `verdict: changes-needed`, or if any unresolved 🔴 critical or 🟠 high finding exists.
+- `result: comment` if all required specialists completed and only 🟡 medium, 🔵 low, or ⚪ question items remain.
+- `result: no-blocking-findings` only if QA lead and required reviewer(s) completed with usable evidence, validation is passed or explicitly not needed, and there are no critical/high findings. Do not call this approve/pass/ship-ready.
 
 Output exactly:
 
@@ -51,6 +57,14 @@ Output exactly:
 | ⚪ Question | 0 | needs author/context |
 
 - result: no-blocking-findings | comment | request-changes | blocked
+- dispatch_required: yes
+- dispatch_status: complete | incomplete | unavailable
+- qa_lead_verdict: gate-ready | needs-tests | blocked
+- review_tier: standard | deep | adversarial-panel
+- domain_leads_dispatched:
+- reviewers_dispatched:
+- build_validator_dispatched: yes | no
+- solo_orchestrator_review: prohibited
 - target:
 - base:
 - head:
@@ -58,6 +72,34 @@ Output exactly:
 - evidence_sources:
 - review_scope:
 - external_actions: none; comments are suggestions only
+
+## Specialist Dispatch Record
+
+- specialist: hird-qa-lead
+  status: completed | missing | malformed | blocked
+  required: yes
+  verdict:
+  review_tier:
+  evidence_summary:
+
+- specialist: hird-frontend-lead | hird-backend-lead | hird-devops-lead | hird-architecture-lead
+  status: completed | not-applicable | missing | malformed | blocked
+  required: yes-if-domain-applies
+  domain:
+  evidence_summary:
+
+- specialist: hird-code-reviewer | hird-code-reviewer-deep
+  status: completed | missing | malformed | blocked
+  required: yes
+  verdict: pass | changes-needed
+  lens: standard | correctness | security | rollback | general
+  evidence_summary:
+
+- specialist: hird-build-validator
+  status: completed | not-needed | missing | malformed | blocked
+  required: yes | no
+  pass: true | false | inconclusive
+  evidence_summary:
 
 ## Criticality-Sorted Findings
 

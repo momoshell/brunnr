@@ -1401,7 +1401,7 @@ export default function hird(pi: ExtensionAPI) {
 
 	async function runHird(ctx: any, task: string, command = "hird", args = ""): Promise<void> {
 		const body = task.trim() || "Introduce yourself, show the Hird activation modes, and ask what engineering task to take on.";
-		const envelope = [
+		const envelopeLines = [
 			"## Hird Command Envelope",
 			`- command: ${command}`,
 			`- cwd: ${ctx?.cwd || currentCwd}`,
@@ -1410,7 +1410,20 @@ export default function hird(pi: ExtensionAPI) {
 			"- must_use_template: true",
 			"- project_guidelines_are_additive_only: true",
 			"- completion_requires_declared_result: true",
-		].join("\n");
+		];
+		if (command === "hird-pr-review") {
+			envelopeLines.push(
+				"- dispatch_required: true",
+				"- required_dispatch_tool: hird_dispatch_agent",
+				"- first_specialist_required: hird-qa-lead",
+				"- domain_lead_required_when_applicable: hird-frontend-lead|hird-backend-lead|hird-devops-lead|hird-architecture-lead",
+				"- reviewer_after_leads: hird-code-reviewer|hird-code-reviewer-deep",
+				"- validator_when_safe_and_relevant: hird-build-validator",
+				"- solo_orchestrator_review: prohibited",
+				"- if_dispatch_not_possible_result: blocked",
+			);
+		}
+		const envelope = envelopeLines.join("\n");
 		await sendHirdKickoff(ctx, `Use Hird. Treat this as a /${command} orchestrator task.\n\n${envelope}\n\nTask:\n${body}\n\nRoute this through the Hird orchestrator protocol. Keep star topology: orchestrator talks to the user, specialists report back.`);
 	}
 

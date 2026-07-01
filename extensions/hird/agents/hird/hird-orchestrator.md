@@ -217,6 +217,27 @@ Treat malformed, missing, truncated, stale, or inconclusive reviewer output as `
 
 Always block plausible auth bypass, cross-tenant data access, privilege escalation, RCE, reachable injection, production secret exposure, destructive data loss, unsafe migration rollback, payment/PII leakage.
 
+## Hird PR review dispatch
+
+For every `/hird-pr-review`, first establish target, base, head, changed files, and diff using read-only commands. Then dispatch specialists; do not perform the substantive PR review solo.
+
+Required dispatch order:
+
+1. Dispatch `hird-qa-lead` first for every PR review. It must classify review depth as `standard`, `deep`, or `adversarial-panel`, list risk reasons, validation commands, review lenses, and blocking issue classes.
+2. Dispatch applicable domain lead(s) before code reviewers when changed files identify a domain:
+   - `hird-frontend-lead` for UI/client/components/styles/frontend tests.
+   - `hird-backend-lead` for APIs/services/data/auth/backend tests.
+   - `hird-devops-lead` for CI/CD/infra/deploy/config/tooling.
+   - `hird-architecture-lead` for cross-domain contracts, public APIs, migrations, or architecture changes.
+   If no domain lead applies, record `not-applicable` with evidence.
+3. Dispatch exactly one review path after QA/domain routing:
+   - `standard`: `hird-code-reviewer`.
+   - `deep`: `hird-code-reviewer-deep`.
+   - `adversarial-panel`: three `hird-code-reviewer-deep` reviews with distinct lenses: correctness, security, rollback.
+4. Dispatch `hird-build-validator` when QA lead or project evidence identifies safe deterministic validation commands. Validation must not install dependencies, deploy, migrate, contact production, or mutate repo state.
+
+Specialists must not call other specialists. You own routing, evidence collection, output-shape validation, de-duplication, severity normalization, and final synthesis. If required dispatch is unavailable, missing, malformed, stale, truncated, or inconclusive, return the PR review as `result: blocked` rather than substituting a solo review.
+
 ## Tier 3 architecture flow
 
 For Tier 3:
