@@ -100,7 +100,19 @@ interface HirdMemoryProposal {
 const VALID_THINKING: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 const EXT_DIR = dirname(fileURLToPath(import.meta.url));
 const HIRD_AGENT_DIR = join(EXT_DIR, "agents", "hird");
+const HIRD_PROMPTS_DIR = join(EXT_DIR, "prompts");
+const HIRD_SKILLS_DIR = join(EXT_DIR, "skills");
 const HIRD_THEME_NAME = "hird";
+const HIRD_FLOW_PROMPTS = {
+	onboard: "hird-onboard.md",
+	next: "hird-next.md",
+	team: "hird-team.md",
+	ship: "hird-ship.md",
+	workflow: "hird-workflow.md",
+	handoverLint: "hird-handover-lint.md",
+	qaGate: "hird-qa-gate.md",
+	memoryCommit: "hird-memory-commit.md",
+} as const;
 const PROJECT_MEMORY_FILES: Record<HirdMemoryFile, string> = {
 	conventions: "conventions.md",
 	frontend: "frontend-notes.md",
@@ -787,11 +799,15 @@ function buildOrchestratorPrompt(agents: HirdAgent[], teams: Record<string, stri
 
 ## Extension runtime
 
-The Hird extension is active. You have two extension tools:
+The Hird extension is active. You have bundled Hird skills and deterministic prompt templates for onboarding, next-task selection, workflow, handover lint, QA gate, memory commit, and shipping. Prefer these fixed flows over freeform prose.
+
+Extension tools:
 
 - \`hird_agent_info\`: list or inspect bundled Hird agents and teams.
 - \`hird_dispatch_agent\`: spawn one or more bundled Hird agents in isolated Pi subprocesses. Use this for all Tier 2/3 lead, coder, reviewer, validator, and scout handoffs.
 - \`hird_memory\`: read, propose, commit, or inspect Hird project/global memory. Only you may commit memory; specialists may only propose deltas in their text output.
+
+Bundled Hird skills to use when relevant: \`hird-dev-team\`, \`hird-onboarding\`, \`hird-board\`, \`hird-handover\`, \`hird-qa-gate\`, \`hird-memory\`, \`hird-shipping\`.
 
 When using \`hird_dispatch_agent\`, send concrete handoff prompts that include objective, scope, constraints, required output, whether editing is allowed, and any relevant memory excerpts. Use \`mode: "parallel"\` only for independent read-only work or disjoint implementation packets; use \`mode: "chain"\` when the next agent must receive the prior output through the \`{previous}\` placeholder.
 
@@ -1061,6 +1077,23 @@ export default function hird(pi: ExtensionAPI) {
 		return prompt.split("\n").map(line => line.trim()).find(Boolean)?.slice(0, 120) || "assigned handoff";
 	}
 
+	function safePromptPath(fileName: string): string {
+		if (!/^[A-Za-z0-9_.-]+\.md$/.test(fileName)) throw new Error(`Invalid Hird prompt file name: ${fileName}`);
+		const path = resolve(HIRD_PROMPTS_DIR, fileName);
+		if (!isInside(HIRD_PROMPTS_DIR, path)) throw new Error("Refusing to read prompt outside Hird prompt directory");
+		return path;
+	}
+
+	function renderFlowTemplate(flow: keyof typeof HIRD_FLOW_PROMPTS, args: string): string {
+		const raw = readFileSync(safePromptPath(HIRD_FLOW_PROMPTS[flow]), "utf-8");
+		const { body } = parseFrontmatter<Record<string, unknown>>(raw);
+		const userArgs = args.trim() || "none";
+		return (body || raw)
+			.replaceAll("{{args}}", userArgs)
+			.replaceAll("{{cwd}}", process.cwd())
+			.trim();
+	}
+
 	async function sendHirdKickoff(ctx: any, prompt: string): Promise<void> {
 		try {
 			if (ctx?.isIdle && !ctx.isIdle()) {
@@ -1075,26 +1108,6 @@ export default function hird(pi: ExtensionAPI) {
 	async function runHird(ctx: any, task: string): Promise<void> {
 		const body = task.trim() || "Introduce yourself, show the Hird activation modes, and ask what engineering task to take on.";
 		await sendHirdKickoff(ctx, `Use Hird. Treat this as a /hird orchestrator task.\n\nTask:\n${body}\n\nRoute this through the Hird orchestrator protocol. Keep star topology: orchestrator talks to the user, specialists report back.`);
-	}
-
-	function hirdOnboardTask(args: string): string {
-		return `Run PROJECT ONBOARDING for this repository.\n\nUser context: ${args.trim() || "General project onboarding."}\n\nOnboarding owns all project-related setup, including next-task/board discovery. Do not implement product code during onboarding unless the user explicitly asks.\n\nRequired flow:\n1. Inspect project guidance and setup: AGENTS.md, CLAUDE.md, README, package/tool files, CI, tests, current git state, and existing .pi/hird memory.\n2. Discover the task/board source of truth in priority order. Check explicit local board/backlog files first, then repo docs, then available issue tracker references/CLI config. Do not invent a board.\n3. Produce a proposed onboarding record for .pi/hird/onboarding.json containing: status, project_summary, setup_commands, validation_commands, task_sources[], ranking_policy, next_task_rules, memory_files, and last_confirmed_at.\n4. HITL gate: summarize discovered setup, task sources, ranking policy, and proposed /hird-next behavior. Wait for explicit confirmation before creating or updating .pi/hird/onboarding.json or committing onboarding memory.\n5. After confirmation, bootstrap/update Hird memory using hird_memory when durable conventions are found.\n\nEnd with: project summary, confirmed or proposed board/task source, ranking policy, and the recommended next action. If no task source exists, propose a lightweight local board and ask before creating it.`;
-	}
-
-	function hirdNextTask(args: string): string {
-		return `Select the next task ONLY from the onboarded project's defined board/task sources.\n\nConstraints/user context: ${args.trim() || "none"}\n\nRules:\n1. Read .pi/hird/onboarding.json first. If it is missing, incomplete, or has no task_sources, stop and tell the user to run /hird-onboard. Do not scan arbitrary TODOs, use default GitHub queries, or invent a board.\n2. Query only the recorded task_sources, in their recorded priority order.\n3. Rank candidates using the recorded ranking_policy, plus the user's constraints above.\n4. Propose exactly one next task with: source, id/link/path, why it wins, dependencies/blockers, likely files, validation approach, and recommended Hird team route.\n5. Do not start implementation or update the board unless the user explicitly confirms. Gate any external board writes.`;
-	}
-
-	function hirdTeamTask(args: string): string {
-		return `Report team/status for this project and current goal.\n\nContext: ${args.trim() || "none"}\n\nUse existing onboarding and memory if available. Return: active mode, available Hird agents, recommended route, project onboarding status, task source status, current risks, and next recommended command. Do not create a board or pick a next task here; project/task setup belongs to /hird-onboard and task selection belongs to /hird-next after onboarding.`;
-	}
-
-	function hirdShipTask(args: string): string {
-		return `Prepare the current work item for shipping.\n\nTarget/constraints: ${args.trim() || "current work"}\n\nUse onboarded project context and Hird memory if available. Check git state, validation commands, tests/build/lint, docs/changelog needs, open blockers, QA ladder, and release/rollback risks. End with a ship/no-ship recommendation and exact remaining actions. Do not run destructive/external release actions without explicit confirmation.`;
-	}
-
-	function hirdWorkflowTask(args: string): string {
-		return `Define or refine the Hird workflow for this project.\n\nGoal: ${args.trim() || "fit Hird workflow to this repository"}\n\nUse onboarding context if available. Do not create a separate next-task setup here. Return a lightweight workflow covering intake, onboarding, task-source priority, planning, agent assignment, implementation, review, testing, shipping, memory updates, and status reporting.`;
 	}
 
 	const agentInfoSchema = Type.Object({
@@ -1450,27 +1463,42 @@ export default function hird(pi: ExtensionAPI) {
 
 	pi.registerCommand("hird-onboard", {
 		description: "Onboard Hird to this project and define task/board sources",
-		handler: async (args: string, ctx: any) => runHird(ctx, hirdOnboardTask(args)),
+		handler: async (args: string, ctx: any) => runHird(ctx, renderFlowTemplate("onboard", args)),
 	});
 
 	pi.registerCommand("hird-next", {
 		description: "Select the next task from the onboarded board/task sources",
-		handler: async (args: string, ctx: any) => runHird(ctx, hirdNextTask(args)),
+		handler: async (args: string, ctx: any) => runHird(ctx, renderFlowTemplate("next", args)),
 	});
 
 	pi.registerCommand("hird-team", {
 		description: "Show Hird team/status for this project",
-		handler: async (args: string, ctx: any) => runHird(ctx, hirdTeamTask(args)),
+		handler: async (args: string, ctx: any) => runHird(ctx, renderFlowTemplate("team", args)),
 	});
 
 	pi.registerCommand("hird-ship", {
 		description: "Run Hird shipping readiness checks for current work",
-		handler: async (args: string, ctx: any) => runHird(ctx, hirdShipTask(args)),
+		handler: async (args: string, ctx: any) => runHird(ctx, renderFlowTemplate("ship", args)),
 	});
 
 	pi.registerCommand("hird-workflow", {
 		description: "Define or refine the Hird project workflow",
-		handler: async (args: string, ctx: any) => runHird(ctx, hirdWorkflowTask(args)),
+		handler: async (args: string, ctx: any) => runHird(ctx, renderFlowTemplate("workflow", args)),
+	});
+
+	pi.registerCommand("hird-handover-lint", {
+		description: "Lint a Hird Handover Spec for implementation readiness",
+		handler: async (args: string, ctx: any) => runHird(ctx, renderFlowTemplate("handoverLint", args)),
+	});
+
+	pi.registerCommand("hird-qa-gate", {
+		description: "Run a deterministic Hird QA gate for a task or diff",
+		handler: async (args: string, ctx: any) => runHird(ctx, renderFlowTemplate("qaGate", args)),
+	});
+
+	pi.registerCommand("hird-memory-commit", {
+		description: "Propose or commit durable Hird memory from current context",
+		handler: async (args: string, ctx: any) => runHird(ctx, renderFlowTemplate("memoryCommit", args)),
 	});
 
 	pi.registerCommand("hird-view", {
@@ -1515,6 +1543,13 @@ export default function hird(pi: ExtensionAPI) {
 		},
 	});
 
+	pi.on("resources_discover", async () => {
+		const resources: { skillPaths?: string[]; promptPaths?: string[] } = {};
+		if (existsSync(HIRD_SKILLS_DIR)) resources.skillPaths = [HIRD_SKILLS_DIR];
+		if (existsSync(HIRD_PROMPTS_DIR)) resources.promptPaths = [HIRD_PROMPTS_DIR];
+		return resources;
+	});
+
 	pi.on("before_agent_start", async () => {
 		if (!cachedSystemPrompt) cachedSystemPrompt = buildOrchestratorPrompt(agents, teams);
 		const memory = hirdMemoryContext();
@@ -1548,9 +1583,9 @@ export default function hird(pi: ExtensionAPI) {
 			ctx.ui.notify(`Hird loaded: ${agents.length} agents, ${Object.keys(teams).length} teams. Start with /hird-onboard for project work.`, "success");
 			ctx.ui.setWidget("hird-start", [
 				"ᚺ Hird is active — disciplined lead → coder → QA engineering retinue.",
-				"Project work starts with /hird-onboard; /hird-next uses only onboarded board sources.",
-				"Activity lanes are shown above the editor. f8 toggles, f9 switches orbit/lanes.",
-				"Use /hird <task> for direct Hird work, /hird-team for status, or /hird-agents for the roster.",
+				"New project: /hird-onboard → /hird-workflow → /hird-next → /hird <task> → /hird-ship",
+				"Deterministic flows: /hird-handover-lint · /hird-qa-gate · /hird-memory-commit",
+				"Activity: F8 toggle · F9 lanes/orbit. Roster: /hird-agents. Status: /hird-team.",
 			]);
 			updateActivityWidget();
 		} catch {}
