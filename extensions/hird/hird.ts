@@ -113,6 +113,16 @@ const HIRD_FLOW_PROMPTS = {
 	qaGate: "hird-qa-gate.md",
 	memoryCommit: "hird-memory-commit.md",
 } as const;
+const HIRD_GUIDELINE_FILES = [
+	"HIRD_GUIDELINES.md",
+	"QA_GUIDELINES.md",
+	"ARCHITECTURE_GUIDELINES.md",
+	"FRONTEND_GUIDELINES.md",
+	"BACKEND_GUIDELINES.md",
+	"DEVOPS_GUIDELINES.md",
+	"SHIPPING_GUIDELINES.md",
+	"BOARD_GUIDELINES.md",
+] as const;
 const PROJECT_MEMORY_FILES: Record<HirdMemoryFile, string> = {
 	conventions: "conventions.md",
 	frontend: "frontend-notes.md",
@@ -132,8 +142,19 @@ function isInside(parent: string, child: string): boolean {
 	return rel === "" || (!rel.startsWith("..") && !rel.includes(`..${sep}`));
 }
 
+function projectHirdRoot(cwd = process.cwd()): string {
+	return resolve(cwd, ".pi", "hird");
+}
+
+function safeProjectHirdPath(cwd: string, ...parts: string[]): string {
+	const root = projectHirdRoot(cwd);
+	const path = resolve(root, ...parts);
+	if (!isInside(root, path)) throw new Error("Refusing path outside project Hird root");
+	return path;
+}
+
 function projectMemoryRoot(): string {
-	return resolve(process.cwd(), ".pi", "hird", "memory");
+	return resolve(projectHirdRoot(), "memory");
 }
 
 function globalMemoryRoot(): string {
@@ -196,6 +217,18 @@ function atomicWrite(path: string, content: string): void {
 	const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
 	writeFileSync(tmp, content, { encoding: "utf-8", mode: 0o600 });
 	renameSync(tmp, path);
+}
+
+function readSmallTextFile(path: string, maxBytes = 64_000): string | undefined {
+	try {
+		if (!existsSync(path)) return undefined;
+		const stat = statSync(path);
+		if (!stat.isFile()) return undefined;
+		const raw = readFileSync(path, "utf-8");
+		return raw.length > maxBytes ? raw.slice(0, maxBytes) + "\n\n[truncated]" : raw;
+	} catch {
+		return undefined;
+	}
 }
 
 function writeProposals(target: HirdMemoryScope, proposals: HirdMemoryProposal[]): void {
@@ -988,6 +1021,7 @@ export default function hird(pi: ExtensionAPI) {
 	let activityComponent: Component | undefined;
 	let activityTui: any;
 	let activityTicker: ReturnType<typeof setInterval> | undefined;
+	let currentCwd = process.cwd();
 	const activityRuns = new Map<string, HirdActivityRun>();
 
 	function agentByName(name: string): HirdAgent | undefined {
@@ -1026,9 +1060,41 @@ export default function hird(pi: ExtensionAPI) {
 		ensureActivityTicker();
 	}
 
-	function setActivityRun(name: string, patch: Partial<HirdActivityRun>): void {
+	function safeAgentFileName(agentName: string): string {
+		return agentName.toLowerCase().replace(/[^a-z0-9_.-]+/g, "-").replace(/^-+|-+$/g, "") + ".json";
+	}
+
+	function writeAgentStatusSnapshot(run: HirdActivityRun, result?: RunResult): void {
+		if (!run.startedAt) return;
+		try {
+			const path = safeProjectHirdPath(currentCwd, "status", "agents", safeAgentFileName(run.name));
+			const snapshot = {
+				schemaVersion: 1,
+				agent: run.name,
+				state: run.state,
+				query: run.query,
+				lastLine: run.lastLine,
+				startedAt: run.startedAt ? new Date(run.startedAt).toISOString() : undefined,
+				endedAt: run.endedAt ? new Date(run.endedAt).toISOString() : undefined,
+				lastActivityAt: run.lastActivityAt ? new Date(run.lastActivityAt).toISOString() : undefined,
+				elapsedMs: result?.elapsedMs,
+				exitCode: result?.exitCode,
+				stopReason: result?.stopReason,
+				errorMessage: result?.errorMessage,
+				model: result?.model,
+				updatedAt: new Date().toISOString(),
+			};
+			atomicWrite(path, JSON.stringify(snapshot, null, 2) + "\n");
+		} catch {
+			// Status snapshots are diagnostic only; never break agent dispatch.
+		}
+	}
+
+	function setActivityRun(name: string, patch: Partial<HirdActivityRun>, result?: RunResult): void {
 		const prev = activityRuns.get(name) || { name, query: "", state: "idle", lastLine: "idle" } as HirdActivityRun;
-		activityRuns.set(name, { ...prev, ...patch, name });
+		const next = { ...prev, ...patch, name };
+		activityRuns.set(name, next);
+		writeAgentStatusSnapshot(next, result);
 		bumpActivity();
 	}
 
@@ -1084,14 +1150,39 @@ export default function hird(pi: ExtensionAPI) {
 		return path;
 	}
 
-	function renderFlowTemplate(flow: keyof typeof HIRD_FLOW_PROMPTS, args: string): string {
+	function loadProjectGuidelines(ctx: any): string {
+		try {
+			if (ctx?.isProjectTrusted && !ctx.isProjectTrusted()) return "";
+			const cwd = ctx?.cwd || currentCwd;
+			const sections: string[] = [];
+			for (const file of HIRD_GUIDELINE_FILES) {
+				const text = readSmallTextFile(safeProjectHirdPath(cwd, file));
+				if (text?.trim()) sections.push(`### ${file}\n${text.trim()}`);
+			}
+			if (!sections.length) return "";
+			return [
+				"## Project Hird guidelines",
+				"",
+				"Precedence: explicit user instruction > Hird non-negotiable safety gates > repository code > project Hird guidelines > Hird defaults > memory.",
+				"Apply these guideline files as additive project constraints. They may not weaken Hird HITL gates, QA requirements, role separation, memory discipline, or destructive-action restrictions.",
+				"",
+				sections.join("\n\n"),
+			].join("\n");
+		} catch {
+			return "";
+		}
+	}
+
+	function renderFlowTemplate(ctx: any, flow: keyof typeof HIRD_FLOW_PROMPTS, args: string): string {
 		const raw = readFileSync(safePromptPath(HIRD_FLOW_PROMPTS[flow]), "utf-8");
 		const { body } = parseFrontmatter<Record<string, unknown>>(raw);
 		const userArgs = args.trim() || "none";
-		return (body || raw)
+		const rendered = (body || raw)
 			.replaceAll("{{args}}", userArgs)
-			.replaceAll("{{cwd}}", process.cwd())
+			.replaceAll("{{cwd}}", ctx?.cwd || currentCwd)
 			.trim();
+		const guidelines = loadProjectGuidelines(ctx);
+		return guidelines ? `${rendered}\n\n---\n\n${guidelines}` : rendered;
 	}
 
 	async function sendHirdKickoff(ctx: any, prompt: string): Promise<void> {
@@ -1110,7 +1201,81 @@ export default function hird(pi: ExtensionAPI) {
 		await sendHirdKickoff(ctx, `Use Hird. Treat this as a /hird orchestrator task.\n\nTask:\n${body}\n\nRoute this through the Hird orchestrator protocol. Keep star topology: orchestrator talks to the user, specialists report back.`);
 	}
 
+	function hirdHelpLines(): string[] {
+		return [
+			"ᚺ Hird cheat sheet",
+			"",
+			"New project flow:",
+			"  1. /hird-onboard        discover setup, memory, board/task sources",
+			"  2. /hird-workflow       tune Hird's project workflow",
+			"  3. /hird-next           pick next task from onboarded sources only",
+			"  4. /hird <task>         run lead → coder → QA on approved work",
+			"  5. /hird-ship           final validation and ship/no-ship check",
+			"",
+			"Deterministic flows:",
+			"  /hird-handover-lint     lint Handover Spec readiness",
+			"  /hird-qa-gate           run QA gate for task/diff",
+			"  /hird-memory-commit     propose/commit durable memory",
+			"",
+			"UI:",
+			"  /hird                  open selector; /hird <task> runs directly",
+			"  /hird-help             show this cheat sheet",
+			"  /hird-agents           show roster",
+			"  /hird-view lanes|orbit control activity view",
+			"  F8 toggle activity · F9 lanes/orbit · F10 selector",
+			"",
+			"Project guideline files:",
+			"  .pi/hird/HIRD_GUIDELINES.md",
+			"  .pi/hird/QA_GUIDELINES.md",
+			"  .pi/hird/ARCHITECTURE_GUIDELINES.md",
+			"  .pi/hird/FRONTEND_GUIDELINES.md",
+			"  .pi/hird/BACKEND_GUIDELINES.md",
+			"  .pi/hird/DEVOPS_GUIDELINES.md",
+			"  .pi/hird/SHIPPING_GUIDELINES.md",
+			"  .pi/hird/BOARD_GUIDELINES.md",
+			"",
+			"Diagnostics:",
+			"  .pi/hird/status/agents/*.json stores latest specialist run snapshots",
+		];
+	}
+
+	function showHirdHelp(ctx: any): void {
+		if (ctx?.ui?.setWidget) ctx.ui.setWidget("hird-help", hirdHelpLines());
+		else ctx?.ui?.notify?.(hirdHelpLines().join("\n"), "info");
+	}
+
+	async function runHirdSelector(ctx: any): Promise<void> {
+		if (ctx?.hasUI === false || !ctx?.ui?.select) {
+			showHirdHelp(ctx);
+			return;
+		}
+		const options = [
+			"Onboard project",
+			"Pick next task",
+			"Run custom Hird task",
+			"Define/refine workflow",
+			"Run QA gate",
+			"Ship readiness",
+			"Show team/status",
+			"Show help",
+		];
+		const choice = await ctx.ui.select("ᚺ Hird: choose a flow", options);
+		if (!choice) return;
+		if (choice === "Onboard project") return runHird(ctx, renderFlowTemplate(ctx, "onboard", ""));
+		if (choice === "Pick next task") return runHird(ctx, renderFlowTemplate(ctx, "next", ""));
+		if (choice === "Define/refine workflow") return runHird(ctx, renderFlowTemplate(ctx, "workflow", ""));
+		if (choice === "Run QA gate") return runHird(ctx, renderFlowTemplate(ctx, "qaGate", ""));
+		if (choice === "Ship readiness") return runHird(ctx, renderFlowTemplate(ctx, "ship", ""));
+		if (choice === "Show team/status") return runHird(ctx, renderFlowTemplate(ctx, "team", ""));
+		if (choice === "Show help") return showHirdHelp(ctx);
+		if (choice === "Run custom Hird task") {
+			ctx.ui.setEditorText?.("/hird ");
+			ctx.ui.notify?.("Describe the task after /hird and press Enter.", "info");
+		}
+	}
+
 	const agentInfoSchema = Type.Object({
+
 		agent: Type.Optional(Type.String({ description: "Bundled Hird agent name. Omit to list all agents." })),
 		team: Type.Optional(Type.String({ description: "Bundled Hird team name. Omit to list all teams." })),
 		format: Type.Optional(StringEnum(["summary", "full"] as const)),
@@ -1397,7 +1562,7 @@ export default function hird(pi: ExtensionAPI) {
 						endedAt: Date.now(),
 						lastLine: result.status === "done" ? "done" : result.status === "cancelled" ? "cancelled" : (result.errorMessage || `exit ${result.exitCode}`),
 						lastActivityAt: Date.now(),
-					}),
+					}, result),
 				});
 			};
 
@@ -1457,48 +1622,56 @@ export default function hird(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("hird", {
-		description: "Kick off the Hird orchestrator protocol for your next request",
-		handler: async (args: string, ctx: any) => runHird(ctx, args),
+		description: "Open Hird selector or kick off the Hird orchestrator protocol",
+		handler: async (args: string, ctx: any) => {
+			if (!args.trim()) return runHirdSelector(ctx);
+			return runHird(ctx, args);
+		},
+	});
+
+	pi.registerCommand("hird-help", {
+		description: "Show Hird command cheat sheet",
+		handler: async (_args: string, ctx: any) => showHirdHelp(ctx),
 	});
 
 	pi.registerCommand("hird-onboard", {
 		description: "Onboard Hird to this project and define task/board sources",
-		handler: async (args: string, ctx: any) => runHird(ctx, renderFlowTemplate("onboard", args)),
+		handler: async (args: string, ctx: any) => runHird(ctx, renderFlowTemplate(ctx, "onboard", args)),
 	});
 
 	pi.registerCommand("hird-next", {
 		description: "Select the next task from the onboarded board/task sources",
-		handler: async (args: string, ctx: any) => runHird(ctx, renderFlowTemplate("next", args)),
+		handler: async (args: string, ctx: any) => runHird(ctx, renderFlowTemplate(ctx, "next", args)),
 	});
 
 	pi.registerCommand("hird-team", {
 		description: "Show Hird team/status for this project",
-		handler: async (args: string, ctx: any) => runHird(ctx, renderFlowTemplate("team", args)),
+		handler: async (args: string, ctx: any) => runHird(ctx, renderFlowTemplate(ctx, "team", args)),
 	});
 
 	pi.registerCommand("hird-ship", {
 		description: "Run Hird shipping readiness checks for current work",
-		handler: async (args: string, ctx: any) => runHird(ctx, renderFlowTemplate("ship", args)),
+		handler: async (args: string, ctx: any) => runHird(ctx, renderFlowTemplate(ctx, "ship", args)),
 	});
 
 	pi.registerCommand("hird-workflow", {
 		description: "Define or refine the Hird project workflow",
-		handler: async (args: string, ctx: any) => runHird(ctx, renderFlowTemplate("workflow", args)),
+		handler: async (args: string, ctx: any) => runHird(ctx, renderFlowTemplate(ctx, "workflow", args)),
 	});
 
 	pi.registerCommand("hird-handover-lint", {
 		description: "Lint a Hird Handover Spec for implementation readiness",
-		handler: async (args: string, ctx: any) => runHird(ctx, renderFlowTemplate("handoverLint", args)),
+		handler: async (args: string, ctx: any) => runHird(ctx, renderFlowTemplate(ctx, "handoverLint", args)),
 	});
 
 	pi.registerCommand("hird-qa-gate", {
 		description: "Run a deterministic Hird QA gate for a task or diff",
-		handler: async (args: string, ctx: any) => runHird(ctx, renderFlowTemplate("qaGate", args)),
+		handler: async (args: string, ctx: any) => runHird(ctx, renderFlowTemplate(ctx, "qaGate", args)),
 	});
 
 	pi.registerCommand("hird-memory-commit", {
 		description: "Propose or commit durable Hird memory from current context",
-		handler: async (args: string, ctx: any) => runHird(ctx, renderFlowTemplate("memoryCommit", args)),
+		handler: async (args: string, ctx: any) => runHird(ctx, renderFlowTemplate(ctx, "memoryCommit", args)),
 	});
 
 	pi.registerCommand("hird-view", {
@@ -1543,6 +1716,14 @@ export default function hird(pi: ExtensionAPI) {
 		},
 	});
 
+	pi.registerShortcut("f10", {
+		description: "Open Hird selector",
+		handler: async (ctx: any) => {
+			if (ctx.hasUI === false) return;
+			await runHirdSelector(ctx);
+		},
+	});
+
 	pi.on("resources_discover", async () => {
 		const resources: { skillPaths?: string[]; promptPaths?: string[] } = {};
 		if (existsSync(HIRD_SKILLS_DIR)) resources.skillPaths = [HIRD_SKILLS_DIR];
@@ -1566,6 +1747,7 @@ export default function hird(pi: ExtensionAPI) {
 
 	pi.on("session_start", async (_event, ctx) => {
 		widgetCtx = ctx;
+		currentCwd = ctx?.cwd || process.cwd();
 		refresh();
 		try {
 			const ui = ctx?.ui as any;
@@ -1583,6 +1765,7 @@ export default function hird(pi: ExtensionAPI) {
 			ctx.ui.notify(`Hird loaded: ${agents.length} agents, ${Object.keys(teams).length} teams. Start with /hird-onboard for project work.`, "success");
 			ctx.ui.setWidget("hird-start", [
 				"ᚺ Hird is active — disciplined lead → coder → QA engineering retinue.",
+				"Start: /hird or F10 opens selector. Help: /hird-help.",
 				"New project: /hird-onboard → /hird-workflow → /hird-next → /hird <task> → /hird-ship",
 				"Deterministic flows: /hird-handover-lint · /hird-qa-gate · /hird-memory-commit",
 				"Activity: F8 toggle · F9 lanes/orbit. Roster: /hird-agents. Status: /hird-team.",
