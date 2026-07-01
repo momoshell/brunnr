@@ -1,11 +1,11 @@
 ---
 name: hird-onboarding
-description: Deterministic project onboarding for Hird: discover repo setup, validation commands, memory, task board sources, ranking policy, and next-task rules before project work.
-license: MIT
-compatibility: Requires the Hird extension.
+description: "Deterministic project onboarding for Hird: discover repo setup, validation commands, memory, task board sources, ranking policy, and next-task rules before project work."
+license: "MIT"
+compatibility: "Requires the Hird extension."
 metadata:
-  owner: hird
-allowed-tools: read grep find ls bash
+  owner: "hird"
+allowed-tools: "read grep find ls bash"
 ---
 # Hird Onboarding
 

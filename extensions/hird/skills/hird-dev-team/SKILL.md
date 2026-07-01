@@ -1,11 +1,11 @@
 ---
 name: hird-dev-team
-description: Core Hird dev-team protocol: star topology, tiering, Handover Specs, specialist routing, QA ladder, memory discipline, and HITL gates. Use for any Hird engineering workflow.
-license: MIT
-compatibility: Requires the Hird extension.
+description: "Core Hird dev-team protocol: star topology, tiering, Handover Specs, specialist routing, QA ladder, memory discipline, and HITL gates. Use for any Hird engineering workflow."
+license: "MIT"
+compatibility: "Requires the Hird extension."
 metadata:
-  owner: hird
-allowed-tools: read grep find ls bash
+  owner: "hird"
+allowed-tools: "read grep find ls bash"
 ---
 # Hird Dev-Team Protocol
 

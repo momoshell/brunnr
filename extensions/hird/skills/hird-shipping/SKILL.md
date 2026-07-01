@@ -1,11 +1,11 @@
 ---
 name: hird-shipping
-description: Hird shipping readiness protocol: git state, validation, QA verdicts, docs, rollback, and external-action gates.
-license: MIT
-compatibility: Requires Hird extension.
+description: "Hird shipping readiness protocol: git state, validation, QA verdicts, docs, rollback, and external-action gates."
+license: "MIT"
+compatibility: "Requires Hird extension."
 metadata:
-  owner: hird
-allowed-tools: read grep find ls bash
+  owner: "hird"
+allowed-tools: "read grep find ls bash"
 ---
 # Hird Shipping
 

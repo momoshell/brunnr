@@ -1,11 +1,11 @@
 ---
 name: hird-handover
-description: Hird Handover Spec creation and linting protocol. Use to produce or validate the lead-to-coder contract before implementation.
-license: MIT
-compatibility: Requires Hird extension agent roster.
+description: "Hird Handover Spec creation and linting protocol. Use to produce or validate the lead-to-coder contract before implementation."
+license: "MIT"
+compatibility: "Requires Hird extension agent roster."
 metadata:
-  owner: hird
-allowed-tools: read grep find ls
+  owner: "hird"
+allowed-tools: "read grep find ls"
 ---
 # Hird Handover Spec
 

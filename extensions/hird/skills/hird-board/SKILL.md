@@ -1,11 +1,11 @@
 ---
 name: hird-board
-description: Deterministic board and next-task selection for Hird. Use only onboarded task sources and ranking policy; never invent tasks or boards.
-license: MIT
-compatibility: Requires `.pi/hird/onboarding.json` from Hird onboarding.
+description: "Deterministic board and next-task selection for Hird. Use only onboarded task sources and ranking policy; never invent tasks or boards."
+license: "MIT"
+compatibility: "Requires `.pi/hird/onboarding.json` from Hird onboarding."
 metadata:
-  owner: hird
-allowed-tools: read grep find ls bash
+  owner: "hird"
+allowed-tools: "read grep find ls bash"
 ---
 # Hird Board and Next Task
 

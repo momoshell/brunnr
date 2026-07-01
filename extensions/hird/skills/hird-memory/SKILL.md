@@ -1,11 +1,11 @@
 ---
 name: hird-memory
-description: Hird memory discipline. Use when reading, proposing, or committing durable project/global conventions with single-writer control and redaction hygiene.
-license: MIT
-compatibility: Requires Hird `hird_memory` tool.
+description: "Hird memory discipline. Use when reading, proposing, or committing durable project/global conventions with single-writer control and redaction hygiene."
+license: "MIT"
+compatibility: "Requires Hird `hird_memory` tool."
 metadata:
-  owner: hird
-  maturity: bundled
+  owner: "hird"
+  maturity: "bundled"
   reads:
     - .pi/hird/memory/**
     - ~/.pi/hird/memory/conventions.md
@@ -18,7 +18,7 @@ metadata:
     - global memory commits
     - cross-cutting convention changes
     - deprecating existing memory
-allowed-tools: read grep find ls
+allowed-tools: "read grep find ls"
 ---
 # Hird Memory
 

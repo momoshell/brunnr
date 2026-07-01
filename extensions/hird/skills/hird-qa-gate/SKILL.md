@@ -1,11 +1,11 @@
 ---
 name: hird-qa-gate
-description: Hird deterministic QA gate and review-depth ladder. Use after implementation or before shipping to produce pass/changes-needed/blocked/conditional verdicts with evidence.
-license: MIT
-compatibility: Requires Hird reviewer agents and read-only validation tools.
+description: "Hird deterministic QA gate and review-depth ladder. Use after implementation or before shipping to produce pass/changes-needed/blocked/conditional verdicts with evidence."
+license: "MIT"
+compatibility: "Requires Hird reviewer agents and read-only validation tools."
 metadata:
-  owner: hird
-  maturity: bundled
+  owner: "hird"
+  maturity: "bundled"
   reads:
     - .pi/hird/**
     - git diff/status
@@ -17,7 +17,7 @@ metadata:
   requires-approval:
     - running expensive or external validation
     - destructive commands
-allowed-tools: read grep find ls bash
+allowed-tools: "read grep find ls bash"
 ---
 # Hird QA Gate
 
