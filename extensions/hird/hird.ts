@@ -112,6 +112,7 @@ const HIRD_FLOW_PROMPTS = {
 	handoverLint: "hird-handover-lint.md",
 	qaGate: "hird-qa-gate.md",
 	memoryCommit: "hird-memory-commit.md",
+	prReview: "hird-pr-review.md",
 } as const;
 const HIRD_GUIDELINE_FILES = [
 	"HIRD_GUIDELINES.md",
@@ -921,7 +922,7 @@ function buildOrchestratorPrompt(agents: HirdAgent[], teams: Record<string, stri
 
 ## Extension runtime
 
-The Hird extension is active. You have bundled Hird skills and deterministic prompt templates for onboarding, next-task selection, workflow, handover lint, QA gate, memory commit, and shipping. Prefer these fixed flows over freeform prose.
+The Hird extension is active. You have bundled Hird skills and deterministic prompt templates for onboarding, next-task selection, workflow, handover lint, QA gate, PR review, memory commit, and shipping. Prefer these fixed flows over freeform prose.
 
 Extension tools:
 
@@ -929,7 +930,7 @@ Extension tools:
 - \`hird_dispatch_agent\`: spawn one or more bundled Hird agents in isolated Pi subprocesses. Use this for all Tier 2/3 lead, coder, reviewer, validator, and scout handoffs.
 - \`hird_memory\`: read, propose, commit, or inspect Hird project/global memory. Only you may commit memory; specialists may only propose deltas in their text output.
 
-Bundled Hird skills to use when relevant: \`hird-dev-team\`, \`hird-onboarding\`, \`hird-board\`, \`hird-handover\`, \`hird-qa-gate\`, \`hird-memory\`, \`hird-shipping\`.
+Bundled Hird skills to use when relevant: \`hird-dev-team\`, \`hird-onboarding\`, \`hird-board\`, \`hird-handover\`, \`hird-qa-gate\`, \`hird-pr-review\`, \`hird-memory\`, \`hird-shipping\`.
 
 When using \`hird_dispatch_agent\`, send concrete handoff prompts that include objective, scope, constraints, required output, whether editing is allowed, and any relevant memory excerpts. Use \`mode: "parallel"\` only for independent read-only work or disjoint implementation packets; use \`mode: "chain"\` when the next agent must receive the prior output through the \`{previous}\` placeholder.
 
@@ -1386,6 +1387,7 @@ export default function hird(pi: ExtensionAPI) {
 			"Deterministic flows:",
 			"  /hird-handover-lint     lint Handover Spec readiness",
 			"  /hird-qa-gate           run QA gate for task/diff",
+			"  /hird-pr-review         PR/diff review with sorted findings + inline comments",
 			"  /hird-memory-commit     propose/commit durable memory",
 			"",
 			"UI:",
@@ -1428,6 +1430,7 @@ export default function hird(pi: ExtensionAPI) {
 			"Run custom Hird task",
 			"Define/refine workflow",
 			"Run QA gate",
+			"PR review",
 			"Ship readiness",
 			"Show team/status",
 			"Show help",
@@ -1443,6 +1446,7 @@ export default function hird(pi: ExtensionAPI) {
 		if (choice === "Pick next task") return runRenderedFlow(ctx, "next", "", "hird-next");
 		if (choice === "Define/refine workflow") return runRenderedFlow(ctx, "workflow", "", "hird-workflow");
 		if (choice === "Run QA gate") return runRenderedFlow(ctx, "qaGate", "", "hird-qa-gate");
+		if (choice === "PR review") return runRenderedFlow(ctx, "prReview", "", "hird-pr-review");
 		if (choice === "Ship readiness") return runRenderedFlow(ctx, "ship", "", "hird-ship");
 		if (choice === "Show team/status") return runRenderedFlow(ctx, "team", "", "hird-team");
 		if (choice === "Show help") return showHirdHelp(ctx);
@@ -1811,6 +1815,7 @@ export default function hird(pi: ExtensionAPI) {
 	registerHirdCommand("hird-workflow", "Define or refine the Hird project workflow", async (args, ctx) => runRenderedFlow(ctx, "workflow", args, "hird-workflow"));
 	registerHirdCommand("hird-handover-lint", "Lint a Hird Handover Spec for implementation readiness", async (args, ctx) => runRenderedFlow(ctx, "handoverLint", args, "hird-handover-lint"));
 	registerHirdCommand("hird-qa-gate", "Run a deterministic Hird QA gate for a task or diff", async (args, ctx) => runRenderedFlow(ctx, "qaGate", args, "hird-qa-gate"));
+	registerHirdCommand("hird-pr-review", "Run a deterministic PR review with sorted findings and inline comment suggestions", async (args, ctx) => runRenderedFlow(ctx, "prReview", args, "hird-pr-review"));
 	registerHirdCommand("hird-memory-commit", "Propose or commit durable Hird memory from current context", async (args, ctx) => runRenderedFlow(ctx, "memoryCommit", args, "hird-memory-commit"));
 
 	registerHirdCommand("hird-view", "Control the Hird parallel-agent activity view: show, hide, toggle, lanes, orbit", async (args, ctx) => {
@@ -1919,7 +1924,7 @@ export default function hird(pi: ExtensionAPI) {
 			"ᚺ Hird is active — disciplined lead → coder → QA engineering retinue.",
 			"Start: /hird or F10 opens selector. Help: /hird-help.",
 			"New project: /hird-onboard → /hird-workflow → /hird-next → /hird <task> → /hird-ship",
-			"Deterministic flows: /hird-handover-lint · /hird-qa-gate · /hird-memory-commit",
+			"Deterministic flows: /hird-handover-lint · /hird-qa-gate · /hird-pr-review · /hird-memory-commit",
 			"Activity: F8 toggle · F9 lanes/orbit. Roster: /hird-agents. Status: /hird-team.",
 		]);
 		updateActivityWidget();
